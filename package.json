@@ -1,0 +1,15 @@
+{
+  "name": "troyen-race-day-dashboard",
+  "version": "1.0.0",
+  "description": "Race day dashboard: meetings x race number x time grid with missing-jockey and duplicate-jockey flags, plus click-through runner detail.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongodb": "^6.8.0",
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.15.0"
+  }
+}

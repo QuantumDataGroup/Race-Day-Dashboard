@@ -1,0 +1,9 @@
+# Dependencies (regenerated via npm install)
+node_modules/
+
+# Local DB credentials/config - must never be committed (contains live connection strings)
+db.json
+
+# Logs
+*.log
+npm-debug.log*
