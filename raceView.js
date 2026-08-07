@@ -186,34 +186,17 @@ function tabIssueForRunner(runner, counts) {
 // disciplines (Greyhound runners have a trainer/handler too, unlike jockey).
 // Verified against real production data (7 Aug 2026): trainer is reliably
 // populated (0% blank in a ~18,700-runner sample), so this is a meaningful
-// check, unlike weight/draw which are almost always blank in this collection
-// (see countMissingBarriers below for why barrier uses "bp" instead of "draw").
+// check, unlike weight/draw which are almost always blank in this collection.
 function countMissingTrainers(runners) {
   if (!Array.isArray(runners)) return 0;
   return runners.filter((r) => !r.isScratched && isBlank(r.trainer)).length;
 }
 
-// Barrier/box position -- the DB field is "bp" (NOT "draw", which was found
-// to be ~99.6% blank in production and therefore not a usable field). "bp"
-// applies to ALL disciplines and was confirmed to carry a real distribution
-// of values (1-14+) in production, with 0 used for "not yet drawn/unassigned"
-// -- treated the same as missing, mirroring the tab-number convention.
-function isMissingBarrier(bp) {
-  return bp == null || bp === '';
-}
-function isZeroBarrier(bp) {
-  return !isMissingBarrier(bp) && Number(bp) === 0;
-}
-function countMissingBarriers(runners) {
-  if (!Array.isArray(runners)) return 0;
-  return runners.filter((r) => !r.isScratched && (isMissingBarrier(r.bp) || isZeroBarrier(r.bp))).length;
-}
-
 // Per-runner issue label used in the click-through detail view. Combines the
-// tab-number check (all disciplines), trainer/barrier checks (all
-// disciplines), and the jockey check (Thoroughbred/Harness only -- Greyhound
-// runners show a trainer column instead and have no jockey-based issue to
-// flag beyond the trainer/barrier checks already covering them).
+// tab-number check (all disciplines), the trainer check (all disciplines),
+// and the jockey check (Thoroughbred/Harness only -- Greyhound runners show
+// a trainer column instead and have no jockey-based issue to flag beyond the
+// trainer check already covering them).
 function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (runner.isScratched) return '';
   const parts = [];
@@ -227,7 +210,6 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
     }
   }
   if (isBlank(runner.trainer)) parts.push('Missing trainer');
-  if (isMissingBarrier(runner.bp) || isZeroBarrier(runner.bp)) parts.push('Missing barrier/box position');
   return parts.join(' | ');
 }
 
@@ -262,7 +244,6 @@ function buildSchedule(docs) {
       duplicateJockeyCount: countDuplicateJockeyGroups(doc.runners, doc.rDiscipline),
       tabIssueCount: countTabNoIssues(doc.runners),
       missingTrainerCount: countMissingTrainers(doc.runners),
-      missingBarrierCount: countMissingBarriers(doc.runners),
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
     });
@@ -286,7 +267,7 @@ function buildSchedule(docs) {
     for (const rNo of raceNos) {
       const {
         id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingBarrierCount, status, resultString,
+        missingTrainerCount, status, resultString,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -320,7 +301,6 @@ function buildSchedule(docs) {
             badTimeReason,
             tabIssueCount,
             missingTrainerCount,
-            missingBarrierCount,
             status,
             resultString,
           }
@@ -330,17 +310,16 @@ function buildSchedule(docs) {
 
     // Meeting-level issue summary -- true if ANY race at this meeting has
     // that kind of issue. Drives the "Issue" filter dropdown (Missing Jockey
-    // / Duplicate Jockey / Missing TAB / Missing Trainer / Missing Barrier /
-    // Schedule Issue / Meetings with Issues / Healthy Meetings), which
-    // filters whole meeting-rows since the grid can't hide individual cells
-    // without breaking the table shape. hasAbandoned is tracked separately
-    // (drives the "ABBN" tag, not the Issue filter/hasAnyIssue -- an
-    // abandoned race isn't a DATA problem to fix, just a status to show).
+    // / Duplicate Jockey / Missing TAB / Missing Trainer / Schedule Issue /
+    // Meetings with Issues / Healthy Meetings), which filters whole
+    // meeting-rows since the grid can't hide individual cells without
+    // breaking the table shape. hasAbandoned is tracked separately (drives
+    // the "ABBN" tag, not the Issue filter/hasAnyIssue -- an abandoned race
+    // isn't a DATA problem to fix, just a status to show).
     let hasMissingJockey = false;
     let hasDuplicateJockey = false;
     let hasMissingTab = false;
     let hasMissingTrainer = false;
-    let hasMissingBarrier = false;
     let hasScheduleIssue = false;
     let hasAbandoned = false;
     for (const rNo of raceNos) {
@@ -350,15 +329,14 @@ function buildSchedule(docs) {
       if (race.duplicateJockeyCount > 0) hasDuplicateJockey = true;
       if (race.tabIssueCount > 0) hasMissingTab = true;
       if (race.missingTrainerCount > 0) hasMissingTrainer = true;
-      if (race.missingBarrierCount > 0) hasMissingBarrier = true;
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingBarrier || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingBarrier, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasScheduleIssue, hasAnyIssue, hasAbandoned,
       races,
     });
   }
@@ -386,7 +364,6 @@ function buildSchedule(docs) {
 // "fp" present), runners are sorted by finishing position instead of tab
 // number, and each runner carries its finishing position for display.
 function buildRaceDetail(doc) {
-  const isGreyhound = doc.rDiscipline === 'G';
   const counts = jockeyCounts(doc.runners);
   const tabCounts = tabNoCounts(doc.runners);
   const clock = parseClock(doc.rScheduleTime);
@@ -421,60 +398,10 @@ function buildRaceDetail(doc) {
     rClass: doc.rClass || '',
     rPrizeMoney: doc.rPrizeMoney || '',
     timeLabel: clock ? clock.label : null,
-    runnerColumnLabel: isGreyhound ? 'Trainer' : 'Jockey',
     resultString: doc.resultString || null,
     hasResult,
     runners,
   };
-}
-
-/**
- * Flat, time-sorted list of every race across every meeting/discipline for
- * one date -- backs the "Timeline view" page (a plain chronological list,
- * e.g. "12:00 WOODBINE R1 / 12:15 FAIRVIEW R4 / ..."), as distinct from
- * buildSchedule()'s per-discipline meeting-grid.
- *
- * @param {Array} docs - same race docs buildSchedule() takes (ALL disciplines
- *   for the date -- the timeline mixes every discipline into one list).
- * @returns {Array<{id, label, minutes, meeting, country, discipline, rNo, isTAB,
- *   status, resultString, missingJockeyCount, duplicateJockeyCount,
- *   tabIssueCount, missingTrainerCount, missingBarrierCount}>}
- */
-function buildTimeline(docs) {
-  const entries = docs.map((doc) => {
-    const clock = parseClock(doc.rScheduleTime);
-    return {
-      id: doc._id,
-      label: clock ? clock.label : null,
-      minutes: clock ? clock.minutes : null,
-      meeting: doc.rCourseDisplayName,
-      country: doc.rCountry,
-      discipline: doc.rDiscipline,
-      rNo: doc.rNo,
-      isTAB: doc.isTAB !== false,
-      status: deriveRaceStatus(doc),
-      resultString: doc.resultString || '',
-      missingJockeyCount: countMissingJockeys(doc.runners, doc.rDiscipline) || 0,
-      duplicateJockeyCount: countDuplicateJockeyGroups(doc.runners, doc.rDiscipline),
-      tabIssueCount: countTabNoIssues(doc.runners),
-      missingTrainerCount: countMissingTrainers(doc.runners),
-      missingBarrierCount: countMissingBarriers(doc.runners),
-    };
-  });
-
-  // Races with no parseable scheduled time sort to the BOTTOM (grouped there
-  // by meeting/race number) rather than vanishing or sorting as "00:00" --
-  // a missing time is itself worth seeing, not hiding.
-  entries.sort((a, b) => {
-    if (a.minutes === null && b.minutes === null) {
-      return a.meeting.localeCompare(b.meeting) || a.rNo - b.rNo;
-    }
-    if (a.minutes === null) return 1;
-    if (b.minutes === null) return -1;
-    return a.minutes - b.minutes || a.meeting.localeCompare(b.meeting) || a.rNo - b.rNo;
-  });
-
-  return entries;
 }
 
 /**
@@ -534,7 +461,6 @@ function buildIssuesReport(docs, dateStr) {
     const duplicateJockeyGroups = countDuplicateJockeyGroups(doc.runners, doc.rDiscipline);
     const tabIssueCount = countTabNoIssues(doc.runners);
     const missingTrainerCount = countMissingTrainers(doc.runners);
-    const missingBarrierCount = countMissingBarriers(doc.runners);
     const isDuplicateRaceNo = (agg.raceNoCounts.get(doc.rNo) || 0) > 1;
     const isPlaceholderTime = Boolean(clock) && clock.label === '00:00';
     const isDuplicateTime = Boolean(clock) && !isPlaceholderTime && (agg.labelCounts.get(clock.label) || 0) > 1;
@@ -547,7 +473,6 @@ function buildIssuesReport(docs, dateStr) {
     if (duplicateJockeyGroups > 0) issues.push(`Duplicate jockey x${duplicateJockeyGroups}`);
     if (tabIssueCount > 0) issues.push(`Tab number issue x${tabIssueCount} (missing/zero/duplicate)`);
     if (missingTrainerCount > 0) issues.push(`Missing trainer x${missingTrainerCount}`);
-    if (missingBarrierCount > 0) issues.push(`Missing/zero barrier position x${missingBarrierCount}`);
     if (isPlaceholderTime) issues.push('Placeholder scheduled time (00:00)');
     if (isDuplicateTime) issues.push(`Duplicate scheduled time (${clock.label}) with another race at this meeting`);
     if (deriveRaceStatus(doc) === 'abandoned') issues.push('Race abandoned');
@@ -687,7 +612,6 @@ const BASE_STYLE_BLOCK = `
   td.time.status-filtered { opacity: 0.15; pointer-events: none; }
   td.time.has-result { white-space: normal; }
   td.time.missing-trainer { outline: 2px solid #6b46c1; outline-offset: -2px; }
-  td.time.missing-barrier { outline: 2px solid #0e7c86; outline-offset: -2px; }
   td.time.abandoned-race { white-space: normal; text-decoration: line-through; opacity: 0.85; }
   .result-line { font-size: 10px; font-weight: 700; color: var(--result-fg); margin-top: 2px; }
   .abandoned-line { font-size: 10px; font-weight: 700; color: #a11b1b; margin-top: 2px; text-decoration: none; }
@@ -702,7 +626,6 @@ const BASE_STYLE_BLOCK = `
   .dup-badge { display: inline-block; background: #e07b00; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
   .tab-badge { display: inline-block; background: #cc0000; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
   .trainer-badge { display: inline-block; background: #6b46c1; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
-  .barrier-badge { display: inline-block; background: #0e7c86; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
   .controls { margin-bottom: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .controls label { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; margin-right: 16px; }
   .controls input[type="date"] { font-size: 13px; padding: 4px 6px; border: 1px solid var(--input-border); border-radius: 4px; margin-left: 4px; background: var(--card-bg); color: var(--fg); }
@@ -741,7 +664,6 @@ const BASE_STYLE_BLOCK = `
   td.issue-cell.duplicate { color: #e07b00; font-weight: 600; }
   td.issue-cell.tab-issue { color: #e14b4b; font-weight: 600; }
   td.issue-cell.trainer-issue { color: #6b46c1; font-weight: 600; }
-  td.issue-cell.barrier-issue { color: #0e7c86; font-weight: 600; }
   td.position-cell { font-weight: 700; }
   .modal-loading, .modal-error { color: var(--muted); font-style: italic; }
 `;
@@ -778,21 +700,19 @@ const MODAL_SCRIPT_BLOCK = `
           return res.json();
         })
         .then(function (race) {
-          var isGreyhound = race.discipline === 'G';
           var rows = race.runners.map(function (r) {
             var issueClass = '';
             if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
             else if (r.issue.indexOf('trainer') !== -1) issueClass = 'issue-cell trainer-issue';
-            else if (r.issue.indexOf('barrier') !== -1) issueClass = 'issue-cell barrier-issue';
             else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
             else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
-            var personValue = isGreyhound ? r.trainer : r.jockey;
             var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? r.position : '-') + '</td>' : '';
             return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
               positionCell +
               '<td>' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
               '<td>' + escapeHtmlClient(r.horseName) + '</td>' +
-              '<td>' + (personValue ? escapeHtmlClient(personValue) : '<em>none</em>') + '</td>' +
+              '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
+              '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
               '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : (escapeHtmlClient(r.issue) || '-')) + '</td>' +
               '</tr>';
           }).join('');
@@ -809,7 +729,7 @@ const MODAL_SCRIPT_BLOCK = `
               (race.rClass ? ' &middot; Class: ' + escapeHtmlClient(race.rClass) : '') +
               (race.rPrizeMoney ? ' &middot; Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') + '</p>' +
             resultLine +
-            '<table><thead><tr>' + positionHeader + '<th>Tab</th><th>Horse</th><th>' + escapeHtmlClient(race.runnerColumnLabel) + '</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>';
+            '<table><thead><tr>' + positionHeader + '<th>Tab</th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>';
         })
         .catch(function (err) {
           content.innerHTML = '<p class="modal-error">Could not load race detail: ' + escapeHtmlClient(err.message) + '</p>';
@@ -837,7 +757,6 @@ function renderMeetingsTable(meetings, maxRaceNo) {
           if (race.missingJockeysFlagged) cls += ' missing-jockeys';
           if (race.tabIssueCount > 0) cls += ' tab-issue';
           if (race.missingTrainerCount > 0) cls += ' missing-trainer';
-          if (race.missingBarrierCount > 0) cls += ' missing-barrier';
           if (race.badTime) cls += ' bad-time';
           if (race.resultString) cls += ' has-result';
           if (race.status === 'abandoned') cls += ' abandoned-race';
@@ -852,7 +771,6 @@ function renderMeetingsTable(meetings, maxRaceNo) {
           if (race.duplicateJockeyCount > 0) titleParts.push(`${race.duplicateJockeyCount} jockey(s) duplicated across runners`);
           if (race.tabIssueCount > 0) titleParts.push(`${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number`);
           if (race.missingTrainerCount > 0) titleParts.push(`${race.missingTrainerCount} runner(s) missing trainer`);
-          if (race.missingBarrierCount > 0) titleParts.push(`${race.missingBarrierCount} runner(s) missing/zero barrier position`);
           if (race.resultString) titleParts.push(`Result (tab numbers, 1st-4th): ${race.resultString}`);
           titleParts.push('Click for runner details');
 
@@ -861,11 +779,10 @@ function renderMeetingsTable(meetings, maxRaceNo) {
           const dupBadge = race.duplicateJockeyCount > 0 ? `<sup class="dup-badge" title="${race.duplicateJockeyCount} jockey(s) duplicated across runners">D${race.duplicateJockeyCount}</sup>` : '';
           const tabBadge = race.tabIssueCount > 0 ? `<sup class="tab-badge" title="${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number">T${race.tabIssueCount}</sup>` : '';
           const trainerBadge = race.missingTrainerCount > 0 ? `<sup class="trainer-badge" title="${race.missingTrainerCount} runner(s) missing trainer">TR${race.missingTrainerCount}</sup>` : '';
-          const barrierBadge = race.missingBarrierCount > 0 ? `<sup class="barrier-badge" title="${race.missingBarrierCount} runner(s) missing/zero barrier position">BR${race.missingBarrierCount}</sup>` : '';
           const resultLine = race.resultString ? `<div class="result-line">&#127937; ${escapeHtml(race.resultString)}</div>` : '';
           const abandonedLine = race.status === 'abandoned' ? `<div class="abandoned-line">Abandoned</div>` : '';
 
-          return `<td class="${cls}" data-status="${race.status}" title="${escapeHtml(titleParts.join(' | '))}" onclick="showRaceDetail('${escapeHtml(race.id)}')">${race.label}${mjBadge}${dupBadge}${tabBadge}${trainerBadge}${barrierBadge}${resultLine}${abandonedLine}</td>`;
+          return `<td class="${cls}" data-status="${race.status}" title="${escapeHtml(titleParts.join(' | '))}" onclick="showRaceDetail('${escapeHtml(race.id)}')">${race.label}${mjBadge}${dupBadge}${tabBadge}${trainerBadge}${resultLine}${abandonedLine}</td>`;
         }).join('');
 
         let countryHeaderRow = '';
@@ -882,7 +799,6 @@ function renderMeetingsTable(meetings, maxRaceNo) {
         if (m.hasDuplicateJockey) issueCodes.push('duplicatejockey');
         if (m.hasMissingTab) issueCodes.push('missingtab');
         if (m.hasMissingTrainer) issueCodes.push('missingtrainer');
-        if (m.hasMissingBarrier) issueCodes.push('missingbarrier');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
         const healthTag = m.hasAnyIssue
           ? '<span class="health-tag issue">Issue</span>'
@@ -959,7 +875,6 @@ ${BASE_STYLE_BLOCK}
     </label>
     <noscript><button type="submit">Go</button></noscript>
     <a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}">Jump to today</a>
-    <a class="today-link" href="/timeline?date=${escapeHtml(dateStr)}${includeTrials ? '&includeTrials=true' : ''}">&#128203; Timeline view</a>
     <span class="report-links">
       <span class="report-links-label">&#11015; Download report:</span>
       <a class="report-link" href="/report.csv?date=${escapeHtml(dateStr)}${includeTrials ? '&includeTrials=true' : ''}">CSV</a>
@@ -996,7 +911,6 @@ ${countryOptions}
           <option value="duplicatejockey">Duplicate Jockey</option>
           <option value="missingtab">Missing TAB</option>
           <option value="missingtrainer">Missing Trainer</option>
-          <option value="missingbarrier">Missing Barrier</option>
           <option value="scheduleissue">Schedule Issue</option>
           <option value="hasissues">Meetings with Issues</option>
           <option value="healthy">Healthy Meetings</option>
@@ -1021,15 +935,15 @@ ${sections}
     <div><span class="swatch dup-swatch"></span> Orange "D" + number = count of distinct jockeys assigned to more than one runner in that race.</div>
     <div><span class="swatch bad-time-swatch"></span> Solid red = bad scheduled time -- either a 00:00 placeholder or the exact same time as another race at that meeting.</div>
     <div><span class="swatch tab-swatch"></span> Red outline + "T" number = runner(s) with a missing, zero, or duplicate tab number in that race.</div>
-    <div>Purple outline + "TR" number = runner(s) missing a trainer in that race. Teal outline + "BR" number = runner(s) with a missing or zero barrier/box position in that race.</div>
+    <div>Purple outline + "TR" number = runner(s) missing a trainer in that race.</div>
     <div><span class="tabmeeting-tag tab">TAB</span> / <span class="tabmeeting-tag nontab">Non-TAB</span> next to a meeting name = its TAB/wagering status. Use the "Meetings" filter above to show only one or the other.</div>
-    <div><span class="health-tag issue">Issue</span> / <span class="health-tag healthy">Healthy</span> next to a meeting name = whether ANY race at that meeting has a missing/duplicate jockey, missing TAB number, missing trainer, missing barrier, or schedule issue. Use the "Issue" filter above to isolate one problem type, or show only "Meetings with Issues" / "Healthy Meetings".</div>
+    <div><span class="health-tag issue">Issue</span> / <span class="health-tag healthy">Healthy</span> next to a meeting name = whether ANY race at that meeting has a missing/duplicate jockey, missing TAB number, missing trainer, or schedule issue. Use the "Issue" filter above to isolate one problem type, or show only "Meetings with Issues" / "Healthy Meetings".</div>
     <div><span class="abandoned-tag">ABBN</span> next to a meeting name = at least one race at that meeting is abandoned. Abandoned races also show "Abandoned" directly inside the race cell (time struck through).</div>
-    <div>&#128203; "Timeline view" = every race for this date, across all disciplines/meetings, in one flat list sorted by scheduled time. "Download report" = the same issues report as CSV, Excel, JSON, or PDF.</div>
+    <div>"Download report" = the same issues report as CSV, Excel, JSON, or PDF.</div>
     <div>"Race status" filter = Upcoming / Running / Completed / Abandoned / Resulted, per RACE (not per meeting -- one meeting can have races at different statuses through the day). Dims out non-matching race cells rather than hiding the whole meeting, since a meeting can have both matching and non-matching races at once.</div>
     <div>&#127937; Green result line under a race time (e.g. "1-4-6-7") = final result, tab numbers in finishing order (1st-4th). Click the race for full runner-by-runner finishing positions.</div>
     <div>"Search meeting" box = type the START of a meeting/course name to filter to it (matches from the beginning of the name only, not the middle; suggestions drop down as you type -- click one or keep typing). Combines with the other filters above.</div>
-    <div>Dashboard auto-refreshes every 3 minutes to pull the latest data (paused while a race detail popup is open). Use the &#127769;/&#9728;&#65039; button top-right to switch Dark/Light mode -- both your filter choices and theme are remembered on this device.</div>
+    <div>Dashboard auto-refreshes every 3 minutes to pull the latest data -- a live countdown next to the date shows time remaining, and pauses (holding steady) while a race detail popup is open. Use the &#127769;/&#9728;&#65039; button top-right to switch Dark/Light mode -- both your filter choices and theme are remembered on this device.</div>
     <div>Hover a race time for class + prize money. Click it for full runner detail (tab number, horse, jockey/trainer, position, issue).</div>
   </p>
   <p class="meta">date param: <code>?date=YYYY-MM-DD</code> &middot; trials param: <code>?includeTrials=true</code></p>
@@ -1254,15 +1168,40 @@ ${MODAL_SCRIPT_BLOCK}
       applyTheme(next);
     }
 
-    // ---- Auto-refresh every 3 minutes ----
-    var AUTO_REFRESH_MS = 3 * 60 * 1000;
+    // ---- Auto-refresh every 3 minutes, with a live countdown ----
+    var AUTO_REFRESH_SECONDS = 3 * 60;
+    var refreshSecondsLeft = AUTO_REFRESH_SECONDS;
+    function formatCountdown(totalSeconds) {
+      var m = Math.floor(totalSeconds / 60);
+      var s = totalSeconds % 60;
+      return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function updateRefreshIndicator(paused) {
+      var el = document.getElementById('refreshIndicator');
+      if (!el) return;
+      el.textContent = paused
+        ? '· Auto-refresh paused (runner detail open)'
+        : '· Auto-refresh in ' + formatCountdown(refreshSecondsLeft);
+    }
     function scheduleAutoRefresh() {
+      updateRefreshIndicator(false);
       setInterval(function () {
         var modal = document.getElementById('detailModal');
-        if (modal && modal.classList.contains('open')) return; // don't yank the page while a runner-detail popup is open
-        saveFilterState();
-        location.reload();
-      }, AUTO_REFRESH_MS);
+        var isPaused = Boolean(modal && modal.classList.contains('open'));
+        if (isPaused) {
+          // Don't yank the page while a runner-detail popup is open -- hold
+          // the countdown steady (don't tick it down) until it's closed.
+          updateRefreshIndicator(true);
+          return;
+        }
+        refreshSecondsLeft -= 1;
+        if (refreshSecondsLeft <= 0) {
+          saveFilterState();
+          location.reload();
+          return;
+        }
+        updateRefreshIndicator(false);
+      }, 1000);
     }
 
     (function init() {
@@ -1278,149 +1217,11 @@ ${MODAL_SCRIPT_BLOCK}
 </html>`;
 }
 
-function renderTimelineRow(e) {
-  const timeLabel = e.label || '––:––';
-  const disciplineBadge = `<span class="badge disc-${e.discipline}">${e.discipline}</span>`;
-  const tabTag = `<span class="tabmeeting-tag ${e.isTAB ? 'tab' : 'nontab'}">${e.isTAB ? 'TAB' : 'Non-TAB'}</span>`;
-  const statusLabel = STATUS_LABELS[e.status] || e.status;
-  const abandonedTag = e.status === 'abandoned' ? '<span class="abandoned-tag">ABBN</span>' : '';
-
-  const badges = [];
-  if (e.missingJockeyCount > 0) badges.push(`<sup class="mj-badge mj-badge-alert" title="${e.missingJockeyCount} runner(s) missing a jockey">M${e.missingJockeyCount}</sup>`);
-  if (e.duplicateJockeyCount > 0) badges.push(`<sup class="dup-badge" title="${e.duplicateJockeyCount} jockey(s) duplicated across runners">D${e.duplicateJockeyCount}</sup>`);
-  if (e.tabIssueCount > 0) badges.push(`<sup class="tab-badge" title="${e.tabIssueCount} runner(s) with missing/zero/duplicate tab number">T${e.tabIssueCount}</sup>`);
-  if (e.missingTrainerCount > 0) badges.push(`<sup class="trainer-badge" title="${e.missingTrainerCount} runner(s) missing trainer">TR${e.missingTrainerCount}</sup>`);
-  if (e.missingBarrierCount > 0) badges.push(`<sup class="barrier-badge" title="${e.missingBarrierCount} runner(s) missing/zero barrier position">BR${e.missingBarrierCount}</sup>`);
-  const resultBadge = e.resultString ? `<span class="result-line" style="display:inline-block;margin-left:6px;">&#127937; ${escapeHtml(e.resultString)}</span>` : '';
-
-  const rowCls = e.status === 'abandoned' ? 'timeline-row abandoned-race' : 'timeline-row';
-  const abandonedNote = e.status === 'abandoned' ? ' <span class="abandoned-line" style="display:inline;">Abandoned</span>' : '';
-
-  return `<tr class="${rowCls}" onclick="showRaceDetail('${escapeHtml(e.id)}')">
-    <td class="timeline-time">${escapeHtml(timeLabel)}</td>
-    <td class="timeline-meeting"><strong>${escapeHtml(String(e.meeting || '').toUpperCase())}</strong> R${e.rNo} <span class="country">${escapeHtml(e.country)}</span> ${tabTag}</td>
-    <td>${disciplineBadge}</td>
-    <td>${escapeHtml(statusLabel)}${abandonedTag}${abandonedNote}</td>
-    <td>${badges.join('')}${resultBadge}</td>
-  </tr>`;
-}
-
-/**
- * Renders the "Timeline view" page -- a separate, simpler page from the main
- * meeting-grid dashboard: every race for the date, across every discipline
- * and meeting, in one flat list sorted by scheduled time (per Dinesh's
- * request: "Weraya oru page... time schedule padi list pannunga", with the
- * example format "12:00 WOODBINE R1 / 12:15 FAIRVIEW R4 / ..."). Reuses the
- * same theme CSS and runner-detail modal/click-through as the main grid
- * (BASE_STYLE_BLOCK / MODAL_MARKUP / MODAL_SCRIPT_BLOCK) so it looks and
- * behaves consistently, but intentionally has none of the grid's
- * country/TAB/issue/status/search filters -- it's meant to be the quick,
- * no-filter "what's on and when" view.
- */
-function renderTimelineHtml(dateStr, timeline, options = {}) {
-  const heading = formatDateHeading(dateStr);
-  const includeTrials = Boolean(options.includeTrials);
-
-  const rows = timeline.length
-    ? timeline.map(renderTimelineRow).join('\n')
-    : '<tr><td class="empty-state" colspan="5">No races for this date.</td></tr>';
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Race Timeline - ${escapeHtml(dateStr)}</title>
-<style>
-${BASE_STYLE_BLOCK}
-  .timeline-time { font-weight: 700; font-size: 14px; white-space: nowrap; width: 90px; }
-  .timeline-meeting { text-align: left; white-space: nowrap; }
-  tr.timeline-row { cursor: pointer; }
-  tr.timeline-row:hover { background: var(--hover-bg); }
-  tr.timeline-row.abandoned-race { opacity: 0.8; }
-  tr.timeline-row.abandoned-race .timeline-time { text-decoration: line-through; }
-</style>
-</head>
-<body>
-  <div class="top-row">
-    <div>
-      <h1>Race Timeline</h1>
-      <p class="sub">${escapeHtml(heading)}</p>
-    </div>
-    <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
-  </div>
-  <form class="controls" method="GET" action="/timeline">
-    <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day">&larr; Prev day</button>
-    <label>Date:
-      <input type="date" name="date" id="dateInput" value="${escapeHtml(dateStr)}" onchange="this.form.submit()">
-    </label>
-    <button type="button" class="day-nav" onclick="shiftDate(1)" title="Next day">Next day &rarr;</button>
-    <label>
-      <input type="checkbox" name="includeTrials" value="true" ${includeTrials ? 'checked' : ''} onchange="this.form.submit()">
-      Include trials
-    </label>
-    <noscript><button type="submit">Go</button></noscript>
-    <a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}">&#128202; Grid view</a>
-  </form>
-  <table class="timeline-table">
-    <thead><tr><th style="text-align:left;">Time</th><th style="text-align:left;">Meeting / Race</th><th>Disc</th><th>Status</th><th>Flags</th></tr></thead>
-    <tbody>
-${rows}
-    </tbody>
-  </table>
-  <p class="legend">
-    <div>Every race for ${escapeHtml(dateStr)}, across all disciplines and meetings, sorted by scheduled time -- the same missing-jockey/tab/trainer/barrier flags and results as the grid view, just as one flat list instead of a per-meeting table.</div>
-    <div>Races with no valid scheduled time are listed at the bottom rather than hidden. Click any row for full runner detail, same as the grid view.</div>
-  </p>
-
-  ${MODAL_MARKUP}
-
-  <script>
-    ${MODAL_SCRIPT_BLOCK}
-
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closeRaceDetail();
-    });
-
-    function shiftDate(deltaDays) {
-      var input = document.getElementById('dateInput');
-      var parts = input.value.split('-').map(Number);
-      var d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
-      d.setUTCDate(d.getUTCDate() + deltaDays);
-      var y = d.getUTCFullYear();
-      var m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      var day = String(d.getUTCDate()).padStart(2, '0');
-      input.value = y + '-' + m + '-' + day;
-      input.form.submit();
-    }
-
-    function applyTheme(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-      var btn = document.getElementById('themeToggle');
-      if (btn) btn.innerHTML = theme === 'dark' ? '&#9728;&#65039; Light' : '&#127769; Dark';
-    }
-    function toggleTheme() {
-      var current = document.documentElement.getAttribute('data-theme') || 'light';
-      var next = current === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem('rdd_theme', next); } catch (e) { /* ignore */ }
-      applyTheme(next);
-    }
-
-    (function init() {
-      var savedTheme = 'light';
-      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
-      applyTheme(savedTheme);
-    })();
-  </script>
-</body>
-</html>`;
-}
-
 module.exports = {
   buildSchedule, buildRaceDetail, renderHtml, todayStr, parseClock, disciplineLabel, escapeHtml,
   countMissingJockeys, hasDuplicateJockey, countDuplicateJockeyGroups, issueForRunner, jockeyCounts,
   tabNoCounts, hasDuplicateTabNo, countTabNoIssues, tabIssueForRunner,
-  countMissingTrainers, isMissingBarrier, isZeroBarrier, countMissingBarriers,
+  countMissingTrainers,
   buildIssuesReport, issuesReportToCsv, deriveRaceStatus,
-  buildTimeline, renderTimelineHtml,
   MISSING_JOCKEY_BORDER_THRESHOLD, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };

@@ -2,8 +2,8 @@
  * Race Day Dashboard Web Service
  * --------------------------------
  * Grid of meetings x race number x scheduled time for any date, with:
- *   - Missing-jockey / missing-trainer / missing-barrier flags (colored
- *     outline + count badge) per race, and missing/zero/duplicate tab number
+ *   - Missing-jockey / missing-trainer flags (colored outline + count badge)
+ *     per race, and missing/zero/duplicate tab number
  *   - Duplicate-jockey flag (orange "D") per race
  *   - Click a race time to see runner-level detail (tab no, horse, jockey,
  *     position (once resulted), issue) in a popup
@@ -14,8 +14,6 @@
  *   - Client auto-refreshes every 3 minutes (paused while the popup is open)
  *   - Light/Dark theme toggle + a "Search meeting" text box, both remembered
  *     per-browser via localStorage alongside the other grid filters
- *   - A separate "Timeline view" page: every race for the date across every
- *     discipline/meeting, in one flat list sorted by scheduled time
  *   - Issues report downloadable as CSV, Excel (.xlsx), JSON, or PDF
  *
  * Config: reads the MongoDB connection string from db.json (same file/
@@ -26,15 +24,13 @@
  *   GET /                    -> the dashboard as an HTML page (default: today)
  *   GET /?date=YYYY-MM-DD     -> dashboard for a specific date
  *   GET /?includeTrials=true  -> include trial meetings (excluded by default)
- *   GET /timeline             -> flat, time-sorted list of every race for the
- *                                 date across all disciplines/meetings
  *   GET /api/race/:id         -> runner-level detail for one race, as JSON
  *   GET /report.csv|.xlsx|.json|.pdf?date=YYYY-MM-DD -> downloadable issues
  *                                      report (missing/duplicate jockey, tab
  *                                      number problems, missing trainer,
- *                                      missing barrier, bad time, duplicate
- *                                      meetings, missing/duplicate race
- *                                      numbers, abandoned races) across ALL
+ *                                      bad time, duplicate meetings,
+ *                                      missing/duplicate race numbers,
+ *                                      abandoned races) across ALL
  *                                      disciplines, not just one tab -- same
  *                                      data, four downloadable formats
  *   GET /health                -> DB connectivity check
@@ -47,7 +43,6 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const {
   buildSchedule, buildRaceDetail, renderHtml, todayStr, escapeHtml, buildIssuesReport, issuesReportToCsv,
-  buildTimeline, renderTimelineHtml,
 } = require('./raceView');
 
 const DB_CONFIG_PATH = process.env.DB_CONFIG_PATH || 'C:\\Users\\Dinesh\\projects-config\\db.json';
@@ -130,7 +125,7 @@ async function fetchRaceDocs(dateStr, includeTrials) {
       _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rPrizeMoney: 1, rScheduleTime: 1,
       meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, resultString: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
-      'runners.trainer': 1, 'runners.bp': 1,
+      'runners.trainer': 1,
     })
     .sort({ rCourseDisplayName: 1, rNo: 1 })
     .toArray();
@@ -151,7 +146,6 @@ async function fetchRaceById(id) {
       projection: {
         rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rPrizeMoney: 1, rScheduleTime: 1, resultString: 1,
         'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
-        'runners.bp': 1,
       },
     }
   );
@@ -257,19 +251,6 @@ app.get('/', async (req, res) => {
     res.send(renderHtml(dateStr, schedule, { includeTrials, discipline }));
   } catch (err) {
     res.status(500).send(`<h1>Error loading dashboard</h1><pre>${escapeHtml(err.message)}</pre>`);
-  }
-});
-
-app.get('/timeline', async (req, res) => {
-  const { dateStr, includeTrials } = parseRequestOptions(req);
-  try {
-    // Every discipline/country for the date, same as the CSV/Excel/JSON/PDF
-    // report -- the timeline is a flat, all-disciplines-mixed-together view.
-    const docs = await fetchRaceDocs(dateStr, includeTrials);
-    const timeline = buildTimeline(docs);
-    res.send(renderTimelineHtml(dateStr, timeline, { includeTrials }));
-  } catch (err) {
-    res.status(500).send(`<h1>Error loading timeline</h1><pre>${escapeHtml(err.message)}</pre>`);
   }
 });
 
