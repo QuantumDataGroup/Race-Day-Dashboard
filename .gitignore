@@ -4,6 +4,13 @@ node_modules/
 # Local DB credentials/config - must never be committed (contains live connection strings)
 db.json
 
+# Local login config - must never be committed (holds the dashboard's hashed
+# password + session secret, even though it's hashed not plaintext). Written
+# by setup-auth.js, normally lives outside this folder entirely (see
+# AUTH_CONFIG_PATH in server.js) -- this is a defence-in-depth backstop in
+# case that path is ever pointed inside the project.
+auth.json
+
 # Logs
 *.log
 npm-debug.log*
