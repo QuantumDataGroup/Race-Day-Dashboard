@@ -192,6 +192,39 @@ function countMissingTrainers(runners) {
   return runners.filter((r) => !r.isScratched && isBlank(r.trainer)).length;
 }
 
+// --- Timezone/UTC cross-check: REMOVED 11 Aug 2026 -------------------------
+//
+// A whole timezone/UTC-offset validation feature (within-meeting peer
+// comparison, then cross-meeting-same-day, then course-history baseline --
+// see git history around 10-11 Aug 2026 for the full three-layer design,
+// `computeTimezoneIssuesForMeeting`/`computeCrossMeetingTimezoneIssues`/
+// `computeCourseHistoryTimezoneIssues`/`computeTimezoneIssues`,
+// `computeUtcOffsetMinutes`/`formatUtcOffset`/`computeMajorityOffset`) was
+// built 10-11 Aug 2026 to catch a real NZ - RICCARTON PARK bug where
+// `rScheduleTimeUTC` was uniformly wrong for a whole meeting.
+//
+// Removed per Dinesh, 11 Aug 2026: "Time zone check pandrada remove
+// pannunga, Time zone wena summa times mattu check pannunga podu" (remove
+// the timezone check, just check the times instead), followed by "Times
+// modal'la sonna madhiri <15 minutes gap irukka kudathu, same time wara
+// kudathu, duplicate aagi irukka kudathu, na first'ku sonna vishayanga da"
+// (like what I originally asked for -- no <15 min gap, no same/duplicate
+// time -- those are the things I said first). That original ask is exactly
+// the PRE-EXISTING "Schedule Issue" check just below (`GAP_THRESHOLD_MIN`,
+// `highlighted`, `badTime`/`badTimeReason` in `buildSchedule()`) -- it
+// already flags a race scheduled <15 minutes after the previous one, an
+// exact-duplicate scheduled time within a meeting, and the 00:00 placeholder
+// time. That check is untouched by this removal and remains the only
+// schedule-time validation in this file.
+//
+// IMPORTANT if a UTC/local-mismatch-style check is ever requested again:
+// this removal means the ONLY thing validated now is the LOCAL
+// `rScheduleTime` value's shape/spacing -- `rScheduleTimeUTC` is no longer
+// read or compared anywhere. That trades away the ability to catch the
+// exact Riccarton Park class of bug (local time was correct, only the UTC
+// field was wrong -- a purely local-time check cannot see that), which was
+// a known, explicitly-accepted tradeoff at removal time, not an oversight.
+
 // Per-runner issue label used in the click-through detail view. Combines the
 // tab-number check (all disciplines), the trainer check (all disciplines),
 // and the jockey check (Thoroughbred/Harness only -- Greyhound runners show
@@ -238,6 +271,7 @@ function buildSchedule(docs) {
     groups.get(key).races.set(doc.rNo, {
       id: doc._id,
       clock: parseClock(doc.rScheduleTime),
+      rScheduleTime: doc.rScheduleTime || null,
       rClass: doc.rClass || '',
       rPrizeMoney: doc.rPrizeMoney || '',
       missingJockeyCount: countMissingJockeys(doc.runners, doc.rDiscipline),
@@ -391,6 +425,7 @@ function buildRaceDetail(doc) {
   return {
     id: doc._id,
     meeting: doc.rCourseDisplayName,
+    rName: doc.rName || doc.rDisplayName || '',
     country: doc.rCountry,
     discipline: doc.rDiscipline,
     disciplineLabel: disciplineLabel(doc.rDiscipline),
@@ -530,6 +565,82 @@ function issuesReportToCsv(rows) {
   return lines.join('\r\n');
 }
 
+// Full meeting details download -- added 10 Aug 2026 per Dinesh: "Edwadu oru
+// meeting full details download panna option wenu... Alice Springs meeting
+// download pannumna anda meeting full race details download pannanu", same
+// 4 formats as the issues report. Unlike buildIssuesReport (one row per
+// RACE, only when something's wrong), this is one row per RUNNER across
+// EVERY race at ONE specific meeting, wrong-or-not -- it's a full export of
+// what's on the grid + modal for that meeting, not a validation report.
+// `docs` must already be scoped to a single meeting (course+country+
+// discipline+date) by the caller (server.js queries by those four fields).
+function buildMeetingDetailsReport(docs, dateStr) {
+  const rows = [];
+  const sorted = docs.slice().sort((a, b) => a.rNo - b.rNo);
+
+  for (const doc of sorted) {
+    const clock = parseClock(doc.rScheduleTime);
+    const hasResult = Boolean(doc.resultString) || (doc.runners || []).some((r) => r.fp != null);
+    const runners = (doc.runners || []).slice().sort((a, b) => {
+      if (hasResult) {
+        const fa = a.fp != null ? a.fp : Infinity;
+        const fb = b.fp != null ? b.fp : Infinity;
+        if (fa !== fb) return fa - fb;
+      }
+      return (a.tabNo || 0) - (b.tabNo || 0);
+    });
+
+    const base = {
+      date: dateStr,
+      country: doc.rCountry,
+      discipline: disciplineLabel(doc.rDiscipline),
+      meeting: doc.rCourseDisplayName,
+      rNo: doc.rNo,
+      raceName: doc.rName || doc.rDisplayName || '',
+      rClass: doc.rClass || '',
+      prizeMoney: doc.rPrizeMoney || '',
+      scheduledTime: clock ? clock.label : '',
+      status: STATUS_LABELS[deriveRaceStatus(doc)] || deriveRaceStatus(doc),
+      resultString: doc.resultString || '',
+    };
+
+    if (!runners.length) {
+      // Still emit one row so a race with zero runner records isn't
+      // silently dropped from the export.
+      rows.push(Object.assign({}, base, { tabNo: '', horseName: '', jockey: '', trainer: '', scratched: '', position: '' }));
+      continue;
+    }
+
+    for (const r of runners) {
+      rows.push(Object.assign({}, base, {
+        tabNo: r.tabNo != null ? r.tabNo : '',
+        horseName: r.horseName || '',
+        jockey: r.jockey || '',
+        trainer: r.trainer || '',
+        scratched: r.isScratched ? 'Yes' : 'No',
+        position: r.fp != null ? r.fp : '',
+      }));
+    }
+  }
+
+  return rows;
+}
+
+function meetingDetailsReportToCsv(rows) {
+  const headers = [
+    'Date', 'Country', 'Discipline', 'Meeting', 'Race No', 'Race Name', 'Class', 'Prize Money',
+    'Scheduled Time', 'Status', 'Result', 'Tab No', 'Horse', 'Jockey', 'Trainer', 'Scratched', 'Position',
+  ];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.date, r.country, r.discipline, r.meeting, r.rNo, r.raceName, r.rClass, r.prizeMoney,
+      r.scheduledTime, r.status, r.resultString, r.tabNo, r.horseName, r.jockey, r.trainer, r.scratched, r.position,
+    ].map(csvEscape).join(','));
+  }
+  return lines.join('\r\n');
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -567,6 +678,20 @@ const BASE_STYLE_BLOCK = `
   body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: var(--bg); color: var(--fg); }
   h1 { margin: 0 0 4px; font-size: 26px; display: inline-block; }
   .top-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .top-row-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .session-info { font-size: 13px; color: var(--muted); }
+  .logout-link { color: var(--header-bg); font-weight: 600; text-decoration: none; }
+  .logout-link:hover { text-decoration: underline; }
+  .login-page-body { display: flex; align-items: center; justify-content: center; min-height: 80vh; margin: 0; }
+  .login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 10px var(--shadow); padding: 32px 36px; width: 320px; }
+  .login-card h1 { font-size: 20px; margin: 0 0 4px; display: block; }
+  .login-card p.sub { margin: 0 0 20px; }
+  .login-card label { display: block; font-size: 13px; margin-bottom: 14px; }
+  .login-card input[type="text"], .login-card input[type="password"] { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; font-size: 14px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); }
+  .login-card button[type="submit"] { width: 100%; padding: 9px; font-size: 14px; font-weight: 600; border: none; border-radius: 4px; background: var(--header-bg); color: var(--header-fg); cursor: pointer; }
+  .login-card button[type="submit"]:hover { background: var(--header-bg-hover); }
+  .login-error { background: #fdecea; color: #a12622; border: 1px solid #f4c7c3; border-radius: 4px; padding: 8px 10px; font-size: 13px; margin-bottom: 16px; }
+  [data-theme="dark"] .login-error { background: #3a1f1f; color: #ff9d95; border-color: #5c2e2c; }
   .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
   .disc-section { margin-bottom: 28px; }
   .disc-section[hidden] { display: none; }
@@ -626,6 +751,19 @@ const BASE_STYLE_BLOCK = `
   .dup-badge { display: inline-block; background: #e07b00; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
   .tab-badge { display: inline-block; background: #cc0000; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
   .trainer-badge { display: inline-block; background: #6b46c1; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
+  /* Per-meeting "download this meeting's full details" widget (10 Aug 2026)
+     -- a native <details>/<summary> disclosure, no JS needed to open/close.
+     Only downside: it doesn't auto-close on an outside click like the
+     meeting-search dropdown does -- acceptable tradeoff for a rarely-used,
+     one-off action button. */
+  .meeting-download { display: inline-block; position: relative; margin-left: 4px; vertical-align: middle; }
+  .meeting-download > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 11px; font-weight: 700; color: var(--header-bg); background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 3px; padding: 1px 6px; }
+  .meeting-download > summary::-webkit-details-marker { display: none; }
+  .meeting-download > summary:hover { background: var(--hover-bg); }
+  .meeting-download[open] > summary { background: var(--hover-bg); }
+  .meeting-download-menu { position: absolute; top: 100%; left: 0; margin-top: 2px; background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 4px; box-shadow: 0 4px 12px var(--shadow); z-index: 55; padding: 4px; display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+  .meeting-download-menu a { display: block; font-size: 12px; font-weight: 400; color: var(--fg); text-decoration: none; padding: 4px 10px; border-radius: 3px; text-align: left; }
+  .meeting-download-menu a:hover { background: var(--hover-bg); }
   .controls { margin-bottom: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .controls label { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; margin-right: 16px; }
   .controls input[type="date"] { font-size: 13px; padding: 4px 6px; border: 1px solid var(--input-border); border-radius: 4px; margin-left: 4px; background: var(--card-bg); color: var(--fg); }
@@ -652,6 +790,7 @@ const BASE_STYLE_BLOCK = `
   .modal-overlay.open { display: flex; }
   .modal-box { background: var(--modal-bg); color: var(--fg); border-radius: 6px; max-width: 640px; width: 92%; max-height: 80vh; overflow-y: auto; padding: 20px 24px; box-shadow: 0 8px 30px var(--modal-shadow); }
   .modal-box h2 { margin: 0 0 4px; font-size: 18px; display: block; }
+  .modal-box .modal-race-name { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
   .modal-box .modal-sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
   .modal-box .modal-result { color: var(--result-fg); font-weight: 700; font-size: 13px; margin: 0 0 10px; }
   .modal-box table { width: 100%; box-shadow: none; }
@@ -666,6 +805,69 @@ const BASE_STYLE_BLOCK = `
   td.issue-cell.trainer-issue { color: #6b46c1; font-weight: 600; }
   td.position-cell { font-weight: 700; }
   .modal-loading, .modal-error { color: var(--muted); font-style: italic; }
+
+  .table-scroll { width: 100%; }
+
+  /* ---- Phone view (added 9 Aug 2026, per "phone'la open panna sariya
+     kaatudilla") ---- the grid was unusable on phones mainly because there
+     was no <meta name="viewport"> tag at all, so mobile browsers rendered
+     it at desktop width and shrank everything down to fit, making text and
+     tap targets tiny. Adding the viewport tag (see renderHtml's <head>)
+     fixes that; these rules on top make the layout actually comfortable to
+     use at phone widths rather than just "technically readable". */
+  @media (max-width: 760px) {
+    body { margin: 12px; }
+    h1 { font-size: 20px; }
+    .top-row { gap: 6px; }
+    .sub { font-size: 12px; margin-bottom: 14px; }
+    .disc-tabs { gap: 6px; margin-bottom: 14px; }
+    .tab-btn { padding: 8px 10px; font-size: 13px; flex: 1 1 auto; justify-content: center; }
+    .grid-filters { margin-left: 0; width: 100%; gap: 10px; }
+    .country-filter, .tabmeeting-filter, .issue-filter, .status-filter, .meeting-search-filter { width: 100%; }
+    .country-filter select, .tabmeeting-filter select, .issue-filter select, .status-filter select { flex: 1; width: 100%; }
+    .meeting-search-filter input { width: 100%; flex: 1; }
+    .controls { gap: 10px; }
+    .controls label { margin-right: 0; }
+    .report-links { width: 100%; flex-wrap: wrap; }
+    /* The meeting-grid itself stays a real table (one column per race) --
+       that structure doesn't reflow into a single phone column without a
+       much bigger rework, so instead it scrolls horizontally inside its own
+       box (finger-swipe) while the meeting name stays pinned on the left,
+       so you always know which row you're looking at. */
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); }
+    /* The meeting name + its country/TAB/issue tags all sitting on one
+       nowrap line made that first column render ~345px wide -- on a
+       ~370px-wide phone scroll box that left only a ~25px sliver not
+       covered by the pinned column, so a race-time cell could never be
+       scrolled into a position where it was both fully visible AND not
+       physically underneath the sticky "meeting" cell (confirmed via
+       getBoundingClientRect: meeting column right edge sat past x=340
+       while the scroll box itself was only 368px wide) -- that's what
+       looked like the sticky cell "stealing" the click. Under the table's
+       normal automatic layout, max-width on a td is only a hint -- a
+       nowrap child still forces the column wider to fit its content, so
+       just capping td.meeting's max-width did NOT actually shrink it
+       (confirmed: still measured ~272px). table-layout: fixed makes column
+       widths obey the declared widths for real, so the sticky column stays
+       genuinely narrow and ellipsis-truncates instead of stretching. */
+    .table-scroll table { min-width: 640px; box-shadow: none; table-layout: fixed; }
+    .table-scroll th, .table-scroll td { white-space: nowrap; }
+    .table-scroll th:first-child, .table-scroll td.meeting {
+      width: 110px; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* Let the download menu escape the narrow, overflow:hidden sticky
+       column while it's actually open, so it isn't clipped on phone widths. */
+    .table-scroll td.meeting:has(details.meeting-download[open]) { overflow: visible; }
+    .table-scroll thead th:first-child, .table-scroll td.meeting {
+      position: sticky; left: 0; z-index: 3; box-shadow: 2px 0 4px var(--shadow);
+    }
+    .table-scroll thead th:first-child { z-index: 6; }
+    .modal-box { width: 94%; padding: 16px 16px; max-height: 88vh; }
+    .modal-box h2 { font-size: 16px; }
+    .modal-box table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .modal-box th, .modal-box td { white-space: nowrap; }
+    .legend { font-size: 11px; }
+  }
 `;
 
 const MODAL_MARKUP = `
@@ -721,9 +923,9 @@ const MODAL_SCRIPT_BLOCK = `
           var resultLine = race.hasResult
             ? '<p class="modal-result">&#127937; Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
             : '';
-
           content.innerHTML =
             '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
+            (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
             '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
               (race.timeLabel ? ' &middot; ' + escapeHtmlClient(race.timeLabel) : '') +
               (race.rClass ? ' &middot; Class: ' + escapeHtmlClient(race.rClass) : '') +
@@ -739,9 +941,25 @@ const MODAL_SCRIPT_BLOCK = `
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') closeRaceDetail();
     });
+
+    // Close any open "meeting download" dropdown when clicking ANYWHERE else
+    // on the page (10 Aug 2026, per Dinesh: clicking elsewhere left the menu
+    // stuck open -- he had to click the download button again just to close
+    // it before it would open cleanly the next time). Native <details> has
+    // no built-in outside-click-to-close behaviour, so this does it by hand:
+    // any click whose target is NOT inside an open .meeting-download element
+    // closes that element. A click on the summary/links INSIDE the open
+    // dropdown is left alone (native toggle / the link's own onclick handle
+    // those cases).
+    document.addEventListener('click', function (e) {
+      var openMenus = document.querySelectorAll('details.meeting-download[open]');
+      for (var i = 0; i < openMenus.length; i++) {
+        if (!openMenus[i].contains(e.target)) openMenus[i].removeAttribute('open');
+      }
+    });
 `;
 
-function renderMeetingsTable(meetings, maxRaceNo) {
+function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
   const cols = Array.from({ length: maxRaceNo }, (_, i) => i + 1);
   const headerCells = cols.map((n) => `<th>R${n}</th>`).join('');
 
@@ -800,24 +1018,51 @@ function renderMeetingsTable(meetings, maxRaceNo) {
         if (m.hasMissingTab) issueCodes.push('missingtab');
         if (m.hasMissingTrainer) issueCodes.push('missingtrainer');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
+        // Tooltip lists exactly which category(ies) triggered the "Issue"
+        // pill -- added 10 Aug 2026 after a real support ticket where the
+        // pill was assumed to mean a timezone problem when it was actually
+        // an unrelated Duplicate Jockey flag (the timezone feature itself
+        // was removed entirely 11 Aug 2026, see the removal note near the
+        // top of this file).
+        const issueReasons = [];
+        if (m.hasMissingJockey) issueReasons.push('Missing Jockey');
+        if (m.hasDuplicateJockey) issueReasons.push('Duplicate Jockey');
+        if (m.hasMissingTab) issueReasons.push('Missing TAB number');
+        if (m.hasMissingTrainer) issueReasons.push('Missing Trainer');
+        if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
         const healthTag = m.hasAnyIssue
-          ? '<span class="health-tag issue">Issue</span>'
-          : '<span class="health-tag healthy">Healthy</span>';
+          ? `<span class="health-tag issue" title="${escapeHtml(issueReasons.join(', '))}">Issue</span>`
+          : '<span class="health-tag healthy" title="No missing/duplicate jockey, missing TAB, missing trainer, or schedule issue at this meeting">Healthy</span>';
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
 
-        return `${countryHeaderRow}<tr class="meeting-row" data-country="${escapeHtml(m.country)}" data-tabmeeting="${tabMeetingValue}" data-issues="${issueCodes.join(' ')}" data-hasissue="${m.hasAnyIssue}" data-meeting="${escapeHtml(String(m.meeting || '').toLowerCase())}" data-meeting-name="${escapeHtml(m.meeting || '')}"><td class="meeting">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span> ${tabMeetingTag} ${healthTag} ${abandonedTag}</td>${cells}</tr>`;
+        // Per-meeting "download this meeting's full details" widget -- added
+        // 10 Aug 2026 per Dinesh ("Edwadu oru meeting full details download
+        // panna option wenu... Alice Springs meeting download pannumna anda
+        // meeting full race details download pannanu"), same 4 formats
+        // (CSV/Excel/JSON/PDF) as the top "Download report" button, but
+        // scoped to just this one meeting's races+runners rather than the
+        // whole date's issues. Query params identify the meeting the same
+        // way buildSchedule groups it (course+country+discipline+date).
+        const dlQuery = `?date=${encodeURIComponent(dateStr || '')}&meeting=${encodeURIComponent(m.meeting || '')}&country=${encodeURIComponent(m.country || '')}&discipline=${encodeURIComponent(m.discipline || '')}${includeTrials ? '&includeTrials=true' : ''}`;
+        // onclick on each link closes this dropdown right after the download
+        // starts (10 Aug 2026) -- without it the menu stayed open after a
+        // download since the download itself doesn't navigate the page away.
+        const closeOnClick = `onclick="this.closest('details').removeAttribute('open')"`;
+        const downloadWidget = `<details class="meeting-download"><summary title="Download this meeting's full race &amp; runner details (CSV / Excel / JSON / PDF)">&#11015;</summary><div class="meeting-download-menu"><a href="/meeting-report.csv${dlQuery}" ${closeOnClick}>CSV</a><a href="/meeting-report.xlsx${dlQuery}" ${closeOnClick}>Excel</a><a href="/meeting-report.json${dlQuery}" ${closeOnClick}>JSON</a><a href="/meeting-report.pdf${dlQuery}" ${closeOnClick}>PDF</a></div></details>`;
+
+        return `${countryHeaderRow}<tr class="meeting-row" data-country="${escapeHtml(m.country)}" data-tabmeeting="${tabMeetingValue}" data-issues="${issueCodes.join(' ')}" data-hasissue="${m.hasAnyIssue}" data-meeting="${escapeHtml(String(m.meeting || '').toLowerCase())}" data-meeting-name="${escapeHtml(m.meeting || '')}"><td class="meeting">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span> ${tabMeetingTag} ${healthTag} ${abandonedTag} ${downloadWidget}</td>${cells}</tr>`;
       }).join('\n')
     : `<tr><td class="empty-state" colspan="${cols.length + 1}">No meetings.</td></tr>`;
 
   const noMatchRow = `<tr class="no-match-row" hidden><td class="empty-state" colspan="${cols.length + 1}">No meetings match the selected filters.</td></tr>`;
 
-  return `<table>
+  return `<div class="table-scroll"><table>
     <thead><tr><th style="text-align:left;">Meeting</th>${headerCells}</tr></thead>
     <tbody>
 ${rows}
 ${noMatchRow}
     </tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function renderHtml(dateStr, schedule, options = {}) {
@@ -825,6 +1070,7 @@ function renderHtml(dateStr, schedule, options = {}) {
   const heading = formatDateHeading(dateStr);
   const includeTrials = Boolean(options.includeTrials);
   const selectedDiscipline = DISCIPLINE_ORDER.includes(options.discipline) ? options.discipline : DISCIPLINE_ORDER[0];
+  const username = options.username ? escapeHtml(options.username) : null;
 
   const countryOptions = ['<option value="">All countries</option>']
     .concat(countries.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`))
@@ -842,7 +1088,7 @@ function renderHtml(dateStr, schedule, options = {}) {
     const hidden = disc === selectedDiscipline ? '' : ' hidden';
     return `
   <section class="disc-section" id="section-${disc}"${hidden}>
-    ${renderMeetingsTable(meetings, maxRaceNo)}
+    ${renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials)}
   </section>`;
   }).join('\n');
 
@@ -850,6 +1096,7 @@ function renderHtml(dateStr, schedule, options = {}) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Race Day Dashboard - ${escapeHtml(dateStr)}</title>
 <style>
 ${BASE_STYLE_BLOCK}
@@ -861,7 +1108,10 @@ ${BASE_STYLE_BLOCK}
       <h1>Race Day Dashboard</h1>
       <p class="sub">${escapeHtml(heading)} <span class="refresh-indicator" id="refreshIndicator">&middot; Auto-refresh every 3 min</span></p>
     </div>
-    <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
+    <div class="top-row-right">
+      ${username ? `<span class="session-info">Logged in as <strong>${username}</strong> &middot; <a class="logout-link" href="/logout">Logout</a></span>` : ''}
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
+    </div>
   </div>
   <form class="controls" method="GET" action="/">
     <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day">&larr; Prev day</button>
@@ -937,9 +1187,10 @@ ${sections}
     <div><span class="swatch tab-swatch"></span> Red outline + "T" number = runner(s) with a missing, zero, or duplicate tab number in that race.</div>
     <div>Purple outline + "TR" number = runner(s) missing a trainer in that race.</div>
     <div><span class="tabmeeting-tag tab">TAB</span> / <span class="tabmeeting-tag nontab">Non-TAB</span> next to a meeting name = its TAB/wagering status. Use the "Meetings" filter above to show only one or the other.</div>
-    <div><span class="health-tag issue">Issue</span> / <span class="health-tag healthy">Healthy</span> next to a meeting name = whether ANY race at that meeting has a missing/duplicate jockey, missing TAB number, missing trainer, or schedule issue. Use the "Issue" filter above to isolate one problem type, or show only "Meetings with Issues" / "Healthy Meetings".</div>
+    <div><span class="health-tag issue">Issue</span> / <span class="health-tag healthy">Healthy</span> next to a meeting name = whether ANY race at that meeting has a missing/duplicate jockey, missing TAB number, missing trainer, or schedule issue. Hover the tag to see exactly which one(s). Use the "Issue" filter above to isolate one problem type, or show only "Meetings with Issues" / "Healthy Meetings".</div>
     <div><span class="abandoned-tag">ABBN</span> next to a meeting name = at least one race at that meeting is abandoned. Abandoned races also show "Abandoned" directly inside the race cell (time struck through).</div>
     <div>"Download report" = the same issues report as CSV, Excel, JSON, or PDF.</div>
+    <div>&#11015; next to a meeting name = download that ONE meeting's full race + runner details (every race, every runner, not just issues) as CSV, Excel, JSON, or PDF -- click to open the format menu.</div>
     <div>"Race status" filter = Upcoming / Running / Completed / Abandoned / Resulted, per RACE (not per meeting -- one meeting can have races at different statuses through the day). Dims out non-matching race cells rather than hiding the whole meeting, since a meeting can have both matching and non-matching races at once.</div>
     <div>&#127937; Green result line under a race time (e.g. "1-4-6-7") = final result, tab numbers in finishing order (1st-4th). Click the race for full runner-by-runner finishing positions.</div>
     <div>"Search meeting" box = type the START of a meeting/course name to filter to it (matches from the beginning of the name only, not the middle; suggestions drop down as you type -- click one or keep typing). Combines with the other filters above.</div>
@@ -1217,11 +1468,64 @@ ${MODAL_SCRIPT_BLOCK}
 </html>`;
 }
 
+// --- Login page -------------------------------------------------------------
+//
+// Added 12 Aug 2026 per Dinesh: "Enakku inda dash boardku user logins seiyanu,
+// Ippodakku, User name Password kuduthu ullukku pora madhiri" (add a
+// username/password login to the dashboard). Scoped via follow-up questions
+// to: a single shared username/password, guarding ONLY the main dashboard
+// page ("/") -- report downloads and the JSON API stay open -- with the
+// password stored as a securely-hashed value in a local config file outside
+// the project folder (see setup-auth.js, AUTH_CONFIG_PATH in server.js),
+// never in plaintext and never committed to git. The session is a plain
+// browser-session cookie -- closing the browser logs you out.
+//
+// This function is pure HTML (no DB/session code, consistent with the rest
+// of this file) -- server.js supplies `error` based on session/query-string
+// state and handles the actual credential check and session cookie.
+function renderLoginPage(options = {}) {
+  const error = options.error ? escapeHtml(options.error) : null;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Login</title>
+<style>
+${BASE_STYLE_BLOCK}
+</style>
+</head>
+<body class="login-page-body">
+  <div class="login-card">
+    <h1>Race Day Dashboard</h1>
+    <p class="sub">Sign in to continue</p>
+    ${error ? `<div class="login-error">${error}</div>` : ''}
+    <form method="POST" action="/login" autocomplete="off">
+      <label>Username
+        <input type="text" name="username" autocomplete="username" autofocus required>
+      </label>
+      <label>Password
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Log in</button>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var savedTheme = 'light';
+      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 module.exports = {
-  buildSchedule, buildRaceDetail, renderHtml, todayStr, parseClock, disciplineLabel, escapeHtml,
+  buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, parseClock, disciplineLabel, escapeHtml,
   countMissingJockeys, hasDuplicateJockey, countDuplicateJockeyGroups, issueForRunner, jockeyCounts,
   tabNoCounts, hasDuplicateTabNo, countTabNoIssues, tabIssueForRunner,
   countMissingTrainers,
-  buildIssuesReport, issuesReportToCsv, deriveRaceStatus,
+  buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
   MISSING_JOCKEY_BORDER_THRESHOLD, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };

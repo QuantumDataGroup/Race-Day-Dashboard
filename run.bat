@@ -12,23 +12,38 @@ cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 (
     echo [run.bat] Node.js was not found on PATH. Install Node.js from https://nodejs.org/ and try again.
+    pause
     exit /b 1
 )
 
 set "NEED_INSTALL="
 if not exist "node_modules" set "NEED_INSTALL=1"
 if not exist "node_modules\express" set "NEED_INSTALL=1"
+if not exist "node_modules\express-session" set "NEED_INSTALL=1"
+if not exist "node_modules\bcryptjs" set "NEED_INSTALL=1"
 if not exist "node_modules\mongodb" set "NEED_INSTALL=1"
 if not exist "node_modules\exceljs" set "NEED_INSTALL=1"
 if not exist "node_modules\pdfkit" set "NEED_INSTALL=1"
 
 if defined NEED_INSTALL (
-    echo [run.bat] Installing/updating dependencies ^(express, mongodb, exceljs, pdfkit^)...
+    echo [run.bat] Installing/updating dependencies ^(express, express-session, bcryptjs, mongodb, exceljs, pdfkit^)...
     call npm install
     if errorlevel 1 (
         echo [run.bat] npm install failed. See errors above.
+        pause
         exit /b 1
     )
+)
+
+if not defined AUTH_CONFIG_PATH (
+    set "AUTH_CONFIG_PATH=C:\Users\Dinesh\projects-config\auth.json"
+)
+if not exist "%AUTH_CONFIG_PATH%" (
+    echo [run.bat] No dashboard login is set up yet.
+    echo [run.bat] Open Command Prompt in this folder and run: node setup-auth.js
+    echo [run.bat] Choose a username/password there, then double-click this file again.
+    pause
+    exit /b 1
 )
 
 if not defined DB_CONFIG_PATH (
@@ -40,6 +55,7 @@ if not defined PORT (
 set "URL=http://localhost:%PORT%/"
 
 echo [run.bat] Using config file: %DB_CONFIG_PATH%
+echo [run.bat] Using login config: %AUTH_CONFIG_PATH%
 echo [run.bat] Starting race day dashboard on port %PORT% in its own window ...
 start "Race Day Dashboard Server" cmd /k "node server.js"
 
