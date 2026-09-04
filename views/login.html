@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Login</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body class="login-page-body">
+  <div class="login-card">
+    <h1>Race Day Dashboard</h1>
+    <p class="sub">Sign in to continue</p>
+    {{ERROR_BLOCK}}
+    <form method="POST" action="/login" autocomplete="off">
+      <label>Username
+        <input type="text" name="username" autocomplete="username" autofocus required>
+      </label>
+      <label>Password
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Log in</button>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var savedTheme = 'light';
+      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
+</body>
+</html>
