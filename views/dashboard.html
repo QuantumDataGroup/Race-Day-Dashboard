@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - {{DATE_STR}}</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="top-row">
+    <div>
+      <h1>Race Day Dashboard</h1>
+      <p class="sub">{{HEADING}} <span class="refresh-indicator" id="refreshIndicator">&middot; Auto-refresh every 3 min</span></p>
+    </div>
+    <div class="top-row-right">
+      {{USERNAME_BLOCK}}
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
+    </div>
+  </div>
+  <form class="controls" method="GET" action="/">
+    <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day">&larr; Prev day</button>
+    <label>Date:
+      <input type="date" name="date" id="dateInput" value="{{DATE_STR}}" onchange="this.form.submit()">
+    </label>
+    <button type="button" class="day-nav" onclick="shiftDate(1)" title="Next day">Next day &rarr;</button>
+    <label>
+      <input type="checkbox" name="includeTrials" value="true" {{INCLUDE_TRIALS_CHECKED}} onchange="this.form.submit()">
+      Include trials
+    </label>
+    <noscript><button type="submit">Go</button></noscript>
+    {{TODAY_LINK_HTML}}
+    {{REPORT_LINKS_HTML}}
+  </form>
+  <div class="disc-tabs">
+{{TABS}}
+    <div class="grid-filters">
+      <label class="meeting-search-filter">Search meeting:
+        <span class="meeting-search-wrap">
+          <input type="text" id="meetingSearch" placeholder="Type a meeting name..." autocomplete="off" oninput="applyFilters()" onfocus="renderSuggestionDropdown()">
+          <div class="meeting-suggestions" id="meetingSuggestions"></div>
+        </span>
+      </label>
+      <label class="country-filter">Country:
+        <select id="countryFilter" onchange="applyFilters()">
+{{COUNTRY_OPTIONS}}
+        </select>
+      </label>
+      <label class="tabmeeting-filter">Meetings:
+        <select id="tabMeetingFilter" onchange="applyFilters()">
+          <option value="">All meetings</option>
+          <option value="tab">TAB meetings</option>
+          <option value="nontab">Non-TAB meetings</option>
+        </select>
+      </label>
+      <label class="issue-filter">Issue:
+        <select id="issueFilter" onchange="applyFilters()">
+          <option value="">All</option>
+          <option value="missingjockey">Missing Jockey</option>
+          <option value="duplicatejockey">Duplicate Jockey</option>
+          <option value="missingtab">Missing TAB</option>
+          <option value="missingtrainer">Missing Trainer</option>
+          <option value="missingform">Missing Form Lines</option>
+          <option value="missingvideo">Missing Video</option>
+          <option value="scheduleissue">Schedule Issue</option>
+          <option value="hasissues">Meetings with Issues</option>
+          <option value="healthy">Healthy Meetings</option>
+        </select>
+      </label>
+      <label class="status-filter">Race status:
+        <select id="statusFilter" onchange="applyFilters()">
+          <option value="">All statuses</option>
+          <option value="upcoming">Upcoming</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="abandoned">Abandoned</option>
+          <option value="resulted">Resulted</option>
+        </select>
+      </label>
+    </div>
+  </div>
+{{MISSING_AUS_MEETINGS_BANNER}}
+{{SECTIONS}}
+  <p class="meta">date param: <code>?date=YYYY-MM-DD</code> &middot; trials param: <code>?includeTrials=true</code></p>
+
+  <div class="modal-overlay" id="detailModal" onclick="if(event.target===this) closeRaceDetail()">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeRaceDetail()" aria-label="Close">&times;</button>
+      <div id="detailContent"><p class="modal-loading">Loading...</p></div>
+    </div>
+  </div>
+
+  <script>
+    function escapeHtmlClient(str) {
+      return String(str).replace(/[&<>"']/g, function (c) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+      });
+    }
+
+    function closeRaceDetail() {
+      document.getElementById('detailModal').classList.remove('open');
+    }
+
+    // Which runners in the currently-open popup are flagged "Missing form
+    // lines" -- feeds the "Confirm no form for all" button. Reset every
+    // time showRaceDetail() loads a race.
+    var _currentFormFlaggedRunners = [];
+
+    function showRaceDetail(id) {
+      var modal = document.getElementById('detailModal');
+      var content = document.getElementById('detailContent');
+      content.innerHTML = '<p class="modal-loading">Loading...</p>';
+      modal.classList.add('open');
+
+      fetch('/api/race/' + encodeURIComponent(id))
+        .then(function (res) {
+          if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+          return res.json();
+        })
+        .then(function (race) {
+          // Tracked so the "Confirm no form for all" button (built below)
+          // knows exactly which runners to ignore without re-parsing the
+          // table -- reset per popup open/race.
+          _currentFormFlaggedRunners = race.runners.filter(function (r) {
+            return !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
+          }).map(function (r) { return { runnerId: r.runnerId, horseName: r.horseName }; });
+
+          var rows = race.runners.map(function (r) {
+            var issueClass = '';
+            if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
+            else if (r.issue.indexOf('trainer') !== -1) issueClass = 'issue-cell trainer-issue';
+            else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
+            else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
+            var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? r.position : '-') + '</td>' : '';
+            // Manual "confirm no form" tick -- lets someone who's actually
+            // checked the real source (punters.com.au) and confirmed a
+            // runner genuinely has no past form (e.g. a first starter) stop
+            // the dashboard flagging that runner going forward.
+            var showFormBtn = !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
+            var formBtnHtml = showFormBtn
+              ? ' <button type="button" class="form-ignore-btn" data-runner-id="' + escapeHtmlClient(r.runnerId) + '" data-horse-name="' + escapeHtmlClient(r.horseName) + '" onclick="confirmNoFormLines(this)" title="Checked punters.com.au and confirmed this runner genuinely has no past form">&#10003; Confirm no form</button>'
+              : '';
+            return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
+              positionCell +
+              '<td>' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
+              '<td>' + escapeHtmlClient(r.horseName) + '</td>' +
+              '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
+              '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
+              '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml)) + '</td>' +
+              '</tr>';
+          }).join('');
+
+          var positionHeader = race.hasResult ? '<th>Pos</th>' : '';
+          var resultLine = race.hasResult
+            ? '<p class="modal-result">&#127937; Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
+            : '';
+          var formIgnoreAllLine = _currentFormFlaggedRunners.length
+            ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
+            : '';
+          content.innerHTML =
+            '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
+            (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
+            '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
+              (race.timeLabel ? ' &middot; ' + escapeHtmlClient(race.timeLabel) : '') +
+              (race.rClass ? ' &middot; Class: ' + escapeHtmlClient(race.rClass) : '') +
+              (race.rPrizeMoney ? ' &middot; Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
+              (race.isTrial ? ' &middot; <span class="trial-tag">Trial</span>' : '') +
+              (race.missingVideo ? ' &middot; <span class="novideo-tag">Videos not available</span>' : '') +
+              (race.videoUrl ? ' &middot; <a class="video-watch-link" href="' + escapeHtmlClient(race.videoUrl) + '" target="_blank" rel="noopener">&#127909; Watch race video</a>' : '') + '</p>' +
+            resultLine +
+            formIgnoreAllLine +
+            '<table><thead><tr>' + positionHeader + '<th>Tab</th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        })
+        .catch(function (err) {
+          content.innerHTML = '<p class="modal-error">Could not load race detail: ' + escapeHtmlClient(err.message) + '</p>';
+        });
+    }
+
+    function confirmNoFormLines(btn) {
+      var runnerId = btn.getAttribute('data-runner-id');
+      var horseName = btn.getAttribute('data-horse-name');
+      if (!runnerId) return;
+      if (!window.confirm('Confirm on punters.com.au that "' + horseName + '" genuinely has no past form, then click OK to stop flagging it here.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/runner/' + encodeURIComponent(runnerId) + '/form-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, horseName: horseName }),
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+          return res.json();
+        })
+        .then(function () {
+          var cell = btn.parentNode;
+          if (cell) cell.textContent = '-';
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = '✓ Confirm no form';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    function confirmNoFormLinesAll(btn) {
+      var list = _currentFormFlaggedRunners;
+      if (!list.length) return;
+      if (!window.confirm('Confirm on punters.com.au that all ' + list.length + ' listed runner(s) genuinely have no past form, then click OK to stop flagging all of them here.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      Promise.all(list.map(function (item) {
+        return fetch('/api/runner/' + encodeURIComponent(item.runnerId) + '/form-ignore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ignored: true, horseName: item.horseName }),
+        }).then(function (res) {
+          if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+          return res.json();
+        });
+      }))
+        .then(function () {
+          document.querySelectorAll('.form-ignore-btn:not(.form-ignore-all-btn)').forEach(function (b) {
+            var cell = b.parentNode;
+            if (cell) cell.textContent = '-';
+          });
+          var line = btn.closest('.form-ignore-all-line');
+          if (line) line.remove();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = '✓ Confirm no form for all (' + list.length + ')';
+          window.alert('Could not save all: ' + err.message);
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeRaceDetail();
+    });
+
+    // Close any open "meeting download" dropdown when clicking ANYWHERE else
+    // on the page (10 Aug 2026, per Dinesh: clicking elsewhere left the menu
+    // stuck open -- he had to click the download button again just to close
+    // it before it would open cleanly the next time). Native <details> has
+    // no built-in outside-click-to-close behaviour, so this does it by hand:
+    // any click whose target is NOT inside an open .meeting-download element
+    // closes that element. A click on the summary/links INSIDE the open
+    // dropdown is left alone (native toggle / the link's own onclick handle
+    // those cases).
+    document.addEventListener('click', function (e) {
+      var openMenus = document.querySelectorAll('details.meeting-download[open]');
+      for (var i = 0; i < openMenus.length; i++) {
+        if (!openMenus[i].contains(e.target)) openMenus[i].removeAttribute('open');
+      }
+    });
+
+    function shiftDate(deltaDays) {
+      var input = document.getElementById('dateInput');
+      var parts = input.value.split('-').map(Number);
+      var d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      d.setUTCDate(d.getUTCDate() + deltaDays);
+      var y = d.getUTCFullYear();
+      var m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      var day = String(d.getUTCDate()).padStart(2, '0');
+      input.value = y + '-' + m + '-' + day;
+      input.form.submit();
+    }
+
+    function switchDiscipline(disc) {
+      document.querySelectorAll('.tab-btn').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-disc') === disc);
+      });
+      document.querySelectorAll('.disc-section').forEach(function (sec) {
+        var isMatch = sec.id === 'section-' + disc;
+        if (isMatch) sec.removeAttribute('hidden');
+        else sec.setAttribute('hidden', '');
+      });
+    }
+
+    function applyFilters() {
+      var country = document.getElementById('countryFilter').value;
+      var tabMeeting = document.getElementById('tabMeetingFilter').value;
+      var issue = document.getElementById('issueFilter').value;
+      var status = document.getElementById('statusFilter').value;
+      var search = (document.getElementById('meetingSearch').value || '').trim().toLowerCase();
+
+      saveFilterState();
+
+      // Race status is a PER-RACE (per-cell) thing, not a per-meeting thing --
+      // one meeting can have R1 Resulted, R2 Running, R3 Upcoming all at
+      // once. So the status filter dims individual race cells rather than
+      // hiding the whole meeting-row, and a row only disappears entirely if
+      // NONE of its races match (handled below via data-has-status-match).
+      document.querySelectorAll('td.time').forEach(function (cell) {
+        var cellStatusMatch = !status || cell.getAttribute('data-status') === status;
+        cell.classList.toggle('status-filtered', !cellStatusMatch);
+      });
+
+      document.querySelectorAll('tr.meeting-row').forEach(function (row) {
+        var countryMatch = !country || row.getAttribute('data-country') === country;
+        var tabMatch = !tabMeeting || row.getAttribute('data-tabmeeting') === tabMeeting;
+        var issueMatch = true;
+        if (issue === 'hasissues') issueMatch = row.getAttribute('data-hasissue') === 'true';
+        else if (issue === 'healthy') issueMatch = row.getAttribute('data-hasissue') === 'false';
+        else if (issue) issueMatch = (row.getAttribute('data-issues') || '').split(' ').indexOf(issue) !== -1;
+        var statusMatch = !status || row.querySelectorAll('td.time[data-status="' + status + '"]').length > 0;
+        // Prefix match only (starts with what's typed), not "contains" --
+        // Dinesh specifically asked for this after "middle'la search aagudu".
+        var searchMatch = !search || (row.getAttribute('data-meeting') || '').indexOf(search) === 0;
+        row.classList.toggle('row-hidden', !(countryMatch && tabMatch && issueMatch && statusMatch && searchMatch));
+      });
+
+      // A country-header-row is visible only if at least one meeting-row
+      // under it (before the next header) is still visible -- otherwise a
+      // TAB/country combo with zero matches would leave an orphaned header.
+      document.querySelectorAll('table').forEach(function (table) {
+        var rows = Array.prototype.slice.call(table.querySelectorAll('tr.country-header-row, tr.meeting-row'));
+        var currentHeader = null;
+        var anyVisibleUnderHeader = false;
+        rows.forEach(function (row) {
+          if (row.classList.contains('country-header-row')) {
+            if (currentHeader) currentHeader.classList.toggle('row-hidden', !anyVisibleUnderHeader);
+            currentHeader = row;
+            anyVisibleUnderHeader = false;
+          } else if (!row.classList.contains('row-hidden')) {
+            anyVisibleUnderHeader = true;
+          }
+        });
+        if (currentHeader) currentHeader.classList.toggle('row-hidden', !anyVisibleUnderHeader);
+
+        var anyVisible = table.querySelectorAll('tr.meeting-row:not(.row-hidden)').length > 0;
+        var hasAnyMeetingRow = table.querySelectorAll('tr.meeting-row').length > 0;
+        var noMatchRow = table.querySelector('tr.no-match-row');
+        if (noMatchRow) {
+          if (hasAnyMeetingRow && !anyVisible) noMatchRow.removeAttribute('hidden');
+          else noMatchRow.setAttribute('hidden', '');
+        }
+      });
+
+      updateMeetingSuggestions(country, tabMeeting, issue, status);
+    }
+
+    // "Search meeting" suggestions must only ever list meetings that are
+    // ACTUALLY on the page right now for this date: this date's schedule
+    // only (never other dates -- the whole page is per-date), the currently
+    // selected discipline tab only (not all 3 mixed together), and further
+    // narrowed by whichever Country/Meetings(TAB)/Issue/Race-status filters
+    // are active -- so a suggestion never points at a meeting that isn't
+    // actually visible if picked. This candidate list is independent of the
+    // search text itself; renderSuggestionDropdown() below narrows it by
+    // what's actually typed (PREFIX match only -- see that function).
+    //
+    // Built with a custom dropdown (not the native <datalist>) because
+    // native datalist matching is browser-controlled and matches ANYWHERE
+    // in the value, not just the start -- Dinesh specifically asked for
+    // start-of-name-only matching ("middle'la search aagudhu, first'la
+    // irundhu mattum thevai"), which datalist can't guarantee.
+    var _availableMeetingNames = [];
+    function updateMeetingSuggestions(country, tabMeeting, issue, status) {
+      var activeSection = document.querySelector('.disc-section:not([hidden])');
+      var names = [];
+      var seen = {};
+      if (activeSection) {
+        activeSection.querySelectorAll('tr.meeting-row').forEach(function (row) {
+          var countryMatch = !country || row.getAttribute('data-country') === country;
+          var tabMatch = !tabMeeting || row.getAttribute('data-tabmeeting') === tabMeeting;
+          var issueMatch = true;
+          if (issue === 'hasissues') issueMatch = row.getAttribute('data-hasissue') === 'true';
+          else if (issue === 'healthy') issueMatch = row.getAttribute('data-hasissue') === 'false';
+          else if (issue) issueMatch = (row.getAttribute('data-issues') || '').split(' ').indexOf(issue) !== -1;
+          var statusMatch = !status || row.querySelectorAll('td.time[data-status="' + status + '"]').length > 0;
+          if (!(countryMatch && tabMatch && issueMatch && statusMatch)) return;
+          var name = row.getAttribute('data-meeting-name');
+          if (name && !seen[name]) { seen[name] = true; names.push(name); }
+        });
+      }
+      names.sort();
+      _availableMeetingNames = names;
+      renderSuggestionDropdown();
+    }
+
+    // Renders the custom suggestion dropdown, filtered to names that START
+    // WITH whatever is currently typed in the search box (case-insensitive
+    // prefix match) -- not a "contains anywhere" match.
+    function renderSuggestionDropdown() {
+      var input = document.getElementById('meetingSearch');
+      var dropdown = document.getElementById('meetingSuggestions');
+      if (!input || !dropdown) return;
+      var text = (input.value || '').trim().toLowerCase();
+      dropdown.innerHTML = '';
+      if (!text) { dropdown.classList.remove('open'); return; }
+      var matches = _availableMeetingNames.filter(function (name) {
+        return name.toLowerCase().indexOf(text) === 0;
+      }).slice(0, 15);
+      if (!matches.length) { dropdown.classList.remove('open'); return; }
+      matches.forEach(function (name) {
+        var item = document.createElement('div');
+        item.textContent = name;
+        // mousedown (not click) so this fires BEFORE the input's blur event
+        // closes the dropdown out from under the click.
+        item.onmousedown = function (e) {
+          e.preventDefault();
+          input.value = name;
+          dropdown.classList.remove('open');
+          applyFilters();
+        };
+        dropdown.appendChild(item);
+      });
+      dropdown.classList.add('open');
+    }
+
+    (function wireSearchDropdownDismiss() {
+      var input = document.getElementById('meetingSearch');
+      if (!input) return;
+      // Close the dropdown when focus leaves the search box -- delayed so a
+      // click on a suggestion (mousedown, handled above) still lands first.
+      input.addEventListener('blur', function () {
+        setTimeout(function () {
+          var dropdown = document.getElementById('meetingSuggestions');
+          if (dropdown) dropdown.classList.remove('open');
+        }, 150);
+      });
+    })();
+
+    // ---- Filter persistence (survives auto-refresh / manual reload) ----
+    var FILTER_STORAGE_KEYS = {
+      countryFilter: 'rdd_countryFilter', tabMeetingFilter: 'rdd_tabMeetingFilter',
+      issueFilter: 'rdd_issueFilter', statusFilter: 'rdd_statusFilter', meetingSearch: 'rdd_meetingSearch',
+    };
+    function saveFilterState() {
+      try {
+        Object.keys(FILTER_STORAGE_KEYS).forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) localStorage.setItem(FILTER_STORAGE_KEYS[id], el.value || '');
+        });
+      } catch (e) { /* localStorage unavailable -- ignore, filters just won't persist */ }
+    }
+    function restoreFilterState() {
+      try {
+        Object.keys(FILTER_STORAGE_KEYS).forEach(function (id) {
+          var el = document.getElementById(id);
+          var saved = localStorage.getItem(FILTER_STORAGE_KEYS[id]);
+          if (el && saved) el.value = saved;
+        });
+        var savedDisc = localStorage.getItem('rdd_discipline');
+        if (savedDisc && document.getElementById('section-' + savedDisc)) switchDiscipline(savedDisc);
+      } catch (e) { /* ignore */ }
+    }
+
+    var _origSwitchDiscipline = switchDiscipline;
+    switchDiscipline = function (disc) {
+      _origSwitchDiscipline(disc);
+      try { localStorage.setItem('rdd_discipline', disc); } catch (e) { /* ignore */ }
+      // Rebuild "Search meeting" suggestions for the tab just switched to --
+      // otherwise they'd keep listing the previous tab's meetings.
+      applyFilters();
+    };
+
+    // ---- Light / Dark theme ----
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'dark' ? '&#9728;&#65039; Light' : '&#127769; Dark';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'light';
+      var next = current === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('rdd_theme', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    // ---- Auto-refresh every 3 minutes, with a live countdown ----
+    var AUTO_REFRESH_SECONDS = 3 * 60;
+    var refreshSecondsLeft = AUTO_REFRESH_SECONDS;
+    function formatCountdown(totalSeconds) {
+      var m = Math.floor(totalSeconds / 60);
+      var s = totalSeconds % 60;
+      return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function updateRefreshIndicator(paused) {
+      var el = document.getElementById('refreshIndicator');
+      if (!el) return;
+      el.textContent = paused
+        ? '· Auto-refresh paused (runner detail open)'
+        : '· Auto-refresh in ' + formatCountdown(refreshSecondsLeft);
+    }
+    function scheduleAutoRefresh() {
+      updateRefreshIndicator(false);
+      setInterval(function () {
+        var modal = document.getElementById('detailModal');
+        var isPaused = Boolean(modal && modal.classList.contains('open'));
+        if (isPaused) {
+          // Don't yank the page while a runner-detail popup is open -- hold
+          // the countdown steady (don't tick it down) until it's closed.
+          updateRefreshIndicator(true);
+          return;
+        }
+        refreshSecondsLeft -= 1;
+        if (refreshSecondsLeft <= 0) {
+          saveFilterState();
+          location.reload();
+          return;
+        }
+        updateRefreshIndicator(false);
+      }, 1000);
+    }
+
+    (function init() {
+      var savedTheme = 'light';
+      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      restoreFilterState();
+      applyFilters();
+      scheduleAutoRefresh();
+    })();
+  </script>
+</body>
+</html>
