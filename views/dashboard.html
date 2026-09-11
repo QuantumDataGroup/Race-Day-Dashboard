@@ -10,18 +10,17 @@
   <div class="top-row">
     <div>
       <h1>Race Day Dashboard</h1>
-      <p class="sub">{{HEADING}} <span class="refresh-indicator" id="refreshIndicator">&middot; Auto-refresh every 3 min</span></p>
+      <p class="sub">{{HEADING}} <span class="refresh-indicator" id="refreshIndicator">| Auto-refresh every 3 min</span></p>
     </div>
     <div class="top-row-right">
       {{USERNAME_BLOCK}}
+      <a class="meetings-list-link" href="/meetings-list-view">Meetings list</a>
       <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
     </div>
   </div>
   <form class="controls" method="GET" action="/">
     <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day">&larr; Prev day</button>
-    <label>Date:
-      <input type="date" name="date" id="dateInput" value="{{DATE_STR}}" onchange="this.form.submit()">
-    </label>
+    {{DATE_PICKER_HTML}}
     <button type="button" class="day-nav" onclick="shiftDate(1)" title="Next day">Next day &rarr;</button>
     <label>
       <input type="checkbox" name="includeTrials" value="true" {{INCLUDE_TRIALS_CHECKED}} onchange="this.form.submit()">
@@ -30,6 +29,7 @@
     <noscript><button type="submit">Go</button></noscript>
     {{TODAY_LINK_HTML}}
     {{REPORT_LINKS_HTML}}
+    {{MEETINGS_LIST_LINKS_HTML}}
   </form>
   <div class="disc-tabs">
 {{TABS}}
@@ -60,7 +60,9 @@
           <option value="missingtab">Missing TAB</option>
           <option value="missingtrainer">Missing Trainer</option>
           <option value="missingform">Missing Form Lines</option>
+          <option value="ageissue">Horse Age Issue</option>
           <option value="missingvideo">Missing Video</option>
+          <option value="missingracecomment">Missing Race Comment</option>
           <option value="scheduleissue">Schedule Issue</option>
           <option value="hasissues">Meetings with Issues</option>
           <option value="healthy">Healthy Meetings</option>
@@ -78,9 +80,8 @@
       </label>
     </div>
   </div>
-{{MISSING_AUS_MEETINGS_BANNER}}
 {{SECTIONS}}
-  <p class="meta">date param: <code>?date=YYYY-MM-DD</code> &middot; trials param: <code>?includeTrials=true</code></p>
+  <p class="meta">date param: <code>?date=YYYY-MM-DD</code> | trials param: <code>?includeTrials=true</code></p>
 
   <div class="modal-overlay" id="detailModal" onclick="if(event.target===this) closeRaceDetail()">
     <div class="modal-box">
@@ -96,6 +97,201 @@
       });
     }
 
+    // Racing silk SVG, generated client-side from the DB's plain-English
+    // `silkDescription` text (9 Sep 2026, per Dinesh) -- e.g. "Purple, White
+    // Star, White And Purple Stars Sleeves And Cap". The DB also has a
+    // matching `silkURL` image in an S3 bucket, but that bucket returns
+    // AccessDenied for anonymous reads (confirmed 9 Sep 2026), so this draws
+    // a small jacket-shaped icon instead: solid base colour, one recognised
+    // body pattern (quarters/halves/hoops/diamonds/stars/spots/checks/
+    // chevron/sash) layered on top, plus separate sleeve and cap colours.
+    // Not every real silk's exact layout is reproduced (e.g. a pattern
+    // specifically on the sleeves/cap, rare motifs like a horseshoe or a
+    // lettered disc) -- this is a best-effort visual identifier, not a
+    // pixel-perfect copy, same trade-off as every other best-effort feature
+    // in this file.
+    var SILK_COLOR_MAP = {
+      'dark blue': '#0b2e5c', 'navy blue': '#0b2e5c', 'navy': '#0b2e5c', 'royal blue': '#1c39bb',
+      'light blue': '#7ec8e3', 'sky blue': '#87ceeb', 'blue': '#1c3f94',
+      'dark green': '#0b4d24', 'emerald green': '#0f9960', 'emerald': '#0f9960', 'lime green': '#9fd400',
+      'lime': '#9fd400', 'green': '#1a7a3c',
+      'dark grey': '#555555', 'grey': '#8a8a8a', 'gray': '#8a8a8a', 'silver': '#c0c0c0',
+      'hot pink': '#ff2d95', 'cerise': '#de3163', 'rose': '#e05a8a', 'pink': '#f48fb1', 'magenta': '#e91e8c',
+      'neon yellow': '#eaff00', 'yellow': '#ffde17', 'gold': '#d4af37',
+      'orange': '#f57c00', 'maroon': '#7a1f2b', 'crimson': '#c8102e', 'red': '#e2231a',
+      'purple': '#7b3fa0', 'indigo': '#3f2a80',
+      'brown': '#6b4226', 'chocolate': '#5a3825', 'tan': '#c8a165', 'beige': '#e6d3b3', 'cream': '#f5f0dc',
+      'black': '#161616', 'white': '#ffffff',
+    };
+    // Longest color names first, so "dark blue" matches before "blue" does.
+    var SILK_COLOR_NAMES = Object.keys(SILK_COLOR_MAP).sort(function (a, b) { return b.length - a.length; });
+    var SILK_PATTERN_WORDS = ['quarters', 'quartered', 'halved', 'halves', 'hoops', 'hooped', 'stripes', 'striped',
+      'diamonds', 'diamond', 'stars', 'star', 'spots', 'spot', 'checks', 'checked', 'checkered', 'checkers',
+      'chevrons', 'chevron', 'sash'];
+
+    function findColorAt(text, startIndex) {
+      var rest = text.slice(startIndex);
+      for (var i = 0; i < SILK_COLOR_NAMES.length; i++) {
+        if (rest.indexOf(SILK_COLOR_NAMES[i]) === 0) return SILK_COLOR_NAMES[i];
+      }
+      return null;
+    }
+    // Finds every (color, index) mention in a string, left to right.
+    function findColorMentions(text) {
+      var found = [];
+      for (var i = 0; i < text.length; i++) {
+        var name = findColorAt(text, i);
+        if (name) { found.push({ name: name, index: i }); i += name.length - 1; }
+      }
+      return found;
+    }
+    function findPatternWord(text) {
+      for (var i = 0; i < SILK_PATTERN_WORDS.length; i++) {
+        var idx = text.indexOf(SILK_PATTERN_WORDS[i]);
+        if (idx !== -1) return { word: SILK_PATTERN_WORDS[i], index: idx };
+      }
+      return null;
+    }
+    // Color mentioned closest before a given text index (used to pick which
+    // color belongs to "sleeves"/"cap"/a pattern word rather than just
+    // taking the first color in the whole description).
+    function nearestColorBefore(mentions, index) {
+      var best = null;
+      for (var i = 0; i < mentions.length; i++) {
+        if (mentions[i].index <= index && (!best || mentions[i].index > best.index)) best = mentions[i];
+      }
+      return best ? best.name : null;
+    }
+
+    function parseSilkDescription(description) {
+      var text = String(description || '').toLowerCase();
+      var mentions = findColorMentions(text);
+      if (!mentions.length) return null;
+      var baseColor = mentions[0].name;
+      var sleeveIdx = text.indexOf('sleeve');
+      if (sleeveIdx === -1) sleeveIdx = text.indexOf('arm');
+      var capIdx = text.indexOf('cap');
+      var sleeveColor = sleeveIdx !== -1 ? (nearestColorBefore(mentions, sleeveIdx) || baseColor) : baseColor;
+      var capColor = capIdx !== -1 ? (nearestColorBefore(mentions, capIdx) || baseColor) : baseColor;
+      var pattern = findPatternWord(text);
+      var patternType = null;
+      var patternColor = null;
+      if (pattern) {
+        // Ignore a pattern word that's actually describing the sleeves/cap
+        // themselves (e.g. "...Sleeves And Cap" after a "Stars" mention
+        // already assigned above) -- only treat it as a BODY pattern when
+        // there's a second, distinct color available for it.
+        var candidate = mentions.filter(function (m) { return m.name !== baseColor && m.index < pattern.index + 20; });
+        var afterColor = mentions.filter(function (m) { return m.index > pattern.index; })[0];
+        patternColor = (candidate.length ? candidate[candidate.length - 1].name : null) || (afterColor ? afterColor.name : null);
+        if (patternColor && patternColor !== baseColor) {
+          patternType = pattern.word.replace(/s$/, '').replace('checkered', 'check').replace('checkers', 'check')
+            .replace('hooped', 'hoop').replace('quartered', 'quarter').replace('halves', 'half').replace('halved', 'half').replace('striped', 'stripe');
+        }
+      }
+      return {
+        base: SILK_COLOR_MAP[baseColor],
+        sleeve: SILK_COLOR_MAP[sleeveColor] || SILK_COLOR_MAP[baseColor],
+        cap: SILK_COLOR_MAP[capColor] || SILK_COLOR_MAP[baseColor],
+        patternType: patternType,
+        patternColor: patternColor ? SILK_COLOR_MAP[patternColor] : null,
+      };
+    }
+
+    // Body shape is a simple jacket silhouette in a 40x44 viewBox: cap
+    // circle on top, a tapered torso, two angled sleeve wedges.
+    var SILK_BODY_PATH = 'M13,14 L27,14 L25,40 L15,40 Z';
+    var SILK_LEFT_SLEEVE_PATH = 'M13,14 L4,25 L8,29 L15,19 Z';
+    var SILK_RIGHT_SLEEVE_PATH = 'M27,14 L36,25 L32,29 L25,19 Z';
+
+    function silkPatternOverlay(patternType, color, clipId) {
+      var g = '<g clip-path="url(#' + clipId + ')">';
+      switch (patternType) {
+        case 'quarter':
+          g += '<rect x="20" y="14" width="8" height="13" fill="' + color + '"/><rect x="13" y="27" width="7" height="13" fill="' + color + '"/>';
+          break;
+        case 'half':
+          g += '<rect x="20" y="14" width="10" height="26" fill="' + color + '"/>';
+          break;
+        case 'hoop':
+        case 'stripe':
+          g += '<rect x="13" y="17" width="14" height="4" fill="' + color + '"/><rect x="13" y="25" width="14" height="4" fill="' + color + '"/><rect x="13" y="33" width="14" height="4" fill="' + color + '"/>';
+          break;
+        case 'diamond':
+          [[20, 18], [15, 27], [25, 27], [20, 35]].forEach(function (p) {
+            g += '<rect x="' + (p[0] - 3) + '" y="' + (p[1] - 3) + '" width="6" height="6" fill="' + color + '" transform="rotate(45 ' + p[0] + ' ' + p[1] + ')"/>';
+          });
+          break;
+        case 'star':
+          [[20, 20], [16, 32], [24, 32]].forEach(function (p) {
+            g += '<path d="M' + p[0] + ',' + (p[1] - 3) + ' l1,2.2 2.4,0.2 -1.8,1.6 0.6,2.4 -2.2,-1.3 -2.2,1.3 0.6,-2.4 -1.8,-1.6 2.4,-0.2 Z" fill="' + color + '"/>';
+          });
+          break;
+        case 'spot':
+          [[18, 20], [23, 25], [17, 31], [23, 35]].forEach(function (p) {
+            g += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="2.4" fill="' + color + '"/>';
+          });
+          break;
+        case 'check':
+          for (var row = 0; row < 5; row++) {
+            for (var col = 0; col < 3; col++) {
+              if ((row + col) % 2 === 0) g += '<rect x="' + (13 + col * 5) + '" y="' + (14 + row * 5.5) + '" width="5" height="5.5" fill="' + color + '"/>';
+            }
+          }
+          break;
+        case 'chevron':
+          g += '<path d="M13,20 L20,26 L27,20 L27,25 L20,31 L13,25 Z" fill="' + color + '"/><path d="M14,30 L20,35 L26,30 L26,35 L20,40 L14,35 Z" fill="' + color + '"/>';
+          break;
+        case 'sash':
+          g += '<rect x="10" y="24" width="20" height="6" fill="' + color + '" transform="rotate(-25 20 27)"/>';
+          break;
+        default:
+          break;
+      }
+      return g + '</g>';
+    }
+
+    var _silkClipIdSeq = 0;
+    function renderSilkSvg(description) {
+      var parsed = parseSilkDescription(description);
+      if (!parsed) return renderMissingSilk();
+      var clipId = 'silkClip' + (_silkClipIdSeq++);
+      return '<svg class="silk-icon" viewBox="0 0 40 44" width="35" height="38" title="' + escapeHtmlClient(description) + '">' +
+        '<title>' + escapeHtmlClient(description) + '</title>' +
+        '<defs><clipPath id="' + clipId + '"><path d="' + SILK_BODY_PATH + '"/></clipPath></defs>' +
+        '<path d="' + SILK_LEFT_SLEEVE_PATH + '" fill="' + parsed.sleeve + '" stroke="#0003" stroke-width="0.5"/>' +
+        '<path d="' + SILK_RIGHT_SLEEVE_PATH + '" fill="' + parsed.sleeve + '" stroke="#0003" stroke-width="0.5"/>' +
+        '<path d="' + SILK_BODY_PATH + '" fill="' + parsed.base + '" stroke="#0003" stroke-width="0.5"/>' +
+        (parsed.patternType ? silkPatternOverlay(parsed.patternType, parsed.patternColor, clipId) : '') +
+        '<circle cx="20" cy="7" r="6" fill="' + parsed.cap + '" stroke="#0003" stroke-width="0.5"/>' +
+        '</svg>';
+    }
+
+    // Highlights a runner with no silk description at all in the DB (rather
+    // than just leaving the cell blank) -- a dashed, muted outline of the
+    // same jacket shape so it still reads as "silk", just visibly missing.
+    function renderMissingSilk() {
+      return '<svg class="silk-icon silk-missing" viewBox="0 0 40 44" width="35" height="38" title="No silk data available">' +
+        '<title>No silk data available</title>' +
+        '<path d="' + SILK_LEFT_SLEEVE_PATH + '"/>' +
+        '<path d="' + SILK_RIGHT_SLEEVE_PATH + '"/>' +
+        '<path d="' + SILK_BODY_PATH + '"/>' +
+        '<circle cx="20" cy="7" r="6"/>' +
+        '</svg>';
+    }
+
+    // A failed confirm/ignore POST used to just throw 'Request failed (500)',
+    // discarding the actual `{ error: '...' }` body server.js sends back
+    // (e.g. "Could not save: ENOENT..."), which is exactly the detail needed
+    // to diagnose a production-only failure without server log access. This
+    // reads that body (falling back to the bare status if it isn't JSON) so
+    // the alert shows the real cause.
+    function throwWithServerError(res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        throw new Error((body && body.error) || ('Request failed (' + res.status + ')'));
+      });
+    }
+
     function closeRaceDetail() {
       document.getElementById('detailModal').classList.remove('open');
     }
@@ -105,74 +301,658 @@
     // time showRaceDetail() loads a race.
     var _currentFormFlaggedRunners = [];
 
-    function showRaceDetail(id) {
+    // [{rno, id, hasFormIssue, hasOtherIssue}] for every race at the SAME
+    // meeting as the currently open popup -- feeds the race-number nav bar
+    // so you can jump between races in one meeting without closing the
+    // popup, and see which OTHER races there still have an issue (shown in
+    // red) without opening each one. Only rebuilt when opened from a grid
+    // cell (cellEl given); jumping via the nav bar itself calls
+    // showRaceDetail(id) with no cellEl, so this list carries over
+    // unchanged except for the one entry syncGridFormBadge() patches.
+    var _currentMeetingRaces = [];
+    // Grid-cell classes that mean "this race has an issue", other than
+    // missing-form (tracked separately since confirming can clear just
+    // that one, live, without a fresh read of the grid).
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'horse-age-issue', 'missing-race-comment'];
+
+    // Race id of whatever's currently shown in the popup -- lets the
+    // "confirm no form" handlers below find and live-update the matching
+    // grid cell without a full page reload.
+    var _currentRaceId = null;
+
+    // Builds just the <button> markup for the race-nav bar from
+    // _currentMeetingRaces/_currentRaceId -- split out so syncGridFormBadge()
+    // can refresh the bar in place after a confirm, without a fresh fetch.
+    function renderRaceNavButtons() {
+      return _currentMeetingRaces.map(function (r) {
+        var isActive = r.id === _currentRaceId;
+        var hasIssue = r.hasFormIssue || r.hasOtherIssue;
+        var cls = 'race-nav-btn' + (isActive ? ' active' : '') + (hasIssue ? ' has-issue' : '');
+        return '<button type="button" class="' + cls + '"' +
+          (isActive ? ' disabled' : ' onclick="showRaceDetail(\'' + r.id + '\')"') +
+          '>R' + escapeHtmlClient(r.rno) + '</button>';
+      }).join('');
+    }
+
+    function showRaceDetail(id, cellEl) {
+      _currentRaceId = id;
       var modal = document.getElementById('detailModal');
       var content = document.getElementById('detailContent');
       content.innerHTML = '<p class="modal-loading">Loading...</p>';
       modal.classList.add('open');
 
+      if (cellEl) {
+        var row = cellEl.closest('tr');
+        _currentMeetingRaces = row
+          ? Array.prototype.slice.call(row.querySelectorAll('td.cell.time.clickable[data-race-id]')).map(function (td) {
+              return {
+                rno: td.getAttribute('data-rno'),
+                id: td.getAttribute('data-race-id'),
+                hasFormIssue: td.classList.contains('missing-form'),
+                hasOtherIssue: OTHER_ISSUE_CLASSES.some(function (c) { return td.classList.contains(c); }),
+              };
+            })
+          : [];
+      }
+
       fetch('/api/race/' + encodeURIComponent(id))
         .then(function (res) {
-          if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+          if (!res.ok) return throwWithServerError(res);
           return res.json();
         })
-        .then(function (race) {
-          // Tracked so the "Confirm no form for all" button (built below)
-          // knows exactly which runners to ignore without re-parsing the
-          // table -- reset per popup open/race.
-          _currentFormFlaggedRunners = race.runners.filter(function (r) {
-            return !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
-          }).map(function (r) { return { runnerId: r.runnerId, horseName: r.horseName }; });
-
-          var rows = race.runners.map(function (r) {
-            var issueClass = '';
-            if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
-            else if (r.issue.indexOf('trainer') !== -1) issueClass = 'issue-cell trainer-issue';
-            else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
-            else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
-            var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? r.position : '-') + '</td>' : '';
-            // Manual "confirm no form" tick -- lets someone who's actually
-            // checked the real source (punters.com.au) and confirmed a
-            // runner genuinely has no past form (e.g. a first starter) stop
-            // the dashboard flagging that runner going forward.
-            var showFormBtn = !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
-            var formBtnHtml = showFormBtn
-              ? ' <button type="button" class="form-ignore-btn" data-runner-id="' + escapeHtmlClient(r.runnerId) + '" data-horse-name="' + escapeHtmlClient(r.horseName) + '" onclick="confirmNoFormLines(this)" title="Checked punters.com.au and confirmed this runner genuinely has no past form">&#10003; Confirm no form</button>'
-              : '';
-            return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
-              positionCell +
-              '<td>' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
-              '<td>' + escapeHtmlClient(r.horseName) + '</td>' +
-              '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
-              '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
-              '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml)) + '</td>' +
-              '</tr>';
-          }).join('');
-
-          var positionHeader = race.hasResult ? '<th>Pos</th>' : '';
-          var resultLine = race.hasResult
-            ? '<p class="modal-result">&#127937; Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
-            : '';
-          var formIgnoreAllLine = _currentFormFlaggedRunners.length
-            ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
-            : '';
-          content.innerHTML =
-            '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
-            (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
-            '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
-              (race.timeLabel ? ' &middot; ' + escapeHtmlClient(race.timeLabel) : '') +
-              (race.rClass ? ' &middot; Class: ' + escapeHtmlClient(race.rClass) : '') +
-              (race.rPrizeMoney ? ' &middot; Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
-              (race.isTrial ? ' &middot; <span class="trial-tag">Trial</span>' : '') +
-              (race.missingVideo ? ' &middot; <span class="novideo-tag">Videos not available</span>' : '') +
-              (race.videoUrl ? ' &middot; <a class="video-watch-link" href="' + escapeHtmlClient(race.videoUrl) + '" target="_blank" rel="noopener">&#127909; Watch race video</a>' : '') + '</p>' +
-            resultLine +
-            formIgnoreAllLine +
-            '<table><thead><tr>' + positionHeader + '<th>Tab</th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>';
-        })
+        .then(renderRacePopup)
         .catch(function (err) {
           content.innerHTML = '<p class="modal-error">Could not load race detail: ' + escapeHtmlClient(err.message) + '</p>';
         });
+    }
+
+    // Cached so "Back to race" from the horse-detail view can redraw the
+    // race popup without a second fetch.
+    var _currentRaceData = null;
+
+    // The runner currently shown in showHorseDetail -- lets
+    // openPastRaceFormPage/checkPastRaceVideos read its pastRaces/region
+    // without threading the whole object through onclick attributes.
+    var _currentHorseDetailRunner = null;
+
+    function renderRacePopup(race) {
+      _currentRaceData = race;
+      var content = document.getElementById('detailContent');
+
+      // Tracked so the "Confirm no form for all" button (built below)
+      // knows exactly which runners to ignore without re-parsing the
+      // table -- reset per popup open/race.
+      _currentFormFlaggedRunners = race.runners.filter(function (r) {
+        return !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
+      }).map(function (r) { return { runnerId: r.runnerId, horseName: r.horseName }; });
+
+      var rows = race.runners.map(function (r) {
+        var issueClass = '';
+        if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
+        else if (r.issue.indexOf('trainer') !== -1) issueClass = 'issue-cell trainer-issue';
+        else if (r.issue.indexOf('age issue') !== -1) issueClass = 'issue-cell age-issue';
+        else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
+        else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
+        var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? r.position : '-') + '</td>' : '';
+        // Manual "confirm no form" tick -- lets someone who's actually
+        // checked the real source (punters.com.au) and confirmed a
+        // runner genuinely has no past form (e.g. a first starter) stop
+        // the dashboard flagging that runner going forward.
+        var showFormBtn = !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
+        var formBtnHtml = showFormBtn
+          ? ' <button type="button" class="form-ignore-btn" data-runner-id="' + escapeHtmlClient(r.runnerId) + '" data-horse-name="' + escapeHtmlClient(r.horseName) + '" onclick="confirmNoFormLines(this)" title="Checked punters.com.au and confirmed this runner genuinely has no past form">&#10003; Confirm no form</button>'
+          : '';
+        // Manual "age checked, no issue" tick -- same idea as the form-lines
+        // override above, for when the age flag itself is wrong/not a real
+        // concern for this horse.
+        var showAgeBtn = !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('age issue') !== -1;
+        var ageBtnHtml = showAgeBtn
+          ? ' <button type="button" class="age-ignore-btn" data-runner-id="' + escapeHtmlClient(r.runnerId) + '" data-horse-name="' + escapeHtmlClient(r.horseName) + '" onclick="confirmAgeOk(this)" title="Confirm you have checked this horse\'s age and it is not an issue">&#10003; Age checked, no issue</button>'
+          : '';
+        // Manual "checked with site, no issue" tick for Duplicate jockey --
+        // keyed by jockey name (not runner), since one click clears every
+        // runner sharing that jockey in this race, not just this row.
+        var showDupJockeyBtn = !r.isScratched && r.jockey && r.issue && r.issue.indexOf('Duplicate jockey') !== -1;
+        var dupJockeyBtnHtml = showDupJockeyBtn
+          ? ' <button type="button" class="dup-jockey-ignore-btn" data-jockey="' + escapeHtmlClient(r.jockey) + '" onclick="confirmDuplicateJockeyOk(this)" title="Confirm you have checked this against the real source and it is correct">&#10003; Checked, no issue</button>'
+          : '';
+        // Manual "checked with site, no issue" tick for Missing jockey --
+        // keyed by race + runner (not runner alone), since whether a
+        // jockey is assigned is specific to THIS race, not a durable fact
+        // about the horse.
+        var showMissingJockeyBtn = !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing jockey') !== -1;
+        var missingJockeyBtnHtml = showMissingJockeyBtn
+          ? ' <button type="button" class="missing-jockey-ignore-btn" data-runner-id="' + escapeHtmlClient(r.runnerId) + '" data-horse-name="' + escapeHtmlClient(r.horseName) + '" onclick="confirmMissingJockeyOk(this)" title="Confirm you have checked this against the real source and it is correct">&#10003; Checked, no issue</button>'
+          : '';
+        // "Site for check" -- a quick link to this race's country's official
+        // racing-authority site (see buildExternalCheckUrl in raceView.js;
+        // null when the country isn't recognised), shown next to whichever
+        // of the 4 confirm buttons above is actually on screen for this
+        // runner, so someone can look up the real source before ticking
+        // "Confirm"/"Checked" rather than after.
+        var siteCheckHtml = (race.externalCheckUrl && (showFormBtn || showAgeBtn || showDupJockeyBtn || showMissingJockeyBtn))
+          ? ' <a class="site-check-link" href="' + escapeHtmlClient(race.externalCheckUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the official racing site to check against the real source">Site for check</a>'
+          : '';
+        // Horse name is clickable when there's actually pedigree/past-form
+        // data to show for it (Thoroughbred only -- see server.js).
+        var hasHorseDetail = Boolean(r.sire || r.dam || r.performanceStatistics || (r.pastRaces && r.pastRaces.length));
+        var horseNameHtml = hasHorseDetail
+          ? '<button type="button" class="horse-name-link" onclick="showHorseDetail(\'' + escapeHtmlClient(r.runnerId) + '\')" title="View pedigree and past races">' + escapeHtmlClient(r.horseName) + '</button>'
+          : escapeHtmlClient(r.horseName);
+        var regionHtml = r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '';
+        var silkHtml = renderSilkSvg(r.silkDescription);
+        return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
+          positionCell +
+          '<td class="tab-cell">' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
+          '<td class="silk-cell">' + silkHtml + '</td>' +
+          '<td class="horse-cell">' + horseNameHtml + regionHtml + '</td>' +
+          '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
+          '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
+          '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + siteCheckHtml)) + '</td>' +
+          '</tr>';
+      }).join('');
+
+      var positionHeader = race.hasResult ? '<th class="position-cell">Pos</th>' : '';
+      var resultLine = race.hasResult
+        ? '<p class="modal-result">&#127937; Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
+        : '';
+      var formIgnoreAllLine = _currentFormFlaggedRunners.length
+        ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
+        : '';
+      // Race-number nav bar -- lets you jump to another race at this
+      // SAME meeting without closing the popup and re-clicking the grid.
+      // Races that still have an issue (not just this one) show red.
+      var raceNavHtml = _currentMeetingRaces.length > 1
+        ? '<div class="race-nav" id="raceNavBar">' + renderRaceNavButtons() + '</div>'
+        : '';
+      // Speed Map tab (8 Sep 2026, per Dinesh, a reference site + screenshot)
+      // -- only shown when this race actually has predictions (most races
+      // won't). Race Field (the existing runner table) stays the default;
+      // Speed Map is built lazily on first click, not up front, since most
+      // popup opens never look at it.
+      var hasSpeedMap = Array.isArray(race.speedMap) && race.speedMap.length > 0;
+      // "Race Card"/"Data Dump" (10 Sep 2026, per Dinesh) -- a debug/verify
+      // view of the raw upstream `racecards`/`datadumps` documents for this
+      // race, fetched lazily (see loadRawView) same as Speed Map. Always
+      // shown, unlike Speed Map, since every Thoroughbred race has a
+      // racecards document even when it has none of the other tabs' data.
+      var popupTabsHtml = '<div class="popup-tabs">' +
+          '<button type="button" class="popup-tab-btn active" id="raceFieldTabBtn" onclick="switchPopupTab(\'field\')">Race Field</button>' +
+          (hasSpeedMap ? '<button type="button" class="popup-tab-btn" id="speedMapTabBtn" onclick="switchPopupTab(\'speedmap\')">&#127943; Speed Map</button>' : '') +
+          '<button type="button" class="popup-tab-btn" id="raceCardTabBtn" onclick="switchPopupTab(\'racecard\')">Race Card</button>' +
+          '<button type="button" class="popup-tab-btn" id="dataDumpTabBtn" onclick="switchPopupTab(\'datadump\')">Data Dump</button>' +
+        '</div>';
+      content.innerHTML =
+        raceNavHtml +
+        '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
+        (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
+        '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
+          (race.timeLabel ? ' | ' + escapeHtmlClient(race.timeLabel) : '') +
+          (race.rClass ? ' | Class: ' + escapeHtmlClient(race.rClass) : '') +
+          (race.sexRestriction ? ' | ' + escapeHtmlClient(race.sexRestriction) : '') +
+          (race.rDistance ? ' | Distance: ' + escapeHtmlClient(String(race.rDistance)) + 'm' : '') +
+          (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
+          (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
+          (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +
+          (race.videoUrl ? ' | <a class="video-watch-link" href="' + escapeHtmlClient(race.videoUrl) + '" target="_blank" rel="noopener">&#127909; Watch race video</a>' : '') +
+          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
+        (race.raceComment ? '<p class="modal-race-comment">' + escapeHtmlClient(race.raceComment) + '</p>' : '') +
+        resultLine +
+        popupTabsHtml +
+        '<div id="raceFieldView">' +
+          formIgnoreAllLine +
+          '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>' +
+        (hasSpeedMap ? '<div id="speedMapView" hidden></div>' : '') +
+        '<div id="raceCardView" hidden></div>' +
+        '<div id="dataDumpView" hidden></div>';
+    }
+
+    // Switches between the popup's tabs (Race Field / Speed Map / Race Card
+    // / Data Dump), each built lazily on first switch to it rather than up
+    // front, since most popup opens only ever look at Race Field.
+    var POPUP_TABS = [
+      { key: 'field', viewId: 'raceFieldView', btnId: 'raceFieldTabBtn' },
+      { key: 'speedmap', viewId: 'speedMapView', btnId: 'speedMapTabBtn' },
+      { key: 'racecard', viewId: 'raceCardView', btnId: 'raceCardTabBtn' },
+      { key: 'datadump', viewId: 'dataDumpView', btnId: 'dataDumpTabBtn' },
+    ];
+    function switchPopupTab(tab) {
+      POPUP_TABS.forEach(function (t) {
+        var view = document.getElementById(t.viewId);
+        var btn = document.getElementById(t.btnId);
+        if (!view || !btn) return;
+        var active = t.key === tab;
+        view.hidden = !active;
+        btn.classList.toggle('active', active);
+      });
+      if (tab === 'speedmap') {
+        var speedView = document.getElementById('speedMapView');
+        if (speedView && !speedView.dataset.rendered) {
+          speedView.innerHTML = renderSpeedMapHtml(_currentRaceData);
+          speedView.dataset.rendered = '1';
+          playSpeedMapAnimation(speedView);
+        }
+      } else if (tab === 'racecard' || tab === 'datadump') {
+        loadRawView(tab);
+      }
+    }
+
+    // Docs behind the current "Race Card" view -- kept so switchRawVersion
+    // can flip between them without re-fetching.
+    var _currentRaceCardDocs = [];
+
+    // The raw `racecards` documents mix PascalCase and camelCase field names
+    // inconsistently (e.g. "RaceClass"/"Going"/"GoingDetails" alongside
+    // "prizeMoney") -- Dinesh's own reference exports of this same data use
+    // a consistent lowercase-first-letter convention throughout (11 Sep
+    // 2026), so the Race Card tab renders keys that way too. Purely a
+    // display transform -- doesn't touch what's actually stored or what
+    // Data Dump shows (that one wasn't asked for this).
+    //
+    // A first-letter lowercase alone doesn't fully match his reference for
+    // every field -- some need a specific rename beyond that (an all-caps
+    // abbreviation like "RPR" only drops to "rPR", and "IsBigRace" becomes
+    // "isBigRace", not the "bigRace" his reference uses), so those two are
+    // remapped explicitly after the generic lowercasing.
+    var RACE_CARD_FIELD_RENAMES = { isBigRace: 'bigRace', rPR: 'rpr' };
+    // "Pattern" is always null in what we've seen and isn't in his
+    // reference at all -- dropped rather than shown as dead weight.
+    var RACE_CARD_FIELDS_TO_DROP = ['pattern'];
+    function normalizeRaceCardDoc(value) {
+      if (Array.isArray(value)) return value.map(normalizeRaceCardDoc);
+      if (value && typeof value === 'object') {
+        // A formLines entry (or anything shaped like one) sometimes has
+        // "jockeyName" before "winnerName" -- his reference always has
+        // winnerName first, so move jockeyName to right after it when
+        // they're the other way around.
+        var keys = Object.keys(value);
+        // Match by the key's transformed (lowercase-first) form -- at this
+        // point in the recursion `keys` still holds the ORIGINAL casing
+        // (e.g. "JockeyName"), not the lowercased result.
+        var jKey = keys.filter(function (k) { return k.charAt(0).toLowerCase() + k.slice(1) === 'jockeyName'; })[0];
+        var wKey = keys.filter(function (k) { return k.charAt(0).toLowerCase() + k.slice(1) === 'winnerName'; })[0];
+        if (jKey && wKey && keys.indexOf(jKey) < keys.indexOf(wKey)) {
+          keys.splice(keys.indexOf(jKey), 1);
+          keys.splice(keys.indexOf(wKey) + 1, 0, jKey);
+        }
+        var result = {};
+        keys.forEach(function (key) {
+          var newKey = key.charAt(0).toLowerCase() + key.slice(1);
+          newKey = RACE_CARD_FIELD_RENAMES[newKey] || newKey;
+          if (RACE_CARD_FIELDS_TO_DROP.indexOf(newKey) !== -1) return;
+          result[newKey] = normalizeRaceCardDoc(value[key]);
+        });
+        return result;
+      }
+      return value;
+    }
+
+    // Strips the internal identity fields (_id/language/style/client) that
+    // are useful on screen (they're how you tell Version 1/2/3 apart) but
+    // don't belong in a clean downloaded race card (11 Sep 2026, per
+    // Dinesh -- his own reference files never have them).
+    var RACE_CARD_DOWNLOAD_FIELDS_TO_DROP = ['_id', 'language', 'style', 'client'];
+    function raceCardForDownload(doc) {
+      var copy = {};
+      Object.keys(doc).forEach(function (key) {
+        if (RACE_CARD_DOWNLOAD_FIELDS_TO_DROP.indexOf(key) === -1) copy[key] = doc[key];
+      });
+      return copy;
+    }
+
+    function downloadJsonFile(filename, data) {
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    var _currentRaceCardVersionIdx = 0;
+    function downloadCurrentRaceCard() {
+      var doc = _currentRaceCardDocs[_currentRaceCardVersionIdx];
+      if (!doc) return;
+      var namePrefix = (_currentRaceData.country || '').toUpperCase() + ' - ' + (_currentRaceData.meeting || '').toUpperCase() + ' - R' + _currentRaceData.rNo;
+      downloadJsonFile(namePrefix + ' - Version ' + (_currentRaceCardVersionIdx + 1) + '.json', raceCardForDownload(doc));
+    }
+
+    // Fetches and renders the raw upstream document(s) for the "Race Card"
+    // (racecards, one per Style/Client variant) / "Data Dump" (datadumps)
+    // tabs -- a debug/verify view, shown pretty-printed and as-is, no
+    // reformatting (10 Sep 2026, per Dinesh). Race Card shows one version at
+    // a time behind "Version 1"/"Version 2" sub-tabs (10 Sep 2026, per
+    // Dinesh -- stacking every variant at once was too much to scroll
+    // through), defaulting to Version 1; Data Dump has no such switcher
+    // since a race only ever has one.
+    function loadRawView(kind) {
+      var viewId = kind === 'racecard' ? 'raceCardView' : 'dataDumpView';
+      var view = document.getElementById(viewId);
+      if (!view || view.dataset.rendered) return;
+      view.innerHTML = '<p class="modal-loading">Loading...</p>';
+      var apiKind = kind === 'racecard' ? 'racecards' : 'datadump';
+      fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/raw/' + apiKind)
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function (data) {
+          var docs = data.docs || [];
+          if (!docs.length) {
+            view.innerHTML = '<p class="modal-sub">No ' + (kind === 'racecard' ? 'racecards' : 'data dump') + ' document found for this race.</p>';
+          } else if (kind === 'racecard') {
+            _currentRaceCardDocs = docs.map(normalizeRaceCardDoc);
+            // "offTime" in the source racecards document is sometimes wrong
+            // -- confirmed 11 Sep 2026 against real prod data that ~17% of
+            // racecards have it copied verbatim from offTimeUtc's clock time
+            // instead of converted to local (e.g. a Korean or Australian
+            // race showing an early-morning UTC time as if it were the
+            // local off time). This dashboard's own `_currentRaceData.
+            // timeLabel` is already the reliable, correctly-localized value
+            // (built server-side from the `races` collection's
+            // rScheduleTime, used everywhere else in this app), so it wins
+            // over whatever the racecards document says.
+            if (_currentRaceData.timeLabel) {
+              _currentRaceCardDocs.forEach(function (doc) { doc.offTime = _currentRaceData.timeLabel; });
+            }
+            var versionBtns = docs.map(function (doc, idx) {
+              return '<button type="button" class="raw-version-btn' + (idx === 0 ? ' active' : '') + '" id="raceCardVersionBtn' + idx + '" onclick="switchRawVersion(' + idx + ')">Version ' + (idx + 1) + '</button>';
+            }).join('');
+            view.innerHTML =
+              '<div class="raw-doc-heading-row">' +
+                '<h4 class="raw-doc-heading" id="raceCardHeading"></h4>' +
+                '<div class="raw-version-tabs">' +
+                  (docs.length > 1 ? versionBtns : '') +
+                  '<button type="button" class="raw-version-btn raw-download-btn" onclick="downloadCurrentRaceCard()">&#11015; Download</button>' +
+                '</div>' +
+              '</div>' +
+              '<pre class="raw-json-block" id="raceCardJson"></pre>';
+            switchRawVersion(0);
+          } else {
+            var namePrefix = (_currentRaceData.country || '').toUpperCase() + ' - ' + (_currentRaceData.meeting || '').toUpperCase() + ' - R' + _currentRaceData.rNo;
+            view.innerHTML = docs.map(function (doc, idx) {
+              var label = namePrefix + ' - Data Dump' + (docs.length > 1 ? ' ' + (idx + 1) : '');
+              return '<h4 class="raw-doc-heading">' + escapeHtmlClient(label) + '</h4>' +
+                '<pre class="raw-json-block">' + escapeHtmlClient(JSON.stringify(doc, null, 2)) + '</pre>';
+            }).join('');
+          }
+          view.dataset.rendered = '1';
+        })
+        .catch(function (err) {
+          view.innerHTML = '<p class="modal-error">Could not load: ' + escapeHtmlClient(err.message) + '</p>';
+        });
+    }
+
+    // Switches the "Race Card" tab's Version 1/2/... sub-tabs -- see
+    // loadRawView above.
+    function switchRawVersion(idx) {
+      var doc = _currentRaceCardDocs[idx];
+      if (!doc) return;
+      _currentRaceCardVersionIdx = idx;
+      var namePrefix = (_currentRaceData.country || '').toUpperCase() + ' - ' + (_currentRaceData.meeting || '').toUpperCase() + ' - R' + _currentRaceData.rNo;
+      document.getElementById('raceCardHeading').textContent = namePrefix + ' - Version ' + (idx + 1);
+      document.getElementById('raceCardJson').textContent = JSON.stringify(doc, null, 2);
+      _currentRaceCardDocs.forEach(function (_, i) {
+        var btn = document.getElementById('raceCardVersionBtn' + i);
+        if (btn) btn.classList.toggle('active', i === idx);
+      });
+    }
+
+    // Left-to-right legend order, matching the reference site's axis --
+    // paceRating (0-100, from `speedMaps.predictions[].paceRating`, aka
+    // barrierSpeedMeasure) runs the opposite way (low rating = Leader, high
+    // rating = Out the Back), so position on the track is (100 - rating).
+    var PACE_CATEGORIES = ['Out the Back', 'Backmarker', 'Off Midfield', 'Midfield', 'On Pace', 'Prominent', 'Leader'];
+
+    // Horse position on the track = early pace (100 - paceRating), NOT
+    // settlingSpeedMeasure -- most speedMaps records never got a settling
+    // value computed, but paceRating/paceCategory (derived from
+    // barrierSpeedMeasure) is populated far more consistently. Scratched
+    // runners are left out entirely (the speedMaps collection is a separate
+    // dataset that doesn't know about scratchings, so this cross-checks
+    // against the runner table's own isScratched instead of trusting
+    // speed-map data alone).
+    function renderSpeedMapHtml(race) {
+      var scratchedIds = {};
+      var silkByRunnerId = {};
+      race.runners.forEach(function (r) {
+        if (r.isScratched && r.runnerId) scratchedIds[r.runnerId] = true;
+        if (r.runnerId) silkByRunnerId[r.runnerId] = r.silkDescription;
+      });
+      var entries = race.speedMap.filter(function (p) { return !scratchedIds[p.runnerId]; });
+      if (!entries.length) return '<p class="modal-sub">No speed map data for the remaining (non-scratched) runners in this race.</p>';
+      var hasAnyData = entries.some(function (p) { return p.paceRating || (p.paceCategory && p.paceCategory !== 'Not Known'); });
+      if (!hasAnyData) return '<p class="modal-sub">No speed map data available for this race.</p>';
+      entries = entries.slice().sort(function (a, b) { return (a.runnerNumber || 0) - (b.runnerNumber || 0); });
+      var rowsHtml = entries.map(function (p) {
+        var isKnown = Boolean(p.paceCategory && p.paceCategory !== 'Not Known' && p.paceRating);
+        var pct = isKnown ? Math.max(0, Math.min(100, 100 - p.paceRating)) : 0;
+        var tooltipParts = [];
+        tooltipParts.push('Early pace: ' + (p.paceCategory || 'Not Known') + (p.paceRating != null ? ' (' + p.paceRating + ')' : ''));
+        if (p.settlingSpeedName) tooltipParts.push('Settling: ' + p.settlingSpeedName);
+        if (p.barrierSpeedRating) tooltipParts.push('Barrier speed: ' + p.barrierSpeedRating);
+        if (p.closingSpeedRating) tooltipParts.push('Closing speed: ' + p.closingSpeedRating);
+        var label = (p.runnerNumber != null ? p.runnerNumber + '. ' : '') + escapeHtmlClient(p.runnerName || '');
+        var barClass = 'speedmap-bar' + (isKnown ? '' : ' speedmap-bar-unknown');
+        var silkHtml = renderSilkSvg(silkByRunnerId[p.runnerId]);
+        // Data attributes carry the FINAL width/left -- the row renders at
+        // 0 first, then playSpeedMapAnimation (called once after the whole
+        // tab is in the DOM) flips these to trigger the CSS transition
+        // (reference site: forms.tddatastream.com, confirmed 11 Sep 2026 --
+        // its bars/icons transition over 4s on first reveal, not a repeating
+        // animation).
+        return '<div class="speedmap-row">' +
+          '<span class="speedmap-tab">' + silkHtml + '<span class="speedmap-tab-number">' + escapeHtmlClient(p.runnerNumber != null ? String(p.runnerNumber) : '-') + '</span></span>' +
+          '<div class="speedmap-track" title="' + escapeHtmlClient(tooltipParts.join(' | ')) + '">' +
+            '<div class="' + barClass + '" style="width:0%" data-final-width="' + pct.toFixed(1) + '"></div>' +
+            '<span class="speedmap-name">' + label + '</span>' +
+            '<span class="speedmap-icon" style="left:0%" data-final-left="' + pct.toFixed(1) + '">&#127943;</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      var legendHtml = '<div class="speedmap-row speedmap-legend-row">' +
+        '<span class="speedmap-tab" style="visibility:hidden">-</span>' +
+        '<div class="speedmap-legend">' +
+          PACE_CATEGORIES.map(function (c) { return '<span class="speedmap-legend-cell">' + escapeHtmlClient(c.toUpperCase()) + '</span>'; }).join('') +
+        '</div>' +
+      '</div>';
+      return rowsHtml + legendHtml;
+    }
+
+    // Flips each bar/icon from its initial 0 to its real value, so the CSS
+    // transition on .speedmap-bar/.speedmap-icon actually plays (a property
+    // set at creation time doesn't transition -- it needs to change AFTER
+    // the browser's first paint). Called once, right after the Speed Map
+    // tab's HTML is inserted into the DOM.
+    function playSpeedMapAnimation(container) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          container.querySelectorAll('.speedmap-bar[data-final-width]').forEach(function (el) {
+            el.style.width = el.dataset.finalWidth + '%';
+          });
+          container.querySelectorAll('.speedmap-icon[data-final-left]').forEach(function (el) {
+            el.style.left = el.dataset.finalLeft + '%';
+          });
+        });
+      });
+    }
+
+    // Labels for the performance-stats tiles, in display order -- keys match
+    // racecards.Runners[].PerformanceStatistics exactly (lowerCamelCase,
+    // unlike most of that document's PascalCase fields).
+    var HORSE_STAT_LABELS = [
+      ['career', 'Career'], ['winPer', 'Win %'], ['placePer', 'Place %'], ['showPer', 'Show %'],
+      ['last10Starts', 'Last 10'], ['last12Months', 'Last 12 Months'], ['season', 'Season'],
+      ['track', 'Track'], ['distance', 'Distance'], ['trackDistanceCombo', 'Track/Dist'],
+      ['wetConditions', 'Wet'], ['prizeMoney', 'Prize Money'], ['avgPrizeMoney', 'Avg Prize'], ['winRange', 'Win Range'],
+    ];
+
+    // Shows pedigree + past-race history for one runner, replacing the race
+    // table view in place (with a "Back to race" button) rather than a
+    // second nested popup -- data comes from the SAME /api/race/:id payload
+    // already loaded (server.js's racecards join), so this needs no fetch.
+    function showHorseDetail(runnerId) {
+      var content = document.getElementById('detailContent');
+      if (!_currentRaceData) return;
+      var r = _currentRaceData.runners.filter(function (x) { return x.runnerId === runnerId; })[0];
+      if (!r) return;
+      _currentHorseDetailRunner = r;
+
+      var ageSexLine = [
+        r.age ? r.age + 'yo' : '',
+        r.colour || '',
+        r.sex || '',
+      ].filter(Boolean).join(' ');
+      var pedigreeLine = [
+        r.sire ? 'Sire: ' + escapeHtmlClient(r.sire) : '',
+        r.dam ? 'Dam: ' + escapeHtmlClient(r.dam) : '',
+      ].filter(Boolean).join(' | ');
+
+      var statTiles = HORSE_STAT_LABELS
+        .filter(function (pair) { return r.performanceStatistics && r.performanceStatistics[pair[0]]; })
+        .map(function (pair) {
+          return '<div class="horse-stat-tile"><div class="horse-stat-label">' + pair[1] + '</div><div class="horse-stat-value">' +
+            escapeHtmlClient(String(r.performanceStatistics[pair[0]])) + '</div></div>';
+        }).join('');
+      var statsHtml = statTiles ? '<div class="horse-stats-grid">' + statTiles + '</div>' : '';
+
+      var pastRaces = r.pastRaces || [];
+      var pastRacesHtml = pastRaces.length
+        ? '<table class="horse-past-races"><thead><tr>' +
+            '<th>FP</th><th>Margin</th><th>Date</th><th>Track</th><th>Race</th><th>Dist</th><th>Jockey</th><th>SP</th><th>Winner/2nd</th><th></th>' +
+            '</tr></thead><tbody>' +
+            pastRaces.map(function (fl, idx) {
+              var winnerOr2nd = fl.WinnerName || fl.SecondName || '-';
+              return '<tr class="past-race-row" onclick="openPastRaceFormPage(' + idx + ')" title="Open this race in a new tab">' +
+                '<td>' + (fl.FinishPosition != null ? fl.FinishPosition : '-') + (fl.Starters ? '/' + fl.Starters : '') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.LengthsBehind || '-') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.Date || '-') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.Course || '-') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.RaceName || fl.EventClass || '-') + '</td>' +
+                '<td>' + (fl.Distance ? escapeHtmlClient(String(fl.Distance)) + 'm' : '-') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.JockeyName || '-') + '</td>' +
+                '<td>' + escapeHtmlClient(fl.StartingPrice || '-') + '</td>' +
+                '<td class="horse-past-name">' + escapeHtmlClient(winnerOr2nd) + '</td>' +
+                '<td><span class="video-icon-slot" id="video-slot-' + idx + '"></span></td>' +
+                '</tr>';
+            }).join('') +
+            '</tbody></table>'
+        : '<p class="modal-sub">No past race history available.</p>';
+
+      content.innerHTML =
+        '<button type="button" class="back-to-race-btn" onclick="renderRacePopup(_currentRaceData)">&larr; Back to race</button>' +
+        '<h2 class="horse-detail-name">' + escapeHtmlClient(r.horseName) + (r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '') + '</h2>' +
+        '<p class="modal-sub">' + [escapeHtmlClient(ageSexLine), pedigreeLine].filter(Boolean).join(' | ') + '</p>' +
+        statsHtml +
+        '<h3 class="horse-past-races-heading">Past Races</h3>' +
+        pastRacesHtml;
+
+      if (pastRaces.length) checkPastRaceVideos(pastRaces);
+    }
+
+    // Best-effort: asks the server whether a video exists for each past
+    // race (needs course+date+race-number+country to build the S3 key --
+    // race number is missing on most old FormLines entries, and country is
+    // only a guess from the horse's own region, so most rows won't get an
+    // icon even when everything else about the row is fine). Never shows a
+    // wrong video -- a guess that doesn't match just means no icon.
+    function checkPastRaceVideos(pastRaces) {
+      var candidates = pastRaces.map(function (fl, idx) {
+        return { id: idx, course: fl.Course, date: fl.Date, raceNo: fl.RaceNumber, country: _currentHorseDetailRunner.region };
+      });
+      fetch('/api/video-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidates: candidates }),
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          (data.results || []).forEach(function (result) {
+            if (!result.hasVideo) return;
+            var slot = document.getElementById('video-slot-' + result.id);
+            if (!slot) return;
+            slot.innerHTML = '<a class="video-icon-link" href="' + escapeHtmlClient(result.videoUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Watch race video">&#127909;</a>';
+          });
+        })
+        .catch(function () { /* best-effort -- silently leave icons blank */ });
+    }
+
+    // Opens a standalone page for one past race in a new tab. We only have
+    // this ONE horse's own row for that historical race (see the "Full
+    // field data" note above showHorseDetail) -- not the full field of
+    // runners, since old racecards don't record who else ran.
+    function openPastRaceFormPage(idx) {
+      var r = _currentHorseDetailRunner;
+      if (!r || !r.pastRaces) return;
+      var fl = r.pastRaces[idx];
+      if (!fl) return;
+      var win = window.open('', '_blank');
+      if (!win) return;
+      var winnerOr2nd = fl.WinnerName || fl.SecondName || '-';
+      var title = escapeHtmlClient(fl.Course || 'Race') + ' - ' + escapeHtmlClient(fl.Date || '');
+      win.document.write(
+        '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
+        '<link rel="stylesheet" href="/styles.css"></head><body class="past-race-page">' +
+        '<div class="past-race-card">' +
+        '<h1>' + escapeHtmlClient(fl.Course || 'Unknown track') + '</h1>' +
+        '<p class="modal-sub">' + escapeHtmlClient(fl.Date || '-') +
+          (fl.RaceName || fl.EventClass ? ' | ' + escapeHtmlClient(fl.RaceName || fl.EventClass) : '') +
+          (fl.Distance ? ' | ' + escapeHtmlClient(String(fl.Distance)) + 'm' : '') + '</p>' +
+        '<table class="horse-past-races"><thead><tr>' +
+          '<th>FP</th><th>Margin</th><th>Horse</th><th>Jockey</th><th>SP</th><th>Winner/2nd</th>' +
+          '</tr></thead><tbody><tr>' +
+          '<td>' + (fl.FinishPosition != null ? fl.FinishPosition : '-') + (fl.Starters ? '/' + fl.Starters : '') + '</td>' +
+          '<td>' + escapeHtmlClient(fl.LengthsBehind || '-') + '</td>' +
+          '<td class="horse-past-name">' + escapeHtmlClient(r.horseName) + '</td>' +
+          '<td>' + escapeHtmlClient(fl.JockeyName || '-') + '</td>' +
+          '<td>' + escapeHtmlClient(fl.StartingPrice || '-') + '</td>' +
+          '<td class="horse-past-name">' + escapeHtmlClient(winnerOr2nd) + '</td>' +
+          '</tr></tbody></table>' +
+        '<p class="modal-sub past-race-note">Only this runner\'s own result is available for this race -- the rest of the field isn\'t recorded in our data.</p>' +
+        '</div></body></html>'
+      );
+      win.document.close();
+    }
+
+    // After confirming a runner (or all) has no form, the grid cell behind
+    // the popup was rendered server-side before this happened, so its FL
+    // badge/outline is now stale -- this recomputes it from what's actually
+    // still flagged in the popup and patches the grid cell directly,
+    // instead of making you reopen the race or reload the whole page to
+    // see it "go back to normal".
+    function syncGridFormBadge() {
+      if (!_currentRaceId) return;
+      var remaining = document.querySelectorAll('#detailContent .form-ignore-btn:not(.form-ignore-all-btn)').length;
+      var flagged = remaining > 3; // matches raceView.js's MISSING_FORM_BORDER_THRESHOLD
+
+      var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
+      if (cell) {
+        var badge = cell.querySelector('.form-badge');
+        if (flagged) {
+          if (!badge) {
+            badge = document.createElement('sup');
+            badge.className = 'form-badge';
+            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
+          }
+          badge.textContent = 'FL' + remaining;
+          badge.title = remaining + ' runner(s) missing form lines';
+          cell.classList.add('missing-form');
+        } else {
+          if (badge) badge.remove();
+          cell.classList.remove('missing-form');
+        }
+      }
+
+      // Keep this race's dot in the race-nav bar in sync too, so it goes
+      // back to normal there without needing to reopen or reload.
+      var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
+      if (navEntry) navEntry.hasFormIssue = flagged;
+      var navBar = document.getElementById('raceNavBar');
+      if (navBar) navBar.innerHTML = renderRaceNavButtons();
     }
 
     function confirmNoFormLines(btn) {
@@ -188,16 +968,202 @@
         body: JSON.stringify({ ignored: true, horseName: horseName }),
       })
         .then(function (res) {
-          if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+          if (!res.ok) return throwWithServerError(res);
           return res.json();
         })
         .then(function () {
           var cell = btn.parentNode;
           if (cell) cell.textContent = '-';
+          syncGridFormBadge();
         })
         .catch(function (err) {
           btn.disabled = false;
           btn.textContent = '✓ Confirm no form';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // Same live-patch idea as syncGridFormBadge, for the age-issue badge --
+    // no ">3" threshold here (raceView.js flags on ANY count > 0), so
+    // "flagged" is just whether any age-ignore button is still left.
+    function syncGridAgeBadge() {
+      if (!_currentRaceId) return;
+      var remaining = document.querySelectorAll('#detailContent .age-ignore-btn').length;
+      var flagged = remaining > 0;
+
+      var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
+      if (cell) {
+        var badge = cell.querySelector('.age-issue-badge');
+        if (flagged) {
+          if (!badge) {
+            badge = document.createElement('sup');
+            badge.className = 'age-issue-badge';
+            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
+          }
+          badge.textContent = 'AGE' + remaining;
+          badge.title = remaining + ' runner(s) over age limit';
+          cell.classList.add('horse-age-issue');
+        } else {
+          if (badge) badge.remove();
+          cell.classList.remove('horse-age-issue');
+        }
+      }
+
+      // Recomputed straight from the (now updated) cell's classes, same
+      // check showRaceDetail used when it first built _currentMeetingRaces --
+      // covers every "other issue" class at once, age included.
+      var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
+      if (navEntry) navEntry.hasOtherIssue = OTHER_ISSUE_CLASSES.some(function (c) { return cell && cell.classList.contains(c); });
+      var navBar = document.getElementById('raceNavBar');
+      if (navBar) navBar.innerHTML = renderRaceNavButtons();
+    }
+
+    function confirmAgeOk(btn) {
+      var runnerId = btn.getAttribute('data-runner-id');
+      var horseName = btn.getAttribute('data-horse-name');
+      if (!runnerId) return;
+      if (!window.confirm('Confirm you have checked "' + horseName + '"\'s age and it is not an issue, then click OK to stop flagging it here.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/runner/' + encodeURIComponent(runnerId) + '/age-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, horseName: horseName }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          var cell = btn.parentNode;
+          if (cell) cell.textContent = '-';
+          syncGridAgeBadge();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = '✓ Age checked, no issue';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // Duplicate jockey has no dedicated grid cell outline (only the "D#"
+    // badge -- see raceView.js's renderMeetingsTable), so this only needs
+    // to update/remove that badge, unlike syncGridAgeBadge/FormBadge.
+    function syncGridDuplicateJockeyBadge() {
+      if (!_currentRaceId) return;
+      var remainingJockeys = {};
+      document.querySelectorAll('#detailContent .dup-jockey-ignore-btn').forEach(function (b) {
+        remainingJockeys[b.getAttribute('data-jockey')] = true;
+      });
+      var remaining = Object.keys(remainingJockeys).length;
+
+      var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
+      if (cell) {
+        var badge = cell.querySelector('.dup-badge');
+        if (remaining > 0) {
+          if (!badge) {
+            badge = document.createElement('sup');
+            badge.className = 'dup-badge';
+            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
+          }
+          badge.textContent = 'D' + remaining;
+          badge.title = remaining + ' jockey(s) duplicated across runners';
+        } else if (badge) {
+          badge.remove();
+        }
+      }
+    }
+
+    // One jockey-name confirm can affect MULTIPLE rows at once -- every
+    // runner in this race sharing that jockey, not just the row clicked
+    // (see dupJockeyIgnoreKey in server.js) -- so this clears all of them.
+    function confirmDuplicateJockeyOk(btn) {
+      var jockey = btn.getAttribute('data-jockey');
+      if (!jockey || !_currentRaceId) return;
+      if (!window.confirm('Confirm you have checked that "' + jockey + '" riding multiple runners in this race is correct, then click OK to stop flagging it here.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/jockey-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, jockey: jockey }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          document.querySelectorAll('#detailContent .dup-jockey-ignore-btn').forEach(function (b) {
+            if (b.getAttribute('data-jockey') === jockey) {
+              var cell = b.parentNode;
+              if (cell) cell.textContent = '-';
+            }
+          });
+          syncGridDuplicateJockeyBadge();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = '✓ Checked, no issue';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // Missing jockey DOES have its own grid cell outline (unlike duplicate
+    // jockey, which is badge-only) -- MISSING_JOCKEY_BORDER_THRESHOLD is 0,
+    // so "flagged" and "badge shown" are the same condition here.
+    function syncGridMissingJockeyBadge() {
+      if (!_currentRaceId) return;
+      var remaining = document.querySelectorAll('#detailContent .missing-jockey-ignore-btn').length;
+      var flagged = remaining > 0;
+
+      var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
+      if (cell) {
+        var badge = cell.querySelector('.mj-badge');
+        if (flagged) {
+          if (!badge) {
+            badge = document.createElement('sup');
+            cell.insertBefore(badge, cell.querySelector('.dup-badge, .tab-badge, .trainer-badge, .form-badge, .age-issue-badge, .video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
+          }
+          badge.className = 'mj-badge mj-badge-alert';
+          badge.textContent = 'M' + remaining;
+          badge.title = remaining + ' runner(s) missing a jockey';
+          cell.classList.add('missing-jockeys');
+        } else {
+          if (badge) badge.remove();
+          cell.classList.remove('missing-jockeys');
+        }
+      }
+
+      var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
+      if (navEntry) navEntry.hasOtherIssue = OTHER_ISSUE_CLASSES.some(function (c) { return cell && cell.classList.contains(c); });
+      var navBar = document.getElementById('raceNavBar');
+      if (navBar) navBar.innerHTML = renderRaceNavButtons();
+    }
+
+    function confirmMissingJockeyOk(btn) {
+      var runnerId = btn.getAttribute('data-runner-id');
+      var horseName = btn.getAttribute('data-horse-name');
+      if (!runnerId || !_currentRaceId) return;
+      if (!window.confirm('Confirm you have checked "' + horseName + '"\'s jockey against the real source, then click OK to stop flagging it here.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/runner/' + encodeURIComponent(runnerId) + '/missing-jockey-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, horseName: horseName }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          var cell = btn.parentNode;
+          if (cell) cell.textContent = '-';
+          syncGridMissingJockeyBadge();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = '✓ Checked, no issue';
           window.alert('Could not save: ' + err.message);
         });
     }
@@ -225,6 +1191,7 @@
           });
           var line = btn.closest('.form-ignore-all-line');
           if (line) line.remove();
+          syncGridFormBadge();
         })
         .catch(function (err) {
           btn.disabled = false;
@@ -251,7 +1218,26 @@
       for (var i = 0; i < openMenus.length; i++) {
         if (!openMenus[i].contains(e.target)) openMenus[i].removeAttribute('open');
       }
+      // Same outside-click-to-close idea for the date picker.
+      var pickerWrap = document.getElementById('datePickerWrap');
+      if (pickerWrap && !pickerWrap.contains(e.target)) {
+        document.getElementById('datePickerPanel').classList.remove('open');
+      }
     });
+
+    // Rewrites the 4 meetings-list download links' `discipline` query param
+    // from the <select> next to them -- client-side only, no page reload,
+    // since data-base already carries the date/includeTrials that were
+    // rendered server-side (renderHtml's meetingsListLinksHtml).
+    function updateMeetingsListLinks() {
+      var disc = document.getElementById('meetingsListDiscipline').value;
+      ['meetingsListCsv', 'meetingsListXlsx', 'meetingsListJson', 'meetingsListPdf'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var base = el.getAttribute('data-base');
+        el.setAttribute('href', base + (disc ? '&discipline=' + disc : ''));
+      });
+    }
 
     function shiftDate(deltaDays) {
       var input = document.getElementById('dateInput');
@@ -263,6 +1249,77 @@
       var day = String(d.getUTCDate()).padStart(2, '0');
       input.value = y + '-' + m + '-' + day;
       input.form.submit();
+    }
+
+    // Custom date picker (7 Sep 2026, per Dinesh) -- replaces the plain
+    // native <input type="date"> with a dropdown: the shortcut row is
+    // rendered server-side (renderHtml's datePickerHtml, so "active"
+    // matches without a flash of the wrong state), the month calendar
+    // grid is built here so paging months doesn't need a page reload.
+    var _calendarViewYear = null;
+    var _calendarViewMonth = null; // 0-indexed
+    var DATE_PICKER_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    var DATE_PICKER_DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+    function formatDateStrUTC(y, m0, d) {
+      return y + '-' + String(m0 + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    }
+
+    function toggleDatePicker() {
+      var panel = document.getElementById('datePickerPanel');
+      if (panel.classList.contains('open')) {
+        panel.classList.remove('open');
+        return;
+      }
+      var parts = document.getElementById('dateInput').value.split('-').map(Number);
+      _calendarViewYear = parts[0];
+      _calendarViewMonth = parts[1] - 1;
+      renderDatePickerCalendar();
+      panel.classList.add('open');
+    }
+
+    function shiftCalendarMonth(delta) {
+      _calendarViewMonth += delta;
+      if (_calendarViewMonth < 0) { _calendarViewMonth = 11; _calendarViewYear--; }
+      else if (_calendarViewMonth > 11) { _calendarViewMonth = 0; _calendarViewYear++; }
+      renderDatePickerCalendar();
+    }
+
+    function renderDatePickerCalendar() {
+      document.getElementById('datePickerMonthLabel').textContent = DATE_PICKER_MONTH_NAMES[_calendarViewMonth] + ' ' + _calendarViewYear;
+
+      var selected = document.getElementById('dateInput').value;
+      var today = document.getElementById('datePickerWrap').getAttribute('data-today');
+      var firstOfMonth = new Date(Date.UTC(_calendarViewYear, _calendarViewMonth, 1));
+      var startWeekday = firstOfMonth.getUTCDay();
+      var daysInMonth = new Date(Date.UTC(_calendarViewYear, _calendarViewMonth + 1, 0)).getUTCDate();
+      var daysInPrevMonth = new Date(Date.UTC(_calendarViewYear, _calendarViewMonth, 0)).getUTCDate();
+
+      var cells = [];
+      for (var i = startWeekday - 1; i >= 0; i--) cells.push({ day: daysInPrevMonth - i, otherMonth: true });
+      for (var d = 1; d <= daysInMonth; d++) cells.push({ day: d, otherMonth: false, dateStr: formatDateStrUTC(_calendarViewYear, _calendarViewMonth, d) });
+      var trailing = (7 - (cells.length % 7)) % 7;
+      for (var t = 1; t <= trailing; t++) cells.push({ day: t, otherMonth: true });
+
+      var html = DATE_PICKER_DOW.map(function (dow) { return '<div class="date-picker-dow">' + dow + '</div>'; }).join('');
+      cells.forEach(function (c) {
+        var cls = 'date-picker-day';
+        var onclick = '';
+        if (c.otherMonth) {
+          cls += ' other-month';
+        } else {
+          if (c.dateStr === today) cls += ' today';
+          if (c.dateStr === selected) cls += ' selected';
+          onclick = ' onclick="selectPickerDate(\'' + c.dateStr + '\')"';
+        }
+        html += '<div class="' + cls + '"' + onclick + '>' + c.day + '</div>';
+      });
+      document.getElementById('datePickerCalGrid').innerHTML = html;
+    }
+
+    function selectPickerDate(dateStr) {
+      document.getElementById('dateInput').value = dateStr;
+      document.getElementById('dateInput').form.submit();
     }
 
     function switchDiscipline(disc) {
@@ -402,6 +1459,10 @@
           input.value = name;
           dropdown.classList.remove('open');
           applyFilters();
+          // applyFilters() calls updateMeetingSuggestions() -> renderSuggestionDropdown()
+          // at the end, which re-opens the dropdown since the box still has text
+          // that matches (the name we just picked) -- close it again after.
+          dropdown.classList.remove('open');
         };
         dropdown.appendChild(item);
       });
@@ -443,6 +1504,18 @@
         });
         var savedDisc = localStorage.getItem('rdd_discipline');
         if (savedDisc && document.getElementById('section-' + savedDisc)) switchDiscipline(savedDisc);
+      } catch (e) { /* ignore */ }
+    }
+
+    // "Jump to today" should land on the plain, unfiltered today page --
+    // otherwise the saved filters (Country/Meetings/Issue/Status/Search)
+    // get restored on load same as any other reload, and it looks like the
+    // filter followed you there instead of jumping to a fresh page.
+    function clearSavedFilters() {
+      try {
+        Object.keys(FILTER_STORAGE_KEYS).forEach(function (id) {
+          localStorage.removeItem(FILTER_STORAGE_KEYS[id]);
+        });
       } catch (e) { /* ignore */ }
     }
 
