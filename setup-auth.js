@@ -8,11 +8,11 @@
  *   node setup-auth.js
  *
  * It writes { username, passwordHash, sessionSecret } to AUTH_CONFIG_PATH
- * (default C:\Users\Dinesh\projects-config\auth.json -- same folder as
- * db.json, outside the project folder so it can never be accidentally
- * committed to git). The password itself is never written anywhere -- only
- * a securely-hashed (bcrypt) version, and this script never sends the
- * password anywhere over the network or through chat/AI.
+ * (default C:\Thilina\Dinesh project\project - 1\auth.json -- same folder
+ * as db.json on the production machine, per Dinesh 9 Sep 2026). The
+ * password itself is never written anywhere -- only a securely-hashed
+ * (bcrypt) version, and this script never sends the password anywhere over
+ * the network or through chat/AI.
  *
  * After running this, restart the dashboard server (close and re-run
  * run.bat, or restart `node server.js`) for the new login to take effect.
@@ -24,7 +24,7 @@ const readline = require('readline');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
-const AUTH_CONFIG_PATH = process.env.AUTH_CONFIG_PATH || 'C:\\Users\\Dinesh\\projects-config\\auth.json';
+const AUTH_CONFIG_PATH = process.env.AUTH_CONFIG_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\auth.json';
 
 function ask(question) {
   return new Promise((resolve) => {

@@ -16,7 +16,19 @@ const fs = require('fs');
 const path = require('path');
 
 const MISSING_JOCKEY_BORDER_THRESHOLD = 0; // strictly more than this -> red border (any missing jockey at all triggers it)
+// 4 Sep 2026, per Dinesh -- a race with just 1-3 runners missing form lines
+// is treated as normal noise (often genuine first-starters), not worth
+// flagging; only 4+ missing on the same race is treated as a real problem.
+// Deliberately much higher than MISSING_JOCKEY_BORDER_THRESHOLD (0) since
+// jockey/trainer data is reliably populated so ANY gap is suspicious, while
+// "no form yet" is routine for individual runners.
+const MISSING_FORM_BORDER_THRESHOLD = 3; // strictly more than this -> flagged
 const GAP_THRESHOLD_MIN = 15; // race scheduled less than this many minutes after the previous race at the same meeting -> highlighted
+// 4 Sep 2026, per Dinesh -- flags an unusually old horse as a likely data
+// error. Thoroughbred only: most TB careers end by 8-10, but Harness horses
+// routinely race well into their teens, so this threshold would be wrong
+// (mass false positives) applied there.
+const MAX_EXPECTED_HORSE_AGE = 10; // strictly more than this -> flagged
 
 const DISCIPLINE_ORDER = ['T', 'H', 'G'];
 const DISCIPLINE_LABELS = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
@@ -87,14 +99,32 @@ function isBlank(value) {
 // Greyhound (G) -- dogs don't have jockeys, so the field is always blank
 // there and flagging it would just mark every greyhound race. Returns null
 // (not applicable) for G.
+// `missingJockeyIgnored` is attached server-side (server.js, same
+// external-config-file pattern as duplicateJockeyIgnored) -- added 7 Sep
+// 2026 per Dinesh: "Missing jockey / Duplicate jockey Idukku checked with
+// Site button podunga, pottadu adu issue ignore aaganu". Keyed by raceId +
+// runnerId (NOT runnerId alone, unlike age/form-lines) -- whether a jockey
+// is assigned is a fact about THIS race's entry, not a durable property of
+// the horse, so confirming it here must not silently suppress a genuinely
+// different missing-jockey problem for the same horse in a future race.
 function countMissingJockeys(runners, discipline) {
   if (discipline === 'G') return null;
   if (!Array.isArray(runners)) return 0;
-  return runners.filter((r) => !r.isScratched && isBlank(r.jockey)).length;
+  return runners.filter((r) => !r.isScratched && isBlank(r.jockey) && !r.missingJockeyIgnored).length;
 }
 
 // Map of jockey (lowercased, trimmed) -> count of non-scratched runners
 // carrying that jockey in this race, excluding blanks and known placeholders.
+// `duplicateJockeyIgnored` is attached server-side (server.js, same
+// external-config-file "manual override" pattern as ageIssueIgnored/
+// formLineIgnores) -- added 7 Sep 2026, per Dinesh: "Duplicate jockey
+// checked with site podunga adau click panna checked podunga" (add a
+// "checked with the real source" tick that clears the flag). Keyed by
+// raceId + jockey name rather than runnerId, since being a duplicate is a
+// property of the JOCKEY NAME shared across runners IN THIS RACE, not of
+// any one runner -- so every runner sharing that name in that race carries
+// the same ignored flag together, and excluding them from this tally
+// clears the whole group at once, not just the runner that was clicked.
 function jockeyCounts(runners) {
   const counts = new Map();
   if (!Array.isArray(runners)) return counts;
@@ -102,6 +132,7 @@ function jockeyCounts(runners) {
     if (r.isScratched) continue;
     if (isBlank(r.jockey)) continue;
     if (isPlaceholderJockey(r.jockey)) continue;
+    if (r.duplicateJockeyIgnored) continue;
     const key = String(r.jockey).trim().toLowerCase();
     counts.set(key, (counts.get(key) || 0) + 1);
   }
@@ -250,15 +281,35 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   const tabIssue = tabIssueForRunner(runner, tabCountsMap || new Map());
   if (tabIssue) parts.push(tabIssue);
   if (discipline !== 'G') {
-    if (isBlank(runner.jockey)) parts.push('Missing jockey');
-    else if (!isPlaceholderJockey(runner.jockey)) {
+    if (isBlank(runner.jockey)) {
+      if (!runner.missingJockeyIgnored) parts.push('Missing jockey');
+    } else if (!isPlaceholderJockey(runner.jockey)) {
       const key = String(runner.jockey).trim().toLowerCase();
       if ((jockeyCountsMap.get(key) || 0) > 1) parts.push('Duplicate jockey (assigned to more than one runner in this race)');
     }
   }
   if (isBlank(runner.trainer)) parts.push('Missing trainer');
   if (discipline === 'T' && runner.hasFormLines === false) parts.push(formLinesIssueLabel(runner.formLinesByClient));
+  if (discipline === 'T' && isAgeIssue(runner)) parts.push(`Horse age issue (${runner.age} years, over ${MAX_EXPECTED_HORSE_AGE})`);
   return parts.join(' | ');
+}
+
+// `ageIssueIgnored` is attached server-side (server.js, from the same
+// external-config-file "manual override" store as formLineIgnores) --
+// added 7 Sep 2026, per Dinesh: "Age issue vanda ada highlight pannunga...
+// Age checked no issue anda madhiri check mark poda podunga" (highlight the
+// age flag, but let someone manually confirm "checked, no issue" to clear
+// it, same pattern as the existing "Confirm no form" override).
+function isAgeIssue(runner) {
+  if (runner.ageIssueIgnored) return false;
+  const n = Number(runner.age);
+  return Number.isFinite(n) && n > MAX_EXPECTED_HORSE_AGE;
+}
+
+function countAgeIssues(runners, discipline) {
+  if (discipline !== 'T') return null;
+  if (!Array.isArray(runners)) return 0;
+  return runners.filter((r) => !r.isScratched && isAgeIssue(r)).length;
 }
 
 // The Default (no-client) racecard feed can be missing form lines for a
@@ -278,8 +329,15 @@ function formLinesIssueLabel(formLinesByClient) {
  * @param {Array<{_id, rCourseDisplayName, rCountry, rDiscipline, rNo, rClass, rPrizeMoney, rScheduleTime, runners}>} docs
  * @returns {{ byDiscipline: { T: {meetings, maxRaceNo}, H: {...}, G: {...} } }}
  */
-function buildSchedule(docs) {
+function buildSchedule(docs, dateStr) {
   const groups = new Map();
+  // 4 Sep 2026, per Dinesh -- videos only ever get uploaded for TODAY's
+  // races (the pipeline runs same-day), so flagging a future date's races
+  // as "missing" would just be permanent noise for every meeting that
+  // hasn't happened yet. Restricted to today regardless of whether the race
+  // has resulted -- a race can pick up its video before the DB shows a
+  // result, so "hasn't resulted yet" alone isn't a safe reason to skip it.
+  const isToday = dateStr === todayStr();
 
   for (const doc of docs) {
     const key = `${doc.rCourseDisplayName}|${doc.rCountry}|${doc.rDiscipline}`;
@@ -307,17 +365,22 @@ function buildSchedule(docs) {
       tabIssueCount: countTabNoIssues(doc.runners),
       missingTrainerCount: countMissingTrainers(doc.runners),
       missingFormCount: countMissingFormLines(doc.runners, doc.rDiscipline),
+      ageIssueCount: countAgeIssues(doc.runners, doc.rDiscipline),
+      // Race-level (not per-runner), attached server-side the same way as
+      // hasVideo -- `doc.hasRaceComment` is null for non-Thoroughbred races
+      // (see attachFormLineStatus), so this stays false for them too rather
+      // than flagging a check that was never actually run.
+      missingRaceComment: doc.hasRaceComment === false,
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
       isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
       // `hasVideo` is attached server-side (server.js's attachVideoStatus) for
       // every Thoroughbred race in AUS/GB/SAF/IRE, checked or not yet run --
       // undefined means "not checked at all" (different discipline/country).
-      // `videoUrl` (the icon/link) shows for ANY race with a video, upcoming
-      // or not, but the "missing" WARNING only applies once the race has
-      // actually resulted -- an upcoming race with no video yet is normal,
-      // not a problem to flag.
-      missingVideo: doc.hasVideo === false && Boolean(doc.resultString),
+      // `videoUrl` (the icon/link) shows for ANY race with a video, any date,
+      // any status. The "missing" WARNING is restricted to today (see
+      // `isToday` above), resulted or not.
+      missingVideo: doc.hasVideo === false && isToday,
       videoUrl: doc.videoUrl || null,
     });
   }
@@ -340,7 +403,7 @@ function buildSchedule(docs) {
     for (const rNo of raceNos) {
       const {
         id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingFormCount, status, resultString, isTrial, missingVideo, videoUrl,
+        missingTrainerCount, missingFormCount, ageIssueCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -375,6 +438,10 @@ function buildSchedule(docs) {
             tabIssueCount,
             missingTrainerCount,
             missingFormCount,
+            missingFormFlagged: missingFormCount > MISSING_FORM_BORDER_THRESHOLD,
+            ageIssueCount,
+            ageIssueFlagged: ageIssueCount > 0,
+            missingRaceComment,
             status,
             resultString,
             isTrial,
@@ -398,7 +465,9 @@ function buildSchedule(docs) {
     let hasMissingTab = false;
     let hasMissingTrainer = false;
     let hasMissingForm = false;
+    let hasAgeIssue = false;
     let hasMissingVideo = false;
+    let hasMissingRaceComment = false;
     let hasScheduleIssue = false;
     let hasAbandoned = false;
     for (const rNo of raceNos) {
@@ -408,16 +477,18 @@ function buildSchedule(docs) {
       if (race.duplicateJockeyCount > 0) hasDuplicateJockey = true;
       if (race.tabIssueCount > 0) hasMissingTab = true;
       if (race.missingTrainerCount > 0) hasMissingTrainer = true;
-      if (race.missingFormCount > 0) hasMissingForm = true;
+      if (race.missingFormFlagged) hasMissingForm = true;
+      if (race.ageIssueFlagged) hasAgeIssue = true;
       if (race.missingVideo) hasMissingVideo = true;
+      if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasMissingVideo || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingVideo || hasMissingRaceComment || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasMissingVideo, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingVideo, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
       races,
     });
   }
@@ -440,6 +511,111 @@ function buildSchedule(docs) {
   return { byDiscipline, countries };
 }
 
+// Our DB uses inconsistent country strings for the same country across
+// records (confirmed 9 Sep 2026 via a distinct-values query) -- normalize
+// them all to one canonical code before routing to a site below.
+const COUNTRY_ALIASES = {
+  GBR: 'GB', 'UNITED KINGDOM': 'GB',
+  NZL: 'NZ',
+  'KOREA, REPUBLIC OF': 'KOR',
+  JAPAN: 'JPN',
+  ARE: 'UAE',
+  SA: 'SAU',
+  BAH: 'BHR',
+  MAS: 'MAL', MYS: 'MAL',
+  IRL: 'IRE',
+  ZAF: 'SAF',
+};
+
+function canonicalCountry(rCountry) {
+  if (!rCountry) return null;
+  const upper = String(rCountry).toUpperCase().trim();
+  return COUNTRY_ALIASES[upper] || upper;
+}
+
+// racing.hkjc.com keys its racecard by course code, not name.
+function hkCourseCode(course) {
+  const c = String(course || '').toUpperCase();
+  if (c.includes('HAPPY VALLEY')) return 'HV';
+  if (c.includes('SHA TIN')) return 'ST';
+  return null;
+}
+
+// "Site for check" link, extended to every country this dashboard sees (9
+// Sep 2026, per Dinesh -- a list of official racing-authority sites, one
+// per country/discipline). Only a handful of these key their race pages by
+// date + race number alone (UAE, Saudi Arabia, Bahrain, Hong Kong) -- for
+// those a deep link straight to the race is built below. Every other site
+// (Australia's own Racing Australia included, as of 9 Sep 2026) needs an
+// internal ID/hash/session this dashboard has no way to generate, OR
+// (Racing Australia specifically) simply doesn't have the meeting's form
+// published even when the URL itself is right -- confirmed 8-9 Sep 2026
+// against two different real meetings (Belmont Park and Randwick, both
+// with the correct short course name) that still showed "Form information
+// for this meeting is not currently available". Rather than keep chasing
+// one-off naming/availability fixes, this links to the site's general
+// racing/meetings page instead of guessing a specific race URL and landing
+// on a dead link (Dinesh's call, 9 Sep 2026: a working general link beats
+// a guessed-wrong -- or simply unpublished -- deep one).
+const GENERAL_CHECK_SITE_BY_COUNTRY = {
+  AUS_T: 'https://www.racingaustralia.horse/home.aspx',
+  FR_H: 'https://www.letrot.com/',
+  FR: 'https://www.france-galop.com/en/racing',
+  NZ: 'https://loveracing.nz/',
+  ITY: 'https://ippica.snai.it/',
+  KOR: 'https://race.kra.co.kr/globalEn/raceCardsDetailSeoul.do',
+  MAL: 'https://www.selangorturfclub.com/horse-racing/local-racing/race-card/',
+  GB: 'https://www.racingpost.com/racecards/',
+  GER: 'https://www.deutscher-galopp.de/',
+  TUR: 'https://www.tjk.org/EN/YarisSever/Info/Page/GunlukYarisProgrami',
+  ARG: 'https://www.studbook.org.ar/reuniones',
+  IRE: 'https://www.racingpost.com/racecards/',
+  USA: 'https://www.equibase.com/static/entry/index.html',
+};
+
+function buildExternalCheckUrl(doc) {
+  const country = canonicalCountry(doc.rCountry);
+  if (!country) return null;
+  const dateStr = doc.rDate;
+  const raceNo = doc.rNo;
+  const course = doc.rCourseDisplayName || doc.rCourse || '';
+
+  if (country === 'AUS') {
+    if (doc.rDiscipline === 'H') return 'https://www.harness.org.au/racing/';
+    if (doc.rDiscipline === 'G') return 'https://www.thedogs.com.au/';
+    return GENERAL_CHECK_SITE_BY_COUNTRY.AUS_T;
+  }
+  // gallop.co.za keys its racecard purely by date + race number, no course
+  // (confirmed 9 Sep 2026, per Dinesh's example URL) -- South Africa mostly
+  // runs one meeting/day, so this is safe most days, but on the rarer
+  // multi-meeting day (confirmed via our own data -- e.g. Fairview +
+  // Greyville both racing 4 Sep 2026) race N could exist at either meeting,
+  // and this link may land on the wrong one. Accepted trade-off, same as
+  // the deep links below.
+  if (country === 'SAF' && dateStr && raceNo) {
+    return `https://www.gallop.co.za/#meeting#${dateStr.replace(/-/g, '')}#${raceNo}`;
+  }
+  if (country === 'UAE' && dateStr && raceNo) {
+    return `https://emiratesracing.com/racecard/${dateStr}/${raceNo}/declarations`;
+  }
+  if (country === 'SAU' && dateStr && raceNo) {
+    return `https://jcsa.sa/en/races/${dateStr.replace(/-/g, '')}/${raceNo}/declared`;
+  }
+  if (country === 'BHR' && dateStr && raceNo) {
+    return `https://bahrainturfclub.com/racecard/${dateStr}/${raceNo}/results`;
+  }
+  if (country === 'HK' && dateStr && raceNo) {
+    const code = hkCourseCode(course);
+    return code
+      ? `https://racing.hkjc.com/en-us/local/information/racecard?racedate=${dateStr.replace(/-/g, '/')}&Racecourse=${code}&RaceNo=${raceNo}`
+      : 'https://racing.hkjc.com/';
+  }
+  if (country === 'FR') {
+    return GENERAL_CHECK_SITE_BY_COUNTRY[doc.rDiscipline === 'H' ? 'FR_H' : 'FR'];
+  }
+  return GENERAL_CHECK_SITE_BY_COUNTRY[country] || null;
+}
+
 // Builds the click-through detail payload for one race document (full runners).
 // When the race has finished (resultString and/or per-runner finish position
 // "fp" present), runners are sorted by finishing position instead of tab
@@ -452,6 +628,11 @@ function buildRaceDetail(doc) {
   const runners = (doc.runners || [])
     .slice()
     .sort((a, b) => {
+      // Scratched runners always sink to the bottom of the list (9 Sep 2026,
+      // per Dinesh), regardless of finish position or tab number.
+      const aScr = Boolean(a.isScratched);
+      const bScr = Boolean(b.isScratched);
+      if (aScr !== bScr) return aScr ? 1 : -1;
       if (hasResult) {
         const fa = a.fp != null ? a.fp : Infinity;
         const fb = b.fp != null ? b.fp : Infinity;
@@ -466,6 +647,24 @@ function buildRaceDetail(doc) {
       horseName: r.horseName || '',
       jockey: r.jockey || '',
       trainer: r.trainer || '',
+      age: r.age != null ? r.age : null,
+      sex: r.sex || null,
+      // region/sire/dam/colour/pastRaces/performanceStatistics come from the
+      // racecards join (server.js's attachFormLineStatus) -- Thoroughbred
+      // only, so these are null for Harness/Greyhound runners.
+      region: r.region || null,
+      sire: r.sire || null,
+      dam: r.dam || null,
+      colour: r.colour || null,
+      // Racing silk description (9 Sep 2026, per Dinesh) -- e.g. "Purple,
+      // White Star, White And Purple Stars Sleeves And Cap". Native field on
+      // the runner subdocument itself (no join needed). The DB also has a
+      // matching `silkURL` image, but that S3 bucket returns AccessDenied
+      // for anonymous reads, so the client renders an SVG silk from this
+      // text instead of trying to load an image.
+      silkDescription: r.colors || null,
+      pastRaces: Array.isArray(r.pastRaces) ? r.pastRaces : [],
+      performanceStatistics: r.performanceStatistics || null,
       isScratched: Boolean(r.isScratched),
       issue: issueForRunner(r, doc.rDiscipline, counts, tabCounts),
     }));
@@ -479,13 +678,47 @@ function buildRaceDetail(doc) {
     disciplineLabel: disciplineLabel(doc.rDiscipline),
     rNo: doc.rNo,
     rClass: doc.rClass || '',
+    rDistance: doc.rDistance || '',
     rPrizeMoney: doc.rPrizeMoney || '',
     timeLabel: clock ? clock.label : null,
     resultString: doc.resultString || null,
     hasResult,
     isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
-    missingVideo: doc.hasVideo === false,
+    // Matches buildSchedule's rule: the "missing" warning only applies to
+    // today's races (videos only ever get uploaded same-day).
+    missingVideo: doc.hasVideo === false && doc.rDate === todayStr(),
     videoUrl: doc.videoUrl || null,
+    // Race-level preview commentary from the racecards join (Thoroughbred
+    // only -- see server.js's attachFormLineStatus). `hasRaceComment` is
+    // null (not false) for non-T races, so this stays false for them too.
+    raceComment: doc.raceComment || null,
+    missingRaceComment: doc.hasRaceComment === false,
+    // Sex restriction (e.g. "Fillies", "Colts & Geldings") -- same
+    // racecards join as raceComment above, same "Thoroughbred only" scope.
+    sexRestriction: doc.sexRestriction || null,
+    // "Site for check" link -- see buildExternalCheckUrl above.
+    externalCheckUrl: buildExternalCheckUrl(doc),
+    // Speed map (8 Sep 2026, per Dinesh -- a screenshot + a reference site,
+    // https://forms.tddatastream.com/race-card/...). One prediction per
+    // runner from the `speedMaps` collection (server.js) -- kept as its own
+    // array rather than merged onto `runners` since it's shown as a
+    // separate "Speed Map" tab in the popup, not part of the main table.
+    speedMap: Array.isArray(doc.speedMapPredictions)
+      ? doc.speedMapPredictions.map((p) => ({
+          runnerId: p.runnerId || null,
+          runnerNumber: p.runnerNumber != null ? p.runnerNumber : null,
+          runnerName: p.runnerName || '',
+          barrierSpeedMeasure: p.barrierSpeedMeasure != null ? p.barrierSpeedMeasure : null,
+          barrierSpeedRating: p.barrierSpeedRating || null,
+          settlingSpeedMeasure: p.settlingSpeedMeasure != null ? p.settlingSpeedMeasure : null,
+          settlingSpeedName: p.settlingSpeedName || null,
+          closingSpeedMeasure: p.closingSpeedMeasure != null ? p.closingSpeedMeasure : null,
+          closingSpeedRating: p.closingSpeedRating || null,
+          paceRating: p.paceRating != null ? p.paceRating : null,
+          paceCode: p.paceCode || null,
+          paceCategory: p.paceCategory || null,
+        }))
+      : null,
     runners,
   };
 }
@@ -548,6 +781,7 @@ function buildIssuesReport(docs, dateStr) {
     const tabIssueCount = countTabNoIssues(doc.runners);
     const missingTrainerCount = countMissingTrainers(doc.runners);
     const missingFormCount = countMissingFormLines(doc.runners, doc.rDiscipline) || 0;
+    const ageIssueCount = countAgeIssues(doc.runners, doc.rDiscipline) || 0;
     const isDuplicateRaceNo = (agg.raceNoCounts.get(doc.rNo) || 0) > 1;
     const isPlaceholderTime = Boolean(clock) && clock.label === '00:00';
     const isDuplicateTime = Boolean(clock) && !isPlaceholderTime && (agg.labelCounts.get(clock.label) || 0) > 1;
@@ -560,7 +794,8 @@ function buildIssuesReport(docs, dateStr) {
     if (duplicateJockeyGroups > 0) issues.push(`Duplicate jockey x${duplicateJockeyGroups}`);
     if (tabIssueCount > 0) issues.push(`Tab number issue x${tabIssueCount} (missing/zero/duplicate)`);
     if (missingTrainerCount > 0) issues.push(`Missing trainer x${missingTrainerCount}`);
-    if (missingFormCount > 0) issues.push(`Missing form lines x${missingFormCount}`);
+    if (missingFormCount > MISSING_FORM_BORDER_THRESHOLD) issues.push(`Missing form lines x${missingFormCount}`);
+    if (ageIssueCount > 0) issues.push(`Horse age issue x${ageIssueCount} (over ${MAX_EXPECTED_HORSE_AGE})`);
     if (isPlaceholderTime) issues.push('Placeholder scheduled time (00:00)');
     if (isDuplicateTime) issues.push(`Duplicate scheduled time (${clock.label}) with another race at this meeting`);
     if (deriveRaceStatus(doc) === 'abandoned') issues.push('Race abandoned');
@@ -614,6 +849,55 @@ function issuesReportToCsv(rows) {
   const lines = [headers.map(csvEscape).join(',')];
   for (const r of rows) {
     lines.push([r.date, r.country, r.discipline, r.meeting, r.rNo, r.time, r.issues].map(csvEscape).join(','));
+  }
+  return lines.join('\r\n');
+}
+
+// Meetings list download -- added 7 Sep 2026 per Dinesh: "Anda datela irukka
+// ella meetings list a download pandradukku option wenu... Select pannanu
+// Thoroughbred ha Harness ha and Greyhound hanu or All metings ha nu" (a
+// downloadable list of every meeting on a date, with a discipline filter --
+// one discipline, or all). One row per MEETING (not per race or runner),
+// reusing buildSchedule()'s own grouping so the export always matches what
+// the grid would show for the same date/discipline. `disciplineFilter` is
+// one of DISCIPLINE_ORDER, or falsy for every discipline.
+function buildMeetingsListReport(docs, dateStr, disciplineFilter) {
+  const schedule = buildSchedule(docs, dateStr);
+  const disciplines = DISCIPLINE_ORDER.includes(disciplineFilter) ? [disciplineFilter] : DISCIPLINE_ORDER;
+
+  const rows = [];
+  for (const disc of disciplines) {
+    for (const m of schedule.byDiscipline[disc].meetings) {
+      const raceNos = Object.keys(m.races).map(Number).sort((a, b) => a - b);
+      const races = raceNos.map((n) => m.races[n]).filter(Boolean);
+      let firstRaceTime = '';
+      for (const n of raceNos) {
+        if (m.races[n] && m.races[n].label) { firstRaceTime = m.races[n].label; break; }
+      }
+      rows.push({
+        date: dateStr,
+        country: m.country,
+        discipline: disciplineLabel(disc),
+        meeting: m.meeting,
+        tab: m.isTAB ? 'TAB' : 'Non-TAB',
+        raceCount: raceNos.length,
+        firstRaceTime,
+        trial: races.some((r) => r.isTrial) ? 'Yes' : 'No',
+        abandoned: (m.hasAbandoned || races.some((r) => r.status === 'abandoned')) ? 'Yes' : 'No',
+        hasIssues: m.hasAnyIssue ? 'Yes' : 'No',
+      });
+    }
+  }
+
+  rows.sort((a, b) => a.country.localeCompare(b.country) || a.meeting.localeCompare(b.meeting));
+  return rows;
+}
+
+function meetingsListReportToCsv(rows) {
+  const headers = ['Date', 'Country', 'Discipline', 'Meeting', 'TAB/Non-TAB', 'Races', 'First Race Time', 'Trial', 'Abandoned', 'Has Issues'];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const r of rows) {
+    lines.push([r.date, r.country, r.discipline, r.meeting, r.tab, r.raceCount, r.firstRaceTime, r.trial, r.abandoned, r.hasIssues].map(csvEscape).join(','));
   }
   return lines.join('\r\n');
 }
@@ -706,6 +990,25 @@ function formatDateHeading(dateStr) {
   return dt.toLocaleDateString('en-AU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 }
 
+// UTC-based so a day offset never lands on the wrong date around a DST
+// transition -- used for the date-picker's Yesterday/Tomorrow/Next 2 Days
+// shortcuts (7 Sep 2026, per Dinesh -- see renderHtml's datePickerHtml).
+function addDaysToDateStr(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Short "07 Sep 2026" label for the date-picker trigger button --
+// formatDateHeading's full "Monday, 7 September 2026" is for the page
+// heading, too long for a small button.
+function formatDatePickerLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 // HTML page skeletons live in views/*.html (styles in public/styles.css,
 // served statically by server.js) -- read once at startup and filled in per
 // request via renderTemplate() below. Only the meeting/race grid itself is
@@ -713,6 +1016,7 @@ function formatDateHeading(dateStr) {
 // (one row per DB result) and can't be a static file.
 const DASHBOARD_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'dashboard.html'), 'utf8');
 const LOGIN_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'login.html'), 'utf8');
+const MEETINGS_LIST_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'meetings-list.html'), 'utf8');
 
 function renderTemplate(template, vars) {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in vars ? vars[key] : match));
@@ -734,8 +1038,10 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingJockeysFlagged) cls += ' missing-jockeys';
           if (race.tabIssueCount > 0) cls += ' tab-issue';
           if (race.missingTrainerCount > 0) cls += ' missing-trainer';
-          if (race.missingFormCount > 0) cls += ' missing-form';
+          if (race.missingFormFlagged) cls += ' missing-form';
+          if (race.ageIssueFlagged) cls += ' horse-age-issue';
           if (race.missingVideo) cls += ' missing-video';
+          if (race.missingRaceComment) cls += ' missing-race-comment';
           if (race.badTime) cls += ' bad-time';
           if (race.resultString) cls += ' has-result';
           if (race.status === 'abandoned') cls += ' abandoned-race';
@@ -752,8 +1058,10 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.duplicateJockeyCount > 0) titleParts.push(`${race.duplicateJockeyCount} jockey(s) duplicated across runners`);
           if (race.tabIssueCount > 0) titleParts.push(`${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number`);
           if (race.missingTrainerCount > 0) titleParts.push(`${race.missingTrainerCount} runner(s) missing trainer`);
-          if (race.missingFormCount > 0) titleParts.push(`${race.missingFormCount} runner(s) missing form lines`);
+          if (race.missingFormFlagged) titleParts.push(`${race.missingFormCount} runner(s) missing form lines`);
+          if (race.ageIssueFlagged) titleParts.push(`${race.ageIssueCount} runner(s) over age limit (${MAX_EXPECTED_HORSE_AGE})`);
           if (race.missingVideo) titleParts.push('Videos not available');
+          if (race.missingRaceComment) titleParts.push('Race comment not available');
           if (race.videoUrl) titleParts.push('Race video available -- click the camera icon to watch');
           if (race.resultString) titleParts.push(`Result (tab numbers, 1st-4th): ${race.resultString}`);
           titleParts.push('Click for runner details');
@@ -763,16 +1071,17 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           const dupBadge = race.duplicateJockeyCount > 0 ? `<sup class="dup-badge" title="${race.duplicateJockeyCount} jockey(s) duplicated across runners">D${race.duplicateJockeyCount}</sup>` : '';
           const tabBadge = race.tabIssueCount > 0 ? `<sup class="tab-badge" title="${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number">T${race.tabIssueCount}</sup>` : '';
           const trainerBadge = race.missingTrainerCount > 0 ? `<sup class="trainer-badge" title="${race.missingTrainerCount} runner(s) missing trainer">TR${race.missingTrainerCount}</sup>` : '';
-          const formBadge = race.missingFormCount > 0 ? `<sup class="form-badge" title="${race.missingFormCount} runner(s) missing form lines">FL${race.missingFormCount}</sup>` : '';
+          const formBadge = race.missingFormFlagged ? `<sup class="form-badge" title="${race.missingFormCount} runner(s) missing form lines">FL${race.missingFormCount}</sup>` : '';
+          const ageBadge = race.ageIssueFlagged ? `<sup class="age-issue-badge" title="${race.ageIssueCount} runner(s) over age limit (${MAX_EXPECTED_HORSE_AGE})">AGE${race.ageIssueCount}</sup>` : '';
           const resultLine = race.resultString ? `<div class="result-line">&#127937; ${escapeHtml(race.resultString)}</div>` : '';
           const abandonedLine = race.status === 'abandoned' ? `<div class="abandoned-line">Abandoned</div>` : '';
           const trialLine = race.isTrial ? `<div class="trial-line">Trial</div>` : '';
           const novideoLine = race.missingVideo ? `<div class="novideo-line">Videos not available</div>` : '';
+          const nocommentLine = race.missingRaceComment ? `<div class="nocomment-line">No race comment</div>` : '';
           const videoLink = race.videoUrl
             ? `<a class="video-link" href="${escapeHtml(race.videoUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Watch race video">&#127909;</a>`
             : '';
-
-          return `<td class="${cls}" data-status="${race.status}" title="${escapeHtml(titleParts.join(' | '))}" onclick="showRaceDetail('${escapeHtml(race.id)}')">${race.label}${mjBadge}${dupBadge}${tabBadge}${trainerBadge}${formBadge}${videoLink}${trialLine}${resultLine}${abandonedLine}${novideoLine}</td>`;
+          return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" title="${escapeHtml(titleParts.join(' | '))}" onclick="showRaceDetail('${escapeHtml(race.id)}', this)">${race.label}${mjBadge}${dupBadge}${tabBadge}${trainerBadge}${formBadge}${ageBadge}${videoLink}${trialLine}${resultLine}${abandonedLine}${novideoLine}${nocommentLine}</td>`;
         }).join('');
 
         let countryHeaderRow = '';
@@ -790,7 +1099,9 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingTab) issueCodes.push('missingtab');
         if (m.hasMissingTrainer) issueCodes.push('missingtrainer');
         if (m.hasMissingForm) issueCodes.push('missingform');
+        if (m.hasAgeIssue) issueCodes.push('ageissue');
         if (m.hasMissingVideo) issueCodes.push('missingvideo');
+        if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
         // Tooltip lists exactly which category(ies) triggered the "Issue"
         // pill -- added 10 Aug 2026 after a real support ticket where the
@@ -804,11 +1115,13 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingTab) issueReasons.push('Missing TAB number');
         if (m.hasMissingTrainer) issueReasons.push('Missing Trainer');
         if (m.hasMissingForm) issueReasons.push('Missing Form Lines');
+        if (m.hasAgeIssue) issueReasons.push('Horse Age Issue');
         if (m.hasMissingVideo) issueReasons.push('Missing Video');
+        if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
         const healthTag = m.hasAnyIssue
           ? `<span class="health-tag issue" title="${escapeHtml(issueReasons.join(', '))}">Issue</span>`
-          : '<span class="health-tag healthy" title="No missing/duplicate jockey, missing TAB, missing trainer, missing form lines, missing video, or schedule issue at this meeting">Healthy</span>';
+          : '<span class="health-tag healthy" title="No missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing video, missing race comment, or schedule issue at this meeting">Healthy</span>';
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
 
         // Per-meeting "download this meeting's full details" widget -- added
@@ -852,6 +1165,43 @@ function renderHtml(dateStr, schedule, options = {}) {
     .concat(countries.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`))
     .join('\n');
 
+  // Custom calendar date picker (7 Sep 2026, per Dinesh -- "Date'la calender
+  // kudunga... date range upto 3 days range kaattanu", 2 reference
+  // screenshots). Kept to a SINGLE date (this dashboard shows one day's
+  // races at a time, not a range) -- just replaces the plain native
+  // <input type="date"> with shortcut links spanning a 3-day window
+  // (Yesterday/Today/Tomorrow/Next 2 Days) plus a full month calendar for
+  // picking any other date directly. The month grid itself is built
+  // client-side (dashboard.html's renderDatePickerCalendar) so opening it
+  // and paging months doesn't need a server round trip; only the shortcut
+  // row's "active" state is computed here, straight off dateStr vs. today.
+  const today = todayStr();
+  const dateShortcuts = [
+    { label: 'Yesterday', date: addDaysToDateStr(today, -1) },
+    { label: 'Today', date: today },
+    { label: 'Tomorrow', date: addDaysToDateStr(today, 1) },
+    { label: 'Next 2 Days', date: addDaysToDateStr(today, 2) },
+  ];
+  const dateShortcutsHtml = dateShortcuts.map((s) => {
+    const active = s.date === dateStr ? ' active' : '';
+    return `<button type="button" class="date-picker-shortcut${active}" data-date="${escapeHtml(s.date)}" onclick="selectPickerDate('${escapeHtml(s.date)}')">${escapeHtml(s.label)}</button>`;
+  }).join('\n');
+  const datePickerHtml = `<div class="date-picker-wrap" id="datePickerWrap" data-today="${escapeHtml(today)}">
+      <button type="button" class="date-picker-trigger" id="datePickerTrigger" onclick="toggleDatePicker()"><span id="datePickerLabel">${escapeHtml(formatDatePickerLabel(dateStr))}</span> <svg class="date-picker-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></button>
+      <input type="hidden" name="date" id="dateInput" value="${escapeHtml(dateStr)}">
+      <div class="date-picker-panel" id="datePickerPanel">
+        <div class="date-picker-shortcuts">${dateShortcutsHtml}</div>
+        <div class="date-picker-calendar">
+          <div class="date-picker-cal-header">
+            <button type="button" class="date-picker-nav" onclick="shiftCalendarMonth(-1)" title="Previous month">&lsaquo;</button>
+            <span id="datePickerMonthLabel"></span>
+            <button type="button" class="date-picker-nav" onclick="shiftCalendarMonth(1)" title="Next month">&rsaquo;</button>
+          </div>
+          <div class="date-picker-cal-grid" id="datePickerCalGrid"></div>
+        </div>
+      </div>
+    </div>`;
+
   const tabs = DISCIPLINE_ORDER.map((disc) => {
     const { meetings } = byDiscipline[disc];
     const active = disc === selectedDiscipline ? ' active' : '';
@@ -869,10 +1219,10 @@ function renderHtml(dateStr, schedule, options = {}) {
   }).join('\n');
 
   const usernameBlock = username
-    ? `<span class="session-info">Logged in as <strong>${username}</strong> &middot; <a class="logout-link" href="/logout">Logout</a></span>`
+    ? `<span class="session-info">Logged in as <strong>${username}</strong> | <a class="logout-link" href="/logout">Logout</a></span>`
     : '';
 
-  const todayLinkHtml = `<a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}">Jump to today</a>`;
+  const todayLinkHtml = `<a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}" onclick="clearSavedFilters()">Jump to today</a>`;
 
   const reportLinksHtml = `<span class="report-links">
       <span class="report-links-label">&#11015; Download report:</span>
@@ -882,26 +1232,41 @@ function renderHtml(dateStr, schedule, options = {}) {
       <a class="report-link" href="/report.pdf?date=${escapeHtml(dateStr)}${includeTrials ? '&includeTrials=true' : ''}">PDF</a>
     </span>`;
 
-  // `missingAusMeetings`: null = date outside Racing Australia's own
-  // published window (or the fetch failed) -- nothing to show either way.
-  // An empty array means it WAS checked and nothing's missing, also no
-  // banner. Only render when there's an actual discrepancy to report.
-  const missingAusMeetings = Array.isArray(options.missingAusMeetings) ? options.missingAusMeetings : [];
-  const missingAusMeetingsBanner = missingAusMeetings.length
-    ? `<div class="ra-missing-banner">&#9888; Racing Australia lists ${missingAusMeetings.length} meeting(s) for this date not found in TD DB: ${escapeHtml(missingAusMeetings.join(', '))}</div>`
-    : '';
+  // Meetings-list download (7 Sep 2026, per Dinesh -- "ella meetings list a
+  // download pandradukku option... Select pannanu Thoroughbred ha Harness ha
+  // and Greyhound hanu or All metings ha nu"). The discipline <select>
+  // doesn't reload the page -- updateMeetingsListLinks() in dashboard.html
+  // just rewrites each format link's `discipline` query param client-side
+  // off each link's `data-base` (the date/includeTrials-only href rendered
+  // here, matching "All meetings" -- the select's default).
+  const meetingsListQuery = `date=${escapeHtml(dateStr)}${includeTrials ? '&includeTrials=true' : ''}`;
+  const meetingsListLinksHtml = `<span class="report-links meetings-list-links">
+      <span class="report-links-label">&#11015; Download meetings list:</span>
+      <select id="meetingsListDiscipline" onchange="updateMeetingsListLinks()">
+        <option value="">All meetings</option>
+        <option value="T">Thoroughbred</option>
+        <option value="H">Harness</option>
+        <option value="G">Greyhound</option>
+      </select>
+      <a class="report-link" id="meetingsListCsv" data-base="/meetings-list.csv?${meetingsListQuery}" href="/meetings-list.csv?${meetingsListQuery}">CSV</a>
+      <a class="report-link" id="meetingsListXlsx" data-base="/meetings-list.xlsx?${meetingsListQuery}" href="/meetings-list.xlsx?${meetingsListQuery}">Excel</a>
+      <a class="report-link" id="meetingsListJson" data-base="/meetings-list.json?${meetingsListQuery}" href="/meetings-list.json?${meetingsListQuery}">JSON</a>
+      <a class="report-link" id="meetingsListPdf" data-base="/meetings-list.pdf?${meetingsListQuery}" href="/meetings-list.pdf?${meetingsListQuery}">PDF</a>
+    </span>`;
 
   return renderTemplate(DASHBOARD_TEMPLATE, {
     DATE_STR: escapeHtml(dateStr),
+    TODAY_STR: escapeHtml(todayStr()),
     HEADING: escapeHtml(heading),
     USERNAME_BLOCK: usernameBlock,
     INCLUDE_TRIALS_CHECKED: includeTrials ? 'checked' : '',
+    DATE_PICKER_HTML: datePickerHtml,
     TODAY_LINK_HTML: todayLinkHtml,
     REPORT_LINKS_HTML: reportLinksHtml,
+    MEETINGS_LIST_LINKS_HTML: meetingsListLinksHtml,
     TABS: tabs,
     COUNTRY_OPTIONS: countryOptions,
     SECTIONS: sections,
-    MISSING_AUS_MEETINGS_BANNER: missingAusMeetingsBanner,
   });
 }
 
@@ -926,11 +1291,111 @@ function renderLoginPage(options = {}) {
   return renderTemplate(LOGIN_TEMPLATE, { ERROR_BLOCK: errorBlock });
 }
 
+// --- Meetings List page (date-RANGE view) -----------------------------------
+//
+// Added 7 Sep 2026 per Dinesh: "Date range slelect pannanu... anda madhiri
+// selct panni meetings filter pannanu" (a screenshot reference of a From/To
+// date range + Country + Discipline filter bar). Deliberately kept SEPARATE
+// from the main "/" dashboard grid -- that grid is one day's races laid out
+// as meeting x race-number columns, which has no sane meaning across
+// multiple dates (same course on two different days would collide into one
+// row). This is a flat, no-issues-detection meeting list instead: one row
+// per meeting, across however many days are selected -- see server.js's
+// fetchRaceDocsForDateRange (deliberately NOT fetching runners, so a wide
+// date range stays fast) and buildMeetingsListReport (already built for the
+// single-date "Download meetings list" feature, reused here per-date and
+// concatenated).
+function renderMeetingsListPage(rows, options = {}) {
+  const { fromDate, toDate, country, discipline, tab, includeTrials, countries = [], username } = options;
+  const heading = fromDate === toDate
+    ? formatDateHeading(fromDate)
+    : `${formatDateHeading(fromDate)} to ${formatDateHeading(toDate)}`;
+
+  const usernameBlock = username
+    ? `<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout">Logout</a></span>`
+    : '';
+
+  const countryOptionsHtml = countries
+    .map((c) => `<option value="${escapeHtml(c)}"${c === country ? ' selected' : ''}>${escapeHtml(c)}</option>`)
+    .join('\n');
+
+  const disciplineOptionsHtml = DISCIPLINE_ORDER
+    .map((d) => `<option value="${d}"${d === discipline ? ' selected' : ''}>${escapeHtml(disciplineLabel(d))}</option>`)
+    .join('\n');
+
+  const tabOptionsHtml = ['TAB', 'Non-TAB']
+    .map((t) => `<option value="${t}"${t === tab ? ' selected' : ''}>${t}</option>`)
+    .join('\n');
+
+  const rowsHtml = rows.length
+    ? rows.map((r) => `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.country)}</td><td>${escapeHtml(r.discipline)}</td>` +
+        `<td class="meeting">${escapeHtml(r.meeting)}</td><td>${escapeHtml(r.tab)}</td><td>${r.raceCount}</td>` +
+        `<td>${escapeHtml(r.firstRaceTime)}</td><td>${escapeHtml(r.trial)}</td><td>${escapeHtml(r.abandoned)}</td></tr>`).join('\n')
+    : `<tr><td class="empty-state" colspan="9">No meetings found for this date range/filters.</td></tr>`;
+
+  const query = `from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}` +
+    (country ? `&country=${encodeURIComponent(country)}` : '') +
+    (discipline ? `&discipline=${encodeURIComponent(discipline)}` : '') +
+    (tab ? `&tab=${encodeURIComponent(tab)}` : '') +
+    (includeTrials ? '&includeTrials=true' : '');
+  const downloadLinksHtml = `<span class="report-links">
+      <span class="report-links-label">&#11015; Download this list:</span>
+      <a class="report-link" href="/meetings-list-range.csv?${query}">CSV</a>
+      <a class="report-link" href="/meetings-list-range.xlsx?${query}">Excel</a>
+      <a class="report-link" href="/meetings-list-range.json?${query}">JSON</a>
+      <a class="report-link" href="/meetings-list-range.pdf?${query}">PDF</a>
+    </span>`;
+
+  return renderTemplate(MEETINGS_LIST_TEMPLATE, {
+    HEADING: escapeHtml(heading),
+    USERNAME_BLOCK: usernameBlock,
+    FROM_DATE: escapeHtml(fromDate),
+    TO_DATE: escapeHtml(toDate),
+    COUNTRY_OPTIONS: countryOptionsHtml,
+    DISCIPLINE_OPTIONS: disciplineOptionsHtml,
+    TAB_OPTIONS: tabOptionsHtml,
+    INCLUDE_TRIALS_CHECKED: includeTrials ? 'checked' : '',
+    RESULT_COUNT: String(rows.length),
+    ROWS_HTML: rowsHtml,
+    DOWNLOAD_LINKS_HTML: downloadLinksHtml,
+  });
+}
+
+// Groups race docs by their own rDate -- buildSchedule()/buildMeetingsListReport()
+// can only be called with ONE date's docs at a time (their internal grouping
+// key is course|country|discipline, which doesn't include date), so a
+// multi-day range must be split back out per date before either is called.
+function groupDocsByDate(docs) {
+  const map = new Map();
+  for (const doc of docs) {
+    if (!map.has(doc.rDate)) map.set(doc.rDate, []);
+    map.get(doc.rDate).push(doc);
+  }
+  return map;
+}
+
+// Builds the combined meetings-list rows for a date range -- one
+// buildMeetingsListReport() call per distinct date in `docsByDate`,
+// concatenated, then filtered by country (buildMeetingsListReport itself
+// only knows about discipline) and sorted date-first.
+function buildMeetingsListRowsForRange(docsByDate, disciplineFilter, countryFilter, tabFilter) {
+  const rows = [];
+  for (const [dateStr, docs] of docsByDate.entries()) {
+    rows.push(...buildMeetingsListReport(docs, dateStr, disciplineFilter));
+  }
+  let filtered = countryFilter ? rows.filter((r) => r.country === countryFilter) : rows;
+  if (tabFilter) filtered = filtered.filter((r) => r.tab === tabFilter);
+  filtered.sort((a, b) => a.date.localeCompare(b.date) || a.country.localeCompare(b.country) || a.meeting.localeCompare(b.meeting));
+  return filtered;
+}
+
 module.exports = {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, parseClock, disciplineLabel, escapeHtml,
   countMissingJockeys, hasDuplicateJockey, countDuplicateJockeyGroups, issueForRunner, jockeyCounts,
   tabNoCounts, hasDuplicateTabNo, countTabNoIssues, tabIssueForRunner,
   countMissingTrainers,
   buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
-  MISSING_JOCKEY_BORDER_THRESHOLD, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
+  buildMeetingsListReport, meetingsListReportToCsv,
+  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange,
+  MISSING_JOCKEY_BORDER_THRESHOLD, MISSING_FORM_BORDER_THRESHOLD, MAX_EXPECTED_HORSE_AGE, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Meetings List</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="top-row">
+    <div>
+      <h1>Meetings List</h1>
+      <p class="sub">{{HEADING}}</p>
+    </div>
+    <div class="top-row-right">
+      {{USERNAME_BLOCK}}
+      <a class="back-to-dashboard-link" href="/">&larr; Back to dashboard</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
+    </div>
+  </div>
+  <form class="controls" method="GET" action="/meetings-list-view">
+    <label>From:
+      <input type="date" name="from" value="{{FROM_DATE}}">
+    </label>
+    <label>To:
+      <input type="date" name="to" value="{{TO_DATE}}">
+    </label>
+    <label>Country:
+      <select name="country">
+        <option value="">All countries</option>
+        {{COUNTRY_OPTIONS}}
+      </select>
+    </label>
+    <label>Discipline:
+      <select name="discipline">
+        <option value="">All disciplines</option>
+        {{DISCIPLINE_OPTIONS}}
+      </select>
+    </label>
+    <label>TAB/Non-TAB:
+      <select name="tab">
+        <option value="">All</option>
+        {{TAB_OPTIONS}}
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" name="includeTrials" value="true" {{INCLUDE_TRIALS_CHECKED}}>
+      Include trials
+    </label>
+    <button type="submit" class="day-nav">Filter</button>
+    {{DOWNLOAD_LINKS_HTML}}
+  </form>
+  <p class="meta">{{RESULT_COUNT}} meeting(s) found.</p>
+  <div class="table-scroll">
+    <table class="meetings-list-table">
+      <thead>
+        <tr>
+          <th>Date</th><th>Country</th><th>Discipline</th><th>Meeting</th><th>TAB/Non-TAB</th>
+          <th>Races</th><th>First Race</th><th>Trial</th><th>Abandoned</th>
+        </tr>
+      </thead>
+      <tbody>
+{{ROWS_HTML}}
+      </tbody>
+    </table>
+  </div>
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'dark' ? '&#9728;&#65039; Light' : '&#127769; Dark';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'light';
+      var next = current === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem('rdd_theme', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+    (function init() {
+      var savedTheme = 'light';
+      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+    })();
+  </script>
+</body>
+</html>

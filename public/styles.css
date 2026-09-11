@@ -82,7 +82,9 @@ td.time.status-filtered { opacity: 0.15; pointer-events: none; }
 td.time.has-result { white-space: normal; }
 td.time.missing-trainer { outline: 2px solid #6b46c1; outline-offset: -2px; }
 td.time.missing-form { outline: 2px solid #b7791f; outline-offset: -2px; }
+td.time.horse-age-issue { outline: 2px solid #b7791f; outline-offset: -2px; }
 td.time.missing-video { outline: 2px solid #ad1457; outline-offset: -2px; white-space: normal; }
+td.time.missing-race-comment { outline: 2px solid #0e7490; outline-offset: -2px; white-space: normal; }
 td.time.abandoned-race { white-space: normal; text-decoration: line-through; opacity: 0.85; }
 td.time.trial-race { white-space: normal; }
 .result-line { font-size: 10px; font-weight: 700; color: var(--result-fg); margin-top: 2px; }
@@ -93,12 +95,13 @@ td.time.trial-race { white-space: normal; }
 .novideo-line { font-size: 10px; font-weight: 700; color: #ad1457; margin-top: 2px; text-decoration: none; }
 .novideo-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #fbe1ec; color: #ad1457; }
 [data-theme="dark"] .novideo-tag { background: #4a1530; color: #ef9dc3; }
+.nocomment-line { font-size: 10px; font-weight: 700; color: #0e7490; margin-top: 2px; text-decoration: none; }
+.nocomment-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #d7f0f3; color: #0e7490; }
+[data-theme="dark"] .nocomment-tag { background: #123a42; color: #7dd3e0; }
 .video-link { text-decoration: none; margin-left: 3px; cursor: pointer; }
 .video-watch-link { display: inline-block; font-size: 12px; font-weight: 600; color: #ad1457; text-decoration: none; }
 .video-watch-link:hover { text-decoration: underline; }
 [data-theme="dark"] .video-watch-link { color: #ef9dc3; }
-.ra-missing-banner { margin: 0 0 14px; padding: 10px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; background: #fdecea; color: #a12622; border: 1px solid #f4c7c3; }
-[data-theme="dark"] .ra-missing-banner { background: #3a1f1f; color: #ff9d95; border-color: #5c2e2c; }
 td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-align: center; }
 .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; color: #fff; }
 .badge.disc-T { background: #2b6cb0; }
@@ -111,6 +114,7 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .tab-badge { display: inline-block; background: #cc0000; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 .trainer-badge { display: inline-block; background: #6b46c1; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 .form-badge { display: inline-block; background: #b7791f; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
+.age-issue-badge { display: inline-block; background: #b7791f; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 /* Per-meeting "download this meeting's full details" widget (10 Aug 2026)
    -- a native <details>/<summary> disclosure, no JS needed to open/close.
    Only downside: it doesn't auto-close on an outside click like the
@@ -126,14 +130,44 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .meeting-download-menu a:hover { background: var(--hover-bg); }
 .controls { margin-bottom: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .controls label { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; margin-right: 16px; }
-.controls input[type="date"] { font-size: 13px; padding: 4px 6px; border: 1px solid var(--input-border); border-radius: 4px; margin-left: 4px; background: var(--card-bg); color: var(--fg); }
 .controls a.today-link { font-size: 12px; color: var(--header-bg); text-decoration: none; margin-left: 4px; }
+.meetings-list-link, .back-to-dashboard-link { font-size: 13px; padding: 6px 12px; border-radius: 6px; color: #ffffff; background: #26527a; text-decoration: none; display: inline-block; }
+.meetings-list-link:hover, .back-to-dashboard-link:hover { opacity: 0.9; }
 .report-links { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
 .report-links-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
 .controls a.report-link { font-size: 12px; color: #fff; background: var(--header-bg); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
 .controls a.report-link:hover { background: var(--header-bg-hover); }
+.meetings-list-links select { font-size: 12px; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--tab-btn-border); background: var(--tab-btn-bg); color: var(--tab-btn-fg); }
 .controls button.day-nav { font-size: 13px; padding: 5px 10px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--header-bg); cursor: pointer; }
 .controls button.day-nav:hover { background: var(--hover-bg); }
+
+/* Custom date picker (7 Sep 2026, per Dinesh) -- replaces the plain native
+   <input type="date"> with a dropdown: a Yesterday/Today/Tomorrow/Next 2
+   Days shortcut row plus a month calendar, built in dashboard.html
+   (renderDatePickerCalendar). */
+.date-picker-wrap { position: relative; display: inline-block; }
+.date-picker-trigger { font-size: 13px; padding: 5px 10px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.date-picker-trigger:hover { background: var(--hover-bg); }
+.date-picker-icon { flex-shrink: 0; }
+.date-picker-panel { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 6px; box-shadow: 0 4px 12px var(--shadow); z-index: 60; padding: 10px; }
+.date-picker-panel.open { display: flex; gap: 12px; }
+.date-picker-shortcuts { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--input-border); padding-right: 10px; min-width: 110px; }
+.date-picker-shortcut { font-size: 12px; text-align: left; padding: 6px 8px; border: none; border-radius: 4px; background: none; color: var(--fg); cursor: pointer; white-space: nowrap; }
+.date-picker-shortcut:hover { background: var(--hover-bg); }
+.date-picker-shortcut.active { background: var(--header-bg); color: #fff; font-weight: 600; }
+.date-picker-calendar { min-width: 220px; }
+.date-picker-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--fg); }
+.date-picker-nav { border: none; background: none; color: var(--fg); font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+.date-picker-nav:hover { background: var(--hover-bg); }
+.date-picker-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.date-picker-dow { font-size: 10px; font-weight: 700; color: var(--muted); text-align: center; padding: 2px 0; }
+.date-picker-day { font-size: 12px; text-align: center; padding: 6px 0; border-radius: 4px; cursor: pointer; color: var(--fg); }
+.date-picker-day:hover { background: var(--hover-bg); }
+.date-picker-day.other-month { color: var(--muted); opacity: 0.4; cursor: default; }
+.date-picker-day.other-month:hover { background: none; }
+.date-picker-day.today { font-weight: 700; color: var(--header-bg); }
+.date-picker-day.selected { background: var(--header-bg); color: #fff; font-weight: 700; }
+.date-picker-day.selected:hover { background: var(--header-bg); }
 .theme-toggle { font-size: 13px; padding: 6px 12px; border: 1px solid var(--tab-btn-border); border-radius: 6px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
 .theme-toggle:hover { background: var(--hover-bg); }
 .refresh-indicator { font-size: 11px; color: var(--muted); margin-left: 4px; }
@@ -141,28 +175,115 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 
 .modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-overlay); align-items: center; justify-content: center; z-index: 50; }
 .modal-overlay.open { display: flex; }
-.modal-box { background: var(--modal-bg); color: var(--fg); border-radius: 6px; max-width: 640px; width: 92%; max-height: 80vh; overflow-y: auto; padding: 20px 24px; box-shadow: 0 8px 30px var(--modal-shadow); }
+.modal-box { background: var(--modal-bg); color: var(--fg); border-radius: 6px; max-width: 1000px; width: 92%; max-height: 80vh; overflow-y: auto; padding: 20px 24px; box-shadow: 0 8px 30px var(--modal-shadow); }
 .modal-box h2 { margin: 0 0 4px; font-size: 18px; display: block; }
 .modal-box .modal-race-name { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
 .modal-box .modal-sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.modal-box .modal-race-comment { font-size: 13px; line-height: 1.45; color: var(--fg); background: var(--sub-bg); border-radius: 4px; padding: 8px 10px; margin: 0 0 14px; }
 .modal-box .modal-result { color: var(--result-fg); font-weight: 700; font-size: 13px; margin: 0 0 10px; }
 .modal-box table { width: 100%; box-shadow: none; }
 .modal-box th, .modal-box td { font-size: 13px; padding: 5px 8px; text-align: left; white-space: normal; }
 .modal-box th { background: var(--header-bg); }
 .modal-close { float: right; cursor: pointer; font-size: 20px; color: var(--muted); border: none; background: none; line-height: 1; }
 .modal-close:hover { color: var(--fg); }
+
+/* Popup "Race Field" / "Speed Map" tabs (8 Sep 2026, per Dinesh) -- only
+   rendered when a race actually has speed-map predictions. */
+.popup-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
+.popup-tab-btn { font-size: 13px; font-weight: 600; padding: 8px 14px; border: none; background: none; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.popup-tab-btn:hover { color: var(--fg); }
+.popup-tab-btn.active { color: var(--header-bg); border-bottom-color: var(--header-bg); }
+[data-theme="dark"] .popup-tab-btn.active { color: #6fa8dc; border-bottom-color: #6fa8dc; }
+.raw-doc-heading { font-size: 13px; margin: 14px 0 4px; color: var(--muted); }
+.raw-doc-heading:first-child { margin-top: 0; }
+.raw-json-block { font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.5; background: var(--sub-bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; overflow-x: auto; white-space: pre; max-height: 400px; overflow-y: auto; }
+.raw-doc-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.raw-doc-heading-row .raw-doc-heading { margin: 0; }
+.raw-version-tabs { display: flex; gap: 4px; }
+.raw-version-btn { font-size: 11px; font-weight: 600; padding: 4px 10px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.raw-version-btn:hover { background: var(--hover-bg); }
+.raw-version-btn.active { background: var(--header-bg); color: #fff; border-color: var(--header-bg); }
+.raw-download-btn { margin-left: 10px; border-color: #2b6cb0; color: #2b6cb0; }
+[data-theme="dark"] .raw-download-btn { border-color: #8fc0ee; color: #8fc0ee; }
+
+/* Speed Map bar chart -- bar width/icon position = early pace (100 -
+   paceRating), i.e. how far forward this runner is predicted to be
+   early in the race. Runners without a computed rating ("Not Known")
+   get a muted bar pinned to the left, before the "Out the Back" zone. */
+.speedmap-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.speedmap-tab { position: relative; flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+.speedmap-tab .silk-icon { width: 24px; height: 26px; }
+.speedmap-tab-number { position: absolute; bottom: -4px; right: -4px; min-width: 14px; height: 14px; padding: 0 2px; border-radius: 50%; background: #fff; color: #161616; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.speedmap-track { position: relative; flex: 1; height: 28px; background: #16602b; border-radius: 3px; }
+[data-theme="dark"] .speedmap-track { background: #0e3d1c; }
+.speedmap-bar { position: absolute; top: 0; left: 0; bottom: 0; min-width: 4px; background: #4ad07f; border-radius: 3px; transition: width 2.5s cubic-bezier(0.4, 0, 0.2, 1); }
+.speedmap-bar-unknown { background: #4a5560; }
+.speedmap-name { position: relative; z-index: 1; display: flex; align-items: center; height: 100%; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); white-space: nowrap; padding-left: 8px; text-transform: uppercase; }
+.speedmap-legend-row { margin-top: 6px; }
+.speedmap-legend { flex: 1; display: flex; border-radius: 3px; overflow: hidden; }
+.speedmap-legend-cell { flex: 1; text-align: center; background: #7a4a1e; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; padding: 6px 2px; border-right: 1px solid rgba(255, 255, 255, 0.25); }
+.speedmap-legend-cell:last-child { border-right: none; }
+.speedmap-icon { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: left 2.5s cubic-bezier(0.4, 0, 0.2, 1); }
 tr.scratched td { color: var(--scratched-fg); text-decoration: line-through; }
 td.issue-cell.missing { color: #e14b4b; font-weight: 600; }
 td.issue-cell.duplicate { color: #e07b00; font-weight: 600; }
 td.issue-cell.tab-issue { color: #e14b4b; font-weight: 600; }
 td.issue-cell.trainer-issue { color: #6b46c1; font-weight: 600; }
+td.issue-cell.age-issue { color: #b7791f; font-weight: 600; }
+.modal-box .position-cell { text-align: center; width: 34px; }
 td.position-cell { font-weight: 700; }
 .modal-loading, .modal-error { color: var(--muted); font-style: italic; }
-.form-ignore-btn { font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid var(--tab-btn-border); border-radius: 3px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
-.form-ignore-btn:hover { background: var(--hover-bg); }
-.form-ignore-btn:disabled { opacity: 0.6; cursor: default; }
+.form-ignore-btn, .age-ignore-btn, .dup-jockey-ignore-btn, .missing-jockey-ignore-btn { font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid var(--tab-btn-border); border-radius: 3px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.form-ignore-btn:hover, .age-ignore-btn:hover, .dup-jockey-ignore-btn:hover, .missing-jockey-ignore-btn:hover { background: var(--hover-bg); }
+.form-ignore-btn:disabled, .age-ignore-btn:disabled, .dup-jockey-ignore-btn:disabled, .missing-jockey-ignore-btn:disabled { opacity: 0.6; cursor: default; }
+.site-check-link { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid #2b6cb0; border-radius: 3px; background: none; color: #2b6cb0; text-decoration: none; }
+.site-check-link:hover { background: #dbe9f7; }
+[data-theme="dark"] .site-check-link { border-color: #8fc0ee; color: #8fc0ee; }
+[data-theme="dark"] .site-check-link:hover { background: #1c3b57; }
 .form-ignore-all-line { margin: 0 0 10px; }
 .form-ignore-all-btn { margin-left: 0; font-size: 12px; padding: 4px 10px; }
+.race-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+.race-nav-btn { font-size: 12px; font-weight: 600; padding: 4px 9px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.race-nav-btn:hover { background: var(--hover-bg); }
+.race-nav-btn.active { background: var(--header-bg); color: #fff; border-color: var(--header-bg); cursor: default; }
+.race-nav-btn.has-issue { border-color: #cc0000; color: #cc0000; }
+.race-nav-btn.has-issue:hover { background: #fff0f0; }
+.race-nav-btn.has-issue.active { color: #fff; box-shadow: inset 0 0 0 2px #ff8a8a; }
+[data-theme="dark"] .race-nav-btn.has-issue { border-color: #e14b4b; color: #ff9d95; }
+[data-theme="dark"] .race-nav-btn.has-issue:hover { background: #3a1f1f; }
+
+.horse-name-link { font: inherit; padding: 0; border: none; background: none; color: var(--header-bg); text-decoration: underline; cursor: pointer; }
+.horse-name-link:hover { color: var(--header-bg-hover); }
+.horse-region { font-weight: 400; color: var(--muted); font-size: 11px; }
+.modal-box .tab-cell { text-align: center; width: 34px; }
+.horse-cell { min-width: 130px; white-space: nowrap; text-transform: uppercase; }
+.modal-box .silk-cell { width: 34px; text-align: center; padding-left: 6px; padding-right: 2px; }
+.silk-icon { vertical-align: middle; flex-shrink: 0; }
+.silk-missing path, .silk-missing circle { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 2.5 2; }
+.silk-missing { background: rgba(214, 84, 47, 0.12); border-radius: 4px; }
+.back-to-race-btn { display: block; margin: 0 0 12px; font-size: 12px; font-weight: 600; padding: 5px 10px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.back-to-race-btn:hover { background: var(--hover-bg); }
+.horse-stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin: 12px 0; }
+.horse-stat-tile { background: var(--sub-bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+.horse-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.horse-stat-value { font-size: 14px; font-weight: 700; margin-top: 2px; }
+.horse-detail-name { text-transform: uppercase; }
+.horse-past-name { text-transform: uppercase; }
+.horse-past-races-heading { font-size: 14px; margin: 14px 0 6px; }
+.horse-past-races { width: 100%; box-shadow: none; }
+.horse-past-races th, .horse-past-races td { font-size: 12px; padding: 5px 8px; text-align: left; white-space: normal; }
+.horse-past-races th { background: var(--header-bg); }
+.horse-past-races tr.past-race-row { cursor: pointer; }
+.horse-past-races tr.past-race-row:hover { background: var(--hover-bg); }
+.video-icon-slot { display: inline-block; min-width: 16px; }
+.video-icon-link { text-decoration: none; font-size: 14px; cursor: pointer; }
+
+/* Standalone "open in new tab" page for one past race (openPastRaceFormPage
+   in dashboard.html) -- only shows this one runner's own row, since old
+   racecards don't record the rest of that race's field. */
+body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
+.past-race-card h1 { font-size: 22px; margin-bottom: 4px; }
+.past-race-note { margin-top: 14px; font-style: italic; }
 
 .table-scroll { width: 100%; }
 
