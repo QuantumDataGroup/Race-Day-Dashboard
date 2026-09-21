@@ -5,88 +5,130 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Race Day Dashboard - {{DATE_STR}}</title>
 <link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
-  <div class="top-row">
-    <div>
-      <h1>Race Day Dashboard</h1>
-      <p class="sub">{{HEADING}} <span class="refresh-indicator" id="refreshIndicator">| Auto-refresh every 3 min</span></p>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Race Day Dashboard</span>
+        </div>
+      </a>
     </div>
-    <div class="top-row-right">
+    <div class="app-header-right">
+      <details class="meeting-download export-data-menu">
+        <summary><i class="fa-solid fa-download"></i> Export Data <i class="fa-solid fa-chevron-down export-caret"></i></summary>
+        <div class="meeting-download-menu export-data-panel" id="exportDataPanel">
+          {{REPORT_LINKS_HTML}}
+          {{MEETINGS_LIST_LINKS_HTML}}
+        </div>
+      </details>
+      <a class="meetings-list-link home-link" href="/"><i class="fa-solid fa-house"></i> Home</a>
+      <a class="meetings-list-link" href="/meetings-list-view"><i class="fa-solid fa-list"></i> Meetings list</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
       {{USERNAME_BLOCK}}
-      <a class="meetings-list-link" href="/meetings-list-view">Meetings list</a>
-      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()">&#127769; Dark</button>
     </div>
+  </header>
+
+  <div class="header-status-bar">
+    <span class="refresh-pill"><span class="refresh-indicator" id="refreshIndicator">Auto-refresh every 3 min</span></span>
+    <span class="date-heading">{{HEADING}}</span>
   </div>
-  <form class="controls" method="GET" action="/">
-    <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day">&larr; Prev day</button>
-    {{DATE_PICKER_HTML}}
-    <button type="button" class="day-nav" onclick="shiftDate(1)" title="Next day">Next day &rarr;</button>
-    <label>
-      <input type="checkbox" name="includeTrials" value="true" {{INCLUDE_TRIALS_CHECKED}} onchange="this.form.submit()">
-      Include trials
-    </label>
-    <noscript><button type="submit">Go</button></noscript>
-    {{TODAY_LINK_HTML}}
-    {{REPORT_LINKS_HTML}}
-    {{MEETINGS_LIST_LINKS_HTML}}
-  </form>
-  <div class="disc-tabs">
-{{TABS}}
-    <div class="grid-filters">
-      <label class="meeting-search-filter">Search meeting:
-        <span class="meeting-search-wrap">
-          <input type="text" id="meetingSearch" placeholder="Type a meeting name..." autocomplete="off" oninput="applyFilters()" onfocus="renderSuggestionDropdown()">
-          <div class="meeting-suggestions" id="meetingSuggestions"></div>
-        </span>
-      </label>
-      <label class="country-filter">Country:
-        <select id="countryFilter" onchange="applyFilters()">
+
+  <div class="control-bar">
+    <div class="control-bar-row">
+      <form class="controls" method="GET" action="/">
+        <button type="button" class="day-nav" onclick="shiftDate(-1)" title="Previous day"><i class="fa-solid fa-chevron-left"></i> Prev day</button>
+        {{DATE_PICKER_HTML}}
+        <button type="button" class="day-nav" onclick="shiftDate(1)" title="Next day">Next day <i class="fa-solid fa-chevron-right"></i></button>
+        {{TODAY_LINK_HTML}}
+        <label>
+          <input type="checkbox" name="includeTrials" value="true" {{INCLUDE_TRIALS_CHECKED}} onchange="this.form.submit()">
+          Include trials
+        </label>
+        <noscript><button type="submit">Go</button></noscript>
+      </form>
+      <div class="grid-filters">
+        <label class="meeting-search-filter">
+          <span class="meeting-search-wrap">
+            <i class="fa-solid fa-magnifying-glass meeting-search-icon"></i>
+            <input type="text" id="meetingSearch" placeholder="Search meeting..." autocomplete="off" oninput="applyFilters()" onfocus="renderSuggestionDropdown()">
+            <div class="meeting-suggestions" id="meetingSuggestions"></div>
+          </span>
+        </label>
+        <label class="country-filter">
+          <select id="countryFilter" onchange="applyFilters()">
+            <option value="">All Countries</option>
 {{COUNTRY_OPTIONS}}
-        </select>
-      </label>
-      <label class="tabmeeting-filter">Meetings:
-        <select id="tabMeetingFilter" onchange="applyFilters()">
-          <option value="">All meetings</option>
-          <option value="tab">TAB meetings</option>
-          <option value="nontab">Non-TAB meetings</option>
-        </select>
-      </label>
-      <label class="issue-filter">Issue:
-        <select id="issueFilter" onchange="applyFilters()">
-          <option value="">All</option>
-          <option value="missingjockey">Missing Jockey</option>
-          <option value="duplicatejockey">Duplicate Jockey</option>
-          <option value="missingtab">Missing TAB</option>
-          <option value="missingtrainer">Missing Trainer</option>
-          <option value="missingform">Missing Form Lines</option>
-          <option value="ageissue">Horse Age Issue</option>
-          <option value="missingvideo">Missing Video</option>
-          <option value="missingracecomment">Missing Race Comment</option>
-          <option value="scheduleissue">Schedule Issue</option>
-          <option value="hasissues">Meetings with Issues</option>
-          <option value="healthy">Healthy Meetings</option>
-        </select>
-      </label>
-      <label class="status-filter">Race status:
-        <select id="statusFilter" onchange="applyFilters()">
-          <option value="">All statuses</option>
-          <option value="upcoming">Upcoming</option>
-          <option value="running">Running</option>
-          <option value="completed">Completed</option>
-          <option value="abandoned">Abandoned</option>
-          <option value="resulted">Resulted</option>
-        </select>
-      </label>
+          </select>
+        </label>
+        <label class="tabmeeting-filter">
+          <select id="tabMeetingFilter" onchange="applyFilters()">
+            <option value="">All meetings</option>
+            <option value="tab">TAB meetings</option>
+            <option value="nontab">Non-TAB meetings</option>
+          </select>
+        </label>
+        <label class="issue-filter">
+          <select id="issueFilter" onchange="applyFilters()">
+            <option value="">All Issues</option>
+            <option value="missingjockey">Missing Jockey</option>
+            <option value="duplicatejockey">Duplicate Jockey</option>
+            <option value="missingtab">Missing TAB</option>
+            <option value="missingtrainer">Missing Trainer</option>
+            <option value="missingform">Missing Form Lines</option>
+            <option value="ageissue">Horse Age Issue</option>
+            <option value="missingrunnercomment">Missing Runner Comment</option>
+            <option value="missingvideo">Missing Video</option>
+            <option value="missingracecomment">Missing Race Comment</option>
+            <option value="scheduleissue">Schedule Issue</option>
+            <option value="hasissues">Meetings with Issues</option>
+            <option value="healthy">Healthy Meetings</option>
+          </select>
+        </label>
+        <label class="status-filter">
+          <select id="statusFilter" onchange="applyFilters()">
+            <option value="">All Statuses</option>
+            <option value="upcoming">Upcoming</option>
+            <option value="running">Running</option>
+            <option value="completed">Completed</option>
+            <option value="abandoned">Abandoned</option>
+            <option value="resulted">Resulted</option>
+          </select>
+        </label>
+        <label class="show-downloads-filter">
+          <input type="checkbox" id="showDownloadsToggle" checked onchange="toggleMeetingDownloads()">
+          Show meeting downloads
+        </label>
+      </div>
     </div>
+    <nav class="disc-tabs">
+{{TABS}}
+    </nav>
   </div>
+
+  <main class="app-main">
 {{SECTIONS}}
   <p class="meta">date param: <code>?date=YYYY-MM-DD</code> | trials param: <code>?includeTrials=true</code></p>
+  </main>
 
   <div class="modal-overlay" id="detailModal" onclick="if(event.target===this) closeRaceDetail()">
     <div class="modal-box">
       <button class="modal-close" onclick="closeRaceDetail()" aria-label="Close">&times;</button>
       <div id="detailContent"><p class="modal-loading">Loading...</p></div>
+    </div>
+  </div>
+
+  <!-- Race-replay video plays as an overlay on top of whatever's open,
+       instead of navigating away to a new tab (18 Sep 2026, per Dinesh:
+       "Race View vides play click panna, video overlap play aganum"). -->
+  <div class="modal-overlay video-modal-overlay" id="videoModal" onclick="if(event.target===this) closeVideoOverlay()">
+    <div class="video-modal-box">
+      <button class="modal-close" onclick="closeVideoOverlay()" aria-label="Close">&times;</button>
+      <video id="videoModalPlayer" controls autoplay></video>
     </div>
   </div>
 
@@ -110,24 +152,291 @@
     // lettered disc) -- this is a best-effort visual identifier, not a
     // pixel-perfect copy, same trade-off as every other best-effort feature
     // in this file.
+    // Replaced 18 Sep 2026, per Dinesh -- was a ~40-colour hand-curated map
+    // that kept needing one-off additions every time a real description used
+    // a colour it didn't recognise (Burgundy/Salmon/Chestnut earlier this
+    // session). Rebuilt from a proper ~200-name colour reference Dinesh
+    // supplied (SILKS PATTERNS AND ICONS/colors-v3.json), with the earlier
+    // one-off fixes kept as a fallback for names that reference doesn't
+    // define at all.
     var SILK_COLOR_MAP = {
-      'dark blue': '#0b2e5c', 'navy blue': '#0b2e5c', 'navy': '#0b2e5c', 'royal blue': '#1c39bb',
-      'light blue': '#7ec8e3', 'sky blue': '#87ceeb', 'blue': '#1c3f94',
-      'dark green': '#0b4d24', 'emerald green': '#0f9960', 'emerald': '#0f9960', 'lime green': '#9fd400',
-      'lime': '#9fd400', 'green': '#1a7a3c',
-      'dark grey': '#555555', 'grey': '#8a8a8a', 'gray': '#8a8a8a', 'silver': '#c0c0c0',
-      'hot pink': '#ff2d95', 'cerise': '#de3163', 'rose': '#e05a8a', 'pink': '#f48fb1', 'magenta': '#e91e8c',
-      'neon yellow': '#eaff00', 'yellow': '#ffde17', 'gold': '#d4af37',
-      'orange': '#f57c00', 'maroon': '#7a1f2b', 'crimson': '#c8102e', 'red': '#e2231a',
-      'purple': '#7b3fa0', 'indigo': '#3f2a80',
-      'brown': '#6b4226', 'chocolate': '#5a3825', 'tan': '#c8a165', 'beige': '#e6d3b3', 'cream': '#f5f0dc',
-      'black': '#161616', 'white': '#ffffff',
+      "almond": "#efdecd", "antique brass": "#cd9575", "apricot": "#fbceb1", "aqua blue": "#00ffff",
+      "aqua": "#00ffff",
+      "aquamarine": "#7fffd4", "asparagus": "#87a96b", "atomic tangerine": "#ff9966", "banana mania": "#fae7b5",
+      "beaver": "#9f8170", "beige": "#f5f5dc", "bittersweet": "#fe6f5e", "black": "#000000",
+      "light blue": "#add8e6", "blizzard blue": "#ace5ee", "blue": "#1f75fe", "blue gray": "#6699cc",
+      "onyx": "#0d98ba", "blue violet": "#8a2be2", "blush": "#de5d83", "brick red": "#cb4154",
+      "brown": "#964b00", "bronze": "#cd7f32", "burgundy": "#800020", "burnt sienna": "#e97451",
+      "cadet blue": "#5f9ea0", "canary": "#ffff99", "cardinal": "#c41e3a", "caribbean green": "#00cc99",
+      "carnation pink": "#ffa6c9", "cerise": "#de3163", "cerulean": "#007ba7", "cherry": "#ffb7c5",
+      "chestnut": "#cd5c5c", "claret": "#801638", "cornflower": "#6495ed", "cotton candy": "#fffdd0",
+      "cream": "#fffdd0", "dark grey": "#a9a9a9", "denim": "#1560bd", "desert sand": "#edc9af",
+      "eggplant": "#614051", "electric lime": "#ccff00", "emerald": "#50c878", "devil red": "#860111",
+      "emerald green": "#00914c", "forest green": "#014421", "fuchsia": "#ff00ff", "fuzzy wuzzy": "#cc6666",
+      "gold": "#d4af37", "goldenrod": "#daa520", "granny smith apple": "#a8e4a0", "gray": "#808080",
+      "green": "#38ad44", "green blue": "#1164b4", "green yellow": "#adff2f", "grey": "#808080",
+      "hot magenta": "#ff1dce", "inchworm": "#b2ec5d", "indigo": "#00416a", "jade": "#00a86b",
+      "jazzberry jam": "#a50b5e", "jungle green": "#29ab87", "laser lemon": "#fefe22", "lavender": "#b57edc",
+      "lemon yellow": "#fff700", "lilac": "#c8a2c8", "lime": "#00ff00", "lime green": "#32cd32",
+      "macaroni and cheese": "#ffbd88", "magenta": "#ca1f7b", "magic mint": "#aaf0d1", "mahogany": "#c04000",
+      "maize": "#edd19c", "manatee": "#979aaa", "mango tango": "#ff8243", "maroon": "#800000",
+      "mauve": "#e0b0ff", "mauvelous": "#ef98aa", "melon": "#fdbcb4", "midnight blue": "#191970",
+      "mountain meadow": "#30ba8f", "mulberry": "#c54b8c", "myrtle": "#21421e", "navy blue": "#000080",
+      "neon carrot": "#ffa343", "olive green": "#808000", "orange": "#ff7f00", "orange red": "#ff4500",
+      "orange yellow": "#f8d568", "orchid": "#da70d6", "outer space": "#414a4c", "outrageous orange": "#ff6e4a",
+      "pacific blue": "#1ca9c9", "pale yellow": "#f7f284", "peach": "#ffe5b4", "periwinkle": "#c5d0e6",
+      "piggy pink": "#fddde6", "pine green": "#01796f", "pink": "#ee3e7d", "pink flamingo": "#fc74fd",
+      "pink sherbet": "#f78fa7", "plum": "#8e4585", "purple mountain's majesty": "#9d81ba",
+      "purple pizzazz": "#fe4eda", "radical red": "#ff355e", "raw sienna": "#d68a59", "raw umber": "#826644",
+      "razzle dazzle rose": "#ff33cc", "razzmatazz": "#e3256b", "red": "#ff0000", "red orange": "#ff5349",
+      "red violet": "#c0448f", "robin egg blue": "#1fcecb", "royal": "#4169e1", "royal blue": "#4169e1",
+      "royal purple": "#7851a9", "salmon": "#ff8c69", "scarlet": "#ff2400", "screamin green": "#76ff7a",
+      "sea green": "#2e8b57", "sepia": "#704214", "shadow": "#8a795d", "shocking pink": "#fc0fc0",
+      "powder blue": "#b0e0e6", "pale goldenrod": "#eee8aa", "pale green": "#98fb98", "light salmon": "#ffa07a",
+      "medium purple": "#9370db", "medium sea green": "#3cb371", "chocolate": "#d2691e", "dark green": "#006400",
+      "dark blue": "#00008b", "purple": "#800080", "dark slate blue": "#483d8b", "dark slate gray": "#2f4f4f",
+      "light coral": "#f08080", "crimson": "#dc143c", "hot pink": "#ff69b4", "indian red": "#cd5c5c",
+      "chartreuse": "#7fff00", "khaki": "#f0e68c", "lawn green": "#7cfc00", "light green": "#90ee90",
+      "light pink": "#ffb6c1", "light sea green": "#20b2aa", "light sky blue": "#87cefa",
+      "light slate gray": "#778899", "light steel blue": "#b0c4de", "medium slate blue": "#7b68ee",
+      "medium spring green": "#00fa9a", "navy": "#000080", "olive": "#808000", "medium turquoise": "#48d1cc",
+      "medium violet red": "#c71585", "pale turquoise": "#afeeee", "mint cream": "#f5fffa",
+      "misty rose": "#ffe4e1", "moccasin": "#ffe4b5", "navajo white": "#ffdead", "old lace": "#fdf5e6",
+      "olive drab": "#6b8e23", "pale violet red": "#db7093", "papaya whip": "#ffefd5", "peach puff": "#ffdab9",
+      "peru": "#cd853f", "rosy brown": "#bc8f8f", "saddle brown": "#8b4513", "seashell": "#fff5ee",
+      "sandy brown": "#f4a460", "sienna": "#a0522d", "slate blue": "#6a5acd", "slate gray": "#708090",
+      "snow": "#fffafa", "silver": "#c0c0c0", "sky blue": "#87ceeb", "spring green": "#eceabe",
+      "sunglow": "#ffcc33", "sunset orange": "#fd5e53", "tan": "#d2b48c", "tangerine": "#f28500",
+      "teal blue": "#367588", "thistle": "#d8bfd8", "tickle me pink": "#fc89ac", "timberwolf": "#dbd7d2",
+      "tropical rain forest": "#00755e", "tumbleweed": "#deaa88", "turquoise blue": "#00ffef",
+      "unmellow yellow": "#ffff66", "violet": "#7f00ff", "violet blue": "#324ab2", "violet red": "#f75394",
+      "vivid tangerine": "#ffa089", "vivid violet": "#9f00ff", "white": "#ffffff", "wild blue": "#a2add0",
+      "wild strawberry": "#ff43a4", "wild watermelon": "#fc6c85", "wisteria": "#c9a0dc", "yellow": "#ffff00",
+      "teal": "#008080", "tomato": "#ff6347", "steel blue": "#4682b4", "yellow green": "#9acd32",
+      "turquoise": "#40e0d0", "wheat": "#f5deb3", "white smoke": "#f5f5f5", "yellow orange": "#ffef02",
+      // Real-DB colours from earlier this session that the reference list
+      // above doesn't define at all -- kept so those fixes don't regress.
+      "rose": "#e05a8a", "neon yellow": "#eaff00", "fawn": "#c8a165", "mustard": "#d9a441",
+      "coral": "#ff6f5e", "primrose": "#f8e473",
     };
     // Longest color names first, so "dark blue" matches before "blue" does.
     var SILK_COLOR_NAMES = Object.keys(SILK_COLOR_MAP).sort(function (a, b) { return b.length - a.length; });
-    var SILK_PATTERN_WORDS = ['quarters', 'quartered', 'halved', 'halves', 'hoops', 'hooped', 'stripes', 'striped',
-      'diamonds', 'diamond', 'stars', 'star', 'spots', 'spot', 'checks', 'checked', 'checkered', 'checkers',
-      'chevrons', 'chevron', 'sash'];
+    // Replaced 18 Sep 2026, per Dinesh -- was ~20 pattern words, each hand-
+    // drawn as a few SVG shapes below (silkPatternOverlay). Rebuilt from
+    // Dinesh's real pattern/icon PNG library (SILKS PATTERNS AND ICONS/
+    // patterns.json + patterns-Lookup names.json, cleaned up: fixed a
+    // trailing-comma JSON error in the source lookup file, dropped a
+    // couple of 2-letter synonyms from that same file ("mi", "vs") that
+    // were a substring false-positive risk, and dropped one stray duplicate
+    // asset filename ("CLUB (1)")), giving ~50 real patterns instead of the
+    // previous 8, plus ~20 named icon emblems (single-letter icons A-Z were
+    // left out -- far too short to safely substring-match in free text).
+    // Every word here maps to an actual PNG under public/silks/patterns|
+    // icons/ (see silkPatternOverlay) rather than a hand-drawn shape.
+    var SILK_OVERLAY_MAP = {
+      "checks": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chevron": { slug: "chevron", kind: "pattern", mode: "alpha" },
+      "circle": { slug: "circle", kind: "pattern", mode: "alpha" },
+      "cross": { slug: "cross", kind: "pattern", mode: "alpha" },
+      "diablo": { slug: "diablo", kind: "pattern", mode: "luminance" },
+      "diagonal halves": { slug: "diagonal-halves", kind: "pattern", mode: "luminance" },
+      "diagonal stripes": { slug: "diagonal-stripes", kind: "pattern", mode: "alpha" },
+      "diamond check": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "diamond stripe": { slug: "diamond-stripe", kind: "pattern", mode: "alpha" },
+      "four diamonds": { slug: "four-diamonds", kind: "pattern", mode: "alpha" },
+      "halved vertical": { slug: "halved-vertical", kind: "pattern", mode: "luminance" },
+      "halved": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "hoops": { slug: "hoops", kind: "pattern", mode: "luminance" },
+      "horizontal rays": { slug: "horizontal-rays", kind: "pattern", mode: "alpha" },
+      "quarters": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "rays": { slug: "rays", kind: "pattern", mode: "alpha" },
+      "seams": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "spots": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "squares": { slug: "squares", kind: "pattern", mode: "alpha" },
+      "stars": { slug: "stars", kind: "pattern", mode: "alpha" },
+      "stripe": { slug: "stripe", kind: "pattern", mode: "alpha" },
+      "stripes": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "tartan": { slug: "tartan", kind: "pattern", mode: "alpha" },
+      "band": { slug: "band", kind: "pattern", mode: "alpha" },
+      "armband": { slug: "band", kind: "pattern", mode: "alpha" },
+      "armbands": { slug: "band", kind: "pattern", mode: "alpha" },
+      "armlet": { slug: "band", kind: "pattern", mode: "alpha" },
+      "armlets": { slug: "band", kind: "pattern", mode: "alpha" },
+      "disc": { slug: "disc", kind: "icon", mode: "alpha" },
+      "chevrons": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "hearts": { slug: "hearts", kind: "pattern", mode: "alpha" },
+      "horses": { slug: "horses", kind: "pattern", mode: "alpha" },
+      "two chevrons": { slug: "two-chevrons", kind: "pattern", mode: "alpha" },
+      "bib": { slug: "bib", kind: "pattern", mode: "alpha" },
+      "braces": { slug: "braces", kind: "pattern", mode: "luminance" },
+      "braid": { slug: "braid", kind: "pattern", mode: "alpha" },
+      "checked crossed sash": { slug: "checked-crossed-sash", kind: "pattern", mode: "alpha" },
+      "checked sash": { slug: "checked-sash", kind: "pattern", mode: "alpha" },
+      "cross lorraine": { slug: "cross-lorraine", kind: "pattern", mode: "alpha" },
+      "crossed sashes": { slug: "crossed-sashes", kind: "pattern", mode: "alpha" },
+      "diamond sash": { slug: "diamond-sash", kind: "pattern", mode: "alpha" },
+      "diamonds_t": { slug: "diamonds-t", kind: "pattern", mode: "alpha" },
+      "diamond_band": { slug: "diamond-band", kind: "pattern", mode: "alpha" },
+      "double vee": { slug: "double-vee", kind: "pattern", mode: "alpha" },
+      "epaulettes": { slug: "epaulettes", kind: "pattern", mode: "alpha" },
+      "hearts_t": { slug: "hearts-t", kind: "pattern", mode: "alpha" },
+      "right sash": { slug: "right-sash", kind: "pattern", mode: "alpha" },
+      "sash": { slug: "sash", kind: "pattern", mode: "alpha" },
+      "shamrocks": { slug: "shamrocks", kind: "pattern", mode: "alpha" },
+      "spots sash": { slug: "spots-sash", kind: "pattern", mode: "alpha" },
+      "star sash": { slug: "star-sash", kind: "pattern", mode: "alpha" },
+      "stars stripe": { slug: "stars-stripe", kind: "pattern", mode: "alpha" },
+      "striped sash": { slug: "striped-sash", kind: "pattern", mode: "alpha" },
+      "thirds": { slug: "thirds", kind: "pattern", mode: "alpha" },
+      "vee": { slug: "vee", kind: "pattern", mode: "alpha" },
+      "yoke": { slug: "yoke", kind: "pattern", mode: "alpha" },
+      "braids": { slug: "braid", kind: "pattern", mode: "alpha" },
+      "cross belts": { slug: "crossed-sashes", kind: "pattern", mode: "alpha" },
+      "cross sashes": { slug: "crossed-sashes", kind: "pattern", mode: "alpha" },
+      "crossed sash": { slug: "crossed-sashes", kind: "pattern", mode: "alpha" },
+      "diagonals": { slug: "diagonal-halves", kind: "pattern", mode: "luminance" },
+      "diagonal half": { slug: "diagonal-halves", kind: "pattern", mode: "luminance" },
+      "halved diagonal": { slug: "diagonal-halves", kind: "pattern", mode: "luminance" },
+      "diagonal striped": { slug: "diagonal-stripes", kind: "pattern", mode: "alpha" },
+      "double braces": { slug: "double-braces", kind: "pattern", mode: "alpha" },
+      "double stripes": { slug: "double-braces", kind: "pattern", mode: "alpha" },
+      "epaulets": { slug: "epaulettes", kind: "pattern", mode: "alpha" },
+      "quartered diamond": { slug: "four-diamonds", kind: "pattern", mode: "alpha" },
+      "inverted vee": { slug: "inverted-vee", kind: "pattern", mode: "alpha" },
+      "seamed": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "coutures": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "piping": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "pois": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "dots": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "stars sash": { slug: "star-sash", kind: "pattern", mode: "alpha" },
+      "starred sash": { slug: "star-sash", kind: "pattern", mode: "alpha" },
+      "etoiles": { slug: "stars", kind: "pattern", mode: "alpha" },
+      "bande": { slug: "stripe", kind: "pattern", mode: "alpha" },
+      "panel": { slug: "stripe", kind: "pattern", mode: "alpha" },
+      "vees": { slug: "vee", kind: "pattern", mode: "alpha" },
+      "yolk": { slug: "yoke", kind: "pattern", mode: "alpha" },
+      "brace": { slug: "braces", kind: "pattern", mode: "luminance" },
+      "bretelles": { slug: "braces", kind: "pattern", mode: "luminance" },
+      "chequered crossed sash": { slug: "checked-crossed-sash", kind: "pattern", mode: "alpha" },
+      "chequered sashes": { slug: "checked-sash", kind: "pattern", mode: "alpha" },
+      "chequered sash": { slug: "checked-sash", kind: "pattern", mode: "alpha" },
+      "checked yoke": { slug: "checked-yoke", kind: "pattern", mode: "alpha" },
+      "check": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "checked": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "checkers": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chequers": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chequered": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "damier": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "checkered": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chervoned": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "chervons": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "chevronnee": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "chevronnees": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "diabolo": { slug: "diablo", kind: "pattern", mode: "luminance" },
+      "chequered diamond": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "checked diamonds": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "checked diamond": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "losanges": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "diamond checks": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "diamonds": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "diamond band": { slug: "diamond-band", kind: "pattern", mode: "alpha" },
+      "diamonds band": { slug: "diamond-band", kind: "pattern", mode: "alpha" },
+      "vertical halves": { slug: "halved-vertical", kind: "pattern", mode: "luminance" },
+      "halves": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "hlvd": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "half": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "hooped": { slug: "hoops", kind: "pattern", mode: "luminance" },
+      "cerclee": { slug: "hoops", kind: "pattern", mode: "luminance" },
+      "cerclees": { slug: "hoops", kind: "pattern", mode: "luminance" },
+      "quartered": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "segmented": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "qtrd": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "ecartelee": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "bars": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "rayee": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "striped": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "hoop": { slug: "band", kind: "pattern", mode: "alpha" },
+      "bands": { slug: "band", kind: "pattern", mode: "alpha" },
+      "cross of lorraine": { slug: "cross-lorraine", kind: "pattern", mode: "alpha" },
+      "circles": { slug: "circle", kind: "pattern", mode: "alpha" },
+      "cros": { slug: "cross", kind: "pattern", mode: "alpha" },
+      "diablos": { slug: "diablo", kind: "pattern", mode: "luminance" },
+      "halveds": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "quarter": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "seam": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "spot": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "square": { slug: "squares", kind: "pattern", mode: "alpha" },
+      "star": { slug: "stars", kind: "pattern", mode: "alpha" },
+      "tartans": { slug: "tartan", kind: "pattern", mode: "alpha" },
+      "heart": { slug: "hearts", kind: "pattern", mode: "alpha" },
+      "horse": { slug: "horses", kind: "pattern", mode: "alpha" },
+      "bibs": { slug: "bib", kind: "pattern", mode: "alpha" },
+      "diamonds_ts": { slug: "diamonds-t", kind: "pattern", mode: "alpha" },
+      "diamond_bands": { slug: "diamond-band", kind: "pattern", mode: "alpha" },
+      "epaulette": { slug: "epaulettes", kind: "pattern", mode: "alpha" },
+      "hearts_ts": { slug: "hearts-t", kind: "pattern", mode: "alpha" },
+      "sashs": { slug: "sash", kind: "pattern", mode: "alpha" },
+      "shamrock": { slug: "shamrocks", kind: "pattern", mode: "alpha" },
+      "third": { slug: "thirds", kind: "pattern", mode: "alpha" },
+      "yokes": { slug: "yoke", kind: "pattern", mode: "alpha" },
+      "diagonal": { slug: "diagonal-halves", kind: "pattern", mode: "luminance" },
+      "epaulet": { slug: "epaulettes", kind: "pattern", mode: "alpha" },
+      "seameds": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "couture": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "pipings": { slug: "seams", kind: "pattern", mode: "alpha" },
+      "poi": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "dot": { slug: "spots", kind: "pattern", mode: "alpha" },
+      "etoile": { slug: "stars", kind: "pattern", mode: "alpha" },
+      "bandes": { slug: "stripe", kind: "pattern", mode: "alpha" },
+      "panels": { slug: "stripe", kind: "pattern", mode: "alpha" },
+      "yolks": { slug: "yoke", kind: "pattern", mode: "alpha" },
+      "bretelle": { slug: "braces", kind: "pattern", mode: "luminance" },
+      "checkeds": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "checker": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chequer": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chequereds": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "damiers": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "checkereds": { slug: "checks", kind: "pattern", mode: "luminance" },
+      "chervoneds": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "chervon": { slug: "chevrons", kind: "pattern", mode: "luminance" },
+      "diabolos": { slug: "diablo", kind: "pattern", mode: "luminance" },
+      "losange": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "diamond": { slug: "diamond-check", kind: "pattern", mode: "alpha" },
+      "halve": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "hlvds": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "halfs": { slug: "halved", kind: "pattern", mode: "luminance" },
+      "hoopeds": { slug: "hoops", kind: "pattern", mode: "luminance" },
+      "quartereds": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "segmenteds": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "qtrds": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "ecartelees": { slug: "quarters", kind: "pattern", mode: "luminance" },
+      "bar": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "rayees": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "stripeds": { slug: "stripes", kind: "pattern", mode: "luminance" },
+      "angel": { slug: "angel", kind: "icon", mode: "alpha" },
+      "atb logo": { slug: "atb-logo", kind: "icon", mode: "alpha" },
+      "butterfly": { slug: "butterfly", kind: "icon", mode: "alpha" },
+      "cadre": { slug: "cadre", kind: "icon", mode: "alpha" },
+      "crescent": { slug: "crescent", kind: "icon", mode: "alpha" },
+      "crown": { slug: "crown", kind: "icon", mode: "alpha" },
+      "eagle": { slug: "eagle", kind: "icon", mode: "alpha" },
+      "five fleur de lys": { slug: "five-fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur de lys": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "four leaf clover": { slug: "four-leaf-clover", kind: "icon", mode: "luminance" },
+      "horse head": { slug: "horse-head", kind: "icon", mode: "alpha" },
+      "horseshoe": { slug: "horseshoe", kind: "icon", mode: "alpha" },
+      "inverted triangle": { slug: "inverted-triangle", kind: "icon", mode: "alpha" },
+      "lightning bolt": { slug: "lightning-bolt", kind: "icon", mode: "alpha" },
+      "maltese cross": { slug: "maltese-cross", kind: "icon", mode: "alpha" },
+      "maple leaf": { slug: "maple-leaf", kind: "icon", mode: "alpha" },
+      "obelisk": { slug: "obelisk", kind: "icon", mode: "alpha" },
+      "shield": { slug: "shield", kind: "icon", mode: "alpha" },
+      "spade": { slug: "spade", kind: "icon", mode: "alpha" },
+      "spades": { slug: "spades", kind: "icon", mode: "alpha" },
+    };
+    // Longest phrase first, so "diamond check" matches before bare
+    // "diamond" does (same principle as SILK_COLOR_NAMES below).
+    var SILK_OVERLAY_WORDS = Object.keys(SILK_OVERLAY_MAP).sort(function (a, b) { return b.length - a.length; });
 
     function findColorAt(text, startIndex) {
       var rest = text.slice(startIndex);
@@ -145,12 +454,27 @@
       }
       return found;
     }
-    function findPatternWord(text) {
-      for (var i = 0; i < SILK_PATTERN_WORDS.length; i++) {
-        var idx = text.indexOf(SILK_PATTERN_WORDS[i]);
-        if (idx !== -1) return { word: SILK_PATTERN_WORDS[i], index: idx };
+    // Longest-match-at-each-position scan for pattern/icon words, same
+    // structure as findColorAt/findColorMentions above -- finds EVERY
+    // pattern mention in the text (not just the first), since a real
+    // description can name a different pattern for the cap or sleeves than
+    // the body (e.g. "Navy Blue, Hot Pink Horse Logo, Seams Cap" -- Horse
+    // is the BODY pattern, Seams is a SEPARATE, CAP-only pattern -- added
+    // 18 Sep 2026, per Dinesh, a real-example breakdown).
+    function findPatternAt(text, startIndex) {
+      var rest = text.slice(startIndex);
+      for (var i = 0; i < SILK_OVERLAY_WORDS.length; i++) {
+        if (rest.indexOf(SILK_OVERLAY_WORDS[i]) === 0) return SILK_OVERLAY_WORDS[i];
       }
       return null;
+    }
+    function findAllPatternMentions(text) {
+      var found = [];
+      for (var i = 0; i < text.length; i++) {
+        var word = findPatternAt(text, i);
+        if (word) { found.push({ word: word, index: i, end: i + word.length }); i += word.length - 1; }
+      }
+      return found;
     }
     // Color mentioned closest before a given text index (used to pick which
     // color belongs to "sleeves"/"cap"/a pattern word rather than just
@@ -162,7 +486,29 @@
       }
       return best ? best.name : null;
     }
-
+    // Colour for ONE pattern mention: the nearest colour mentioned BEFORE
+    // it (e.g. "Light Blue Stripes" -> light blue), or, if none precedes
+    // it, the nearest one mentioned after (covers "Purple, White Star"
+    // where the colour comes first in the sentence but still reads as
+    // "the star is white"). Deliberately STRICT before/after, not a fuzzy
+    // nearby-either-direction window -- an earlier version used a "within
+    // 20 chars either side" window and that let a colour meant for a LATER
+    // region (e.g. "Pink Armbands") leak backwards and get taken as the
+    // pattern's own colour instead (confirmed 18 Sep 2026, per Dinesh's
+    // worked examples: "White, Light Blue Stripes, Pink Armbands And Cap"
+    // was rendering the stripes pattern in pink, not light blue). Used to
+    // also exclude a "before" colour that equals baseColor, on the theory
+    // that it was just restating the body colour rather than the pattern's
+    // own -- dropped that exclusion (18 Sep 2026, per Dinesh's "White,
+    // Emerald Green Right Sash, Sleeves, Cap, White Quarters": the White
+    // Quarters pattern is genuinely coloured White, same as the body, and
+    // excluding it made the colour wrongly fall back to Emerald Green).
+    function resolvePatternColor(mentions, baseColor, patternIndex) {
+      var before = mentions.filter(function (m) { return m.index < patternIndex; });
+      if (before.length) return before[before.length - 1].name;
+      var afterColor = mentions.filter(function (m) { return m.index > patternIndex; })[0];
+      return afterColor ? afterColor.name : null;
+    }
     function parseSilkDescription(description) {
       var text = String(description || '').toLowerCase();
       var mentions = findColorMentions(text);
@@ -171,112 +517,272 @@
       var sleeveIdx = text.indexOf('sleeve');
       if (sleeveIdx === -1) sleeveIdx = text.indexOf('arm');
       var capIdx = text.indexOf('cap');
-      var sleeveColor = sleeveIdx !== -1 ? (nearestColorBefore(mentions, sleeveIdx) || baseColor) : baseColor;
-      var capColor = capIdx !== -1 ? (nearestColorBefore(mentions, capIdx) || baseColor) : baseColor;
-      var pattern = findPatternWord(text);
-      var patternType = null;
-      var patternColor = null;
-      if (pattern) {
-        // Ignore a pattern word that's actually describing the sleeves/cap
-        // themselves (e.g. "...Sleeves And Cap" after a "Stars" mention
-        // already assigned above) -- only treat it as a BODY pattern when
-        // there's a second, distinct color available for it.
-        var candidate = mentions.filter(function (m) { return m.name !== baseColor && m.index < pattern.index + 20; });
-        var afterColor = mentions.filter(function (m) { return m.index > pattern.index; })[0];
-        patternColor = (candidate.length ? candidate[candidate.length - 1].name : null) || (afterColor ? afterColor.name : null);
-        if (patternColor && patternColor !== baseColor) {
-          patternType = pattern.word.replace(/s$/, '').replace('checkered', 'check').replace('checkers', 'check')
-            .replace('hooped', 'hoop').replace('quartered', 'quarter').replace('halves', 'half').replace('halved', 'half').replace('striped', 'stripe');
-        }
+
+      // A pattern/region word pair only counts as "directly attached"
+      // (e.g. "Seams Cap") when nothing separates them but whitespace --
+      // a COMMA in between means the region word starts a new clause
+      // instead (e.g. "Yellow Seams, Sleeves Grey": the comma means
+      // "seams" is NOT attached to "sleeves").
+      function noCommaBetween(i, j) {
+        return text.slice(Math.min(i, j), Math.max(i, j)).indexOf(',') === -1;
       }
+
+      // Every pattern mention in the description, assigned to a region:
+      // one immediately before "sleeve(s)"/"arm(bands)" or "cap" (just a
+      // word or two of gap, e.g. "Seams Cap") belongs to THAT region
+      // specifically; anything left over is queued as "unassigned" and
+      // resolved below via the current-region timeline.
+      var patternMentions = findAllPatternMentions(text);
+      var bodyPatterns = [], capPatterns = [], sleevePatterns = [];
+      var ADJACENT_GAP = 3; // just whitespace between the pattern word and the region word
+      var unassigned = [];
+      patternMentions.forEach(function (p) {
+        if (!capPatterns.length && capIdx !== -1 && capIdx >= p.end && capIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.end, capIdx)) {
+          capPatterns.push(p);
+        // sleeveIdx >= p.index (not p.end) also catches a pattern word that
+        // IS itself the sleeve marker, e.g. "armband" -- sleeveIdx points at
+        // the "arm" inside it, which sits before the pattern's own end.
+        } else if (!sleevePatterns.length && sleeveIdx !== -1 && sleeveIdx >= p.index && sleeveIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.index, sleeveIdx)) {
+          sleevePatterns.push(p);
+        } else {
+          unassigned.push(p);
+        }
+      });
+
+      // "Pink Armband And Cap" -- a plain "and cap"/"and also cap" bridge
+      // right after the sleeve's OWN pattern means the cap gets that exact
+      // same pattern too (not just its colour), same idea mirrored for
+      // "and sleeve(s)" after a cap-only pattern (added 16 Sep 2026, per
+      // Dinesh, re: "Cap color mention aagi irukku Pink Armband and Cap").
+      if (sleevePatterns.length && !capPatterns.length && capIdx !== -1) {
+        var sleeveCapBridge = text.slice(sleeveIdx, capIdx);
+        if (/^(sleeves?|arms?|armbands?)\s+and\s+(also\s+)?$/.test(sleeveCapBridge)) capPatterns = sleevePatterns.slice();
+      } else if (capPatterns.length && !sleevePatterns.length && sleeveIdx !== -1 && sleeveIdx > capIdx) {
+        var capSleeveBridge = text.slice(capIdx, sleeveIdx);
+        if (/^cap\s+and\s+(also\s+)?$/.test(capSleeveBridge)) sleevePatterns = capPatterns.slice();
+      }
+
+      // A "<region> <colour>" or "<colour> <region>" comma clause on its
+      // own (e.g. "Sleeves Grey", "Cap Blue", "White Sleeves") declares
+      // that region's OWN plain fill colour explicitly, and marks that
+      // region as the "current" one for any pattern mention still
+      // unassigned after it (e.g. the 2nd "Yellow Seams" in "Grey, Yellow
+      // Seams, Sleeves Grey, Yellow Seams, Cap Blue, Yellow Stars" belongs
+      // to the sleeve, not the body, because it comes after "Sleeves
+      // Grey") -- added 17 Sep 2026, per Dinesh, real multi-region example.
+      var segments = [];
+      (function () {
+        var start = 0;
+        for (var i = 0; i <= text.length; i++) {
+          if (i === text.length || text[i] === ',') {
+            var raw = text.slice(start, i);
+            var leading = raw.length - raw.replace(/^\s+/, '').length;
+            var trimmed = raw.trim();
+            if (trimmed) segments.push({ text: trimmed, index: start + leading });
+            start = i + 1;
+          }
+        }
+      })();
+      var explicitSleeveColor = null, explicitCapColor = null;
+      var regionTimeline = [];
+      segments.slice(1).forEach(function (seg) {
+        var m;
+        if ((m = /^(.+?)\s+(sleeves?|arms?)$/.exec(seg.text)) && findColorAt(m[1], 0) === m[1]) {
+          explicitSleeveColor = m[1]; regionTimeline.push({ region: 'sleeve', index: seg.index });
+        } else if ((m = /^(sleeves?|arms?)\s+(.+)$/.exec(seg.text)) && findColorAt(m[2], 0) === m[2]) {
+          explicitSleeveColor = m[2]; regionTimeline.push({ region: 'sleeve', index: seg.index });
+        } else if ((m = /^(.+?)\s+cap$/.exec(seg.text)) && findColorAt(m[1], 0) === m[1]) {
+          explicitCapColor = m[1]; regionTimeline.push({ region: 'cap', index: seg.index });
+        } else if ((m = /^cap\s+(.+)$/.exec(seg.text)) && findColorAt(m[1], 0) === m[1]) {
+          explicitCapColor = m[1]; regionTimeline.push({ region: 'cap', index: seg.index });
+        // A clause that's JUST the bare region word on its own, no colour
+        // in the same clause (e.g. "...Right Sash, Sleeves, Cap, White
+        // Quarters") still switches the "current region" for later pattern
+        // mentions, and inherits the nearest earlier colour as its own
+        // explicit fill -- added 18 Sep 2026, per Dinesh, real example
+        // "White, Emerald Green Right Sash, Sleeves, Cap, White Quarters"
+        // (Sleeves and Cap both plain Emerald Green, Cap ALSO gets its own
+        // White Quarters pattern on top).
+        } else if (/^(sleeves?|arms?)$/.test(seg.text)) {
+          explicitSleeveColor = nearestColorBefore(mentions, seg.index) || explicitSleeveColor;
+          regionTimeline.push({ region: 'sleeve', index: seg.index });
+        } else if (seg.text === 'cap') {
+          explicitCapColor = nearestColorBefore(mentions, seg.index) || explicitCapColor;
+          regionTimeline.push({ region: 'cap', index: seg.index });
+        }
+      });
+      function currentRegionAt(index) {
+        var region = 'body';
+        regionTimeline.forEach(function (r) { if (r.index < index) region = r.region; });
+        return region;
+      }
+      unassigned.forEach(function (p) {
+        var region = currentRegionAt(p.index);
+        if (region === 'sleeve') sleevePatterns.push(p);
+        else if (region === 'cap') capPatterns.push(p);
+        else bodyPatterns.push(p);
+      });
+
+      // A region with its OWN pattern but no explicit colour of its own
+      // (e.g. "Seams Cap") defaults its base fill to the body colour (18
+      // Sep 2026, per Dinesh: "Cap-la color mention panna illanna, Default
+      // ha body color cap edukkanu"); an EXPLICIT "<region> <colour>"
+      // clause (above) always wins over that default.
+      var sleeveColor = explicitSleeveColor
+        ? explicitSleeveColor
+        : (sleevePatterns.length
+            ? baseColor
+            : (sleeveIdx !== -1 ? (nearestColorBefore(mentions, sleeveIdx) || baseColor) : baseColor));
+      var capColor = explicitCapColor
+        ? explicitCapColor
+        : (capPatterns.length
+            ? baseColor
+            : (capIdx !== -1 ? (nearestColorBefore(mentions, capIdx) || baseColor) : baseColor));
+
+      // Two (or more) pattern mentions can land in the SAME region (e.g.
+      // "White, Black Braces, Green Stripe" -- both are body patterns, no
+      // sleeve/cap marker at all) -- stack them in mention order, first
+      // mentioned drawn first/underneath and later ones overlapping on top,
+      // instead of the extra ones being silently dropped (18 Sep 2026, per
+      // Dinesh: "2 pattern vandalu load aaganu, 1st mention pandra pattern
+      // 1st, 2nd Mention pandra Pattern 2nd Overlap aaganu").
+      function overlaysFor(list) {
+        return list.map(function (p) {
+          var color = resolvePatternColor(mentions, baseColor, p.index);
+          if (!color) return null;
+          var overlay = SILK_OVERLAY_MAP[p.word];
+          return { slug: overlay.slug, kind: overlay.kind, mode: overlay.mode, color: SILK_COLOR_MAP[color] };
+        }).filter(Boolean);
+      }
+
       return {
         base: SILK_COLOR_MAP[baseColor],
         sleeve: SILK_COLOR_MAP[sleeveColor] || SILK_COLOR_MAP[baseColor],
         cap: SILK_COLOR_MAP[capColor] || SILK_COLOR_MAP[baseColor],
-        patternType: patternType,
-        patternColor: patternColor ? SILK_COLOR_MAP[patternColor] : null,
+        bodyPattern: overlaysFor(bodyPatterns),
+        capPattern: overlaysFor(capPatterns),
+        sleevePattern: overlaysFor(sleevePatterns),
       };
     }
 
-    // Body shape is a simple jacket silhouette in a 40x44 viewBox: cap
-    // circle on top, a tapered torso, two angled sleeve wedges.
-    var SILK_BODY_PATH = 'M13,14 L27,14 L25,40 L15,40 Z';
-    var SILK_LEFT_SLEEVE_PATH = 'M13,14 L4,25 L8,29 L15,19 Z';
-    var SILK_RIGHT_SLEEVE_PATH = 'M27,14 L36,25 L32,29 L25,19 Z';
+    // Body shape is a jacket silhouette in a 40x44 viewBox: a rounded dome
+    // cap, a tapered torso with softly rounded shoulders, two curved FULL
+    // sleeves (shoulder to a cuff near the hem, not short/elbow-length)
+    // tapering to a cuff. Redrawn 17 Sep 2026, per Dinesh, to match a
+    // supplied silk template (rounded cap, collar seam, curved side
+    // panels, full sleeves with a cuff) instead of the original flat-edged
+    // shapes -- the body/cap bounding boxes silkRegionOverlay masks
+    // against (13,14,14,26 body / 14,1,12,12 cap) are unchanged; the
+    // SLEEVE box grew taller and narrower (4,14,32,15 -> 6,14,28,25) for
+    // full-length (18 Sep 2026, per Dinesh: "Sleeves Full Sleeves podunga"
+    // -- was short/elbow-length) then slimmer (same day, "Sleeves Sinnada
+    // Size podunga" -- the sleeve wedges read as too bulky) sleeves.
+    var SILK_CAP_PATH = 'M14,8 C14,4.5 16.5,2 20,2 C23.5,2 26,4.5 26,8 C26,9.8 23.5,10.6 20,10.6 C16.5,10.6 14,9.8 14,8 Z';
+    var SILK_BODY_PATH = 'M13,14 C13,18 14,24 14.5,29 C15,33 14.7,36.5 15,40 L25,40 C25.3,36.5 25,33 25.5,29 C26,24 27,18 27,14 C24,16 16,16 13,14 Z';
+    var SILK_LEFT_SLEEVE_PATH = 'M13,14 C10.5,15 8,17.5 7,22 C6.7,27 7.2,32 8,36.5 C9,37.8 10.5,38 11.5,37.2 C11.8,32 12.3,25 14,19.5 C13.5,17.5 13.2,15.5 13,14 Z';
+    var SILK_RIGHT_SLEEVE_PATH = 'M27,14 C29.5,15 32,17.5 33,22 C33.3,27 32.8,32 32,36.5 C31,37.8 29.5,38 28.5,37.2 C28.2,32 27.7,25 26,19.5 C26.5,17.5 26.8,15.5 27,14 Z';
+    // Purely decorative seam lines (stroke only, drawn on top of the fills)
+    // echoing the collar, cuff and side-panel lines on the reference
+    // template -- these don't affect any clip/mask region.
+    var SILK_COLLAR_SEAM = 'M17,13.2 Q20,15.5 23,13.2';
+    var SILK_LEFT_CUFF_SEAM = 'M7,35.8 Q9.5,38 11.5,36.2';
+    var SILK_RIGHT_CUFF_SEAM = 'M33,35.8 Q30.5,38 28.5,36.2';
+    var SILK_LEFT_SIDE_SEAM = 'M14.2,18 C14.6,23 15,29 15.3,35';
+    var SILK_RIGHT_SIDE_SEAM = 'M25.8,18 C25.4,23 25,29 24.7,35';
 
-    function silkPatternOverlay(patternType, color, clipId) {
-      var g = '<g clip-path="url(#' + clipId + ')">';
-      switch (patternType) {
-        case 'quarter':
-          g += '<rect x="20" y="14" width="8" height="13" fill="' + color + '"/><rect x="13" y="27" width="7" height="13" fill="' + color + '"/>';
-          break;
-        case 'half':
-          g += '<rect x="20" y="14" width="10" height="26" fill="' + color + '"/>';
-          break;
-        case 'hoop':
-        case 'stripe':
-          g += '<rect x="13" y="17" width="14" height="4" fill="' + color + '"/><rect x="13" y="25" width="14" height="4" fill="' + color + '"/><rect x="13" y="33" width="14" height="4" fill="' + color + '"/>';
-          break;
-        case 'diamond':
-          [[20, 18], [15, 27], [25, 27], [20, 35]].forEach(function (p) {
-            g += '<rect x="' + (p[0] - 3) + '" y="' + (p[1] - 3) + '" width="6" height="6" fill="' + color + '" transform="rotate(45 ' + p[0] + ' ' + p[1] + ')"/>';
-          });
-          break;
-        case 'star':
-          [[20, 20], [16, 32], [24, 32]].forEach(function (p) {
-            g += '<path d="M' + p[0] + ',' + (p[1] - 3) + ' l1,2.2 2.4,0.2 -1.8,1.6 0.6,2.4 -2.2,-1.3 -2.2,1.3 0.6,-2.4 -1.8,-1.6 2.4,-0.2 Z" fill="' + color + '"/>';
-          });
-          break;
-        case 'spot':
-          [[18, 20], [23, 25], [17, 31], [23, 35]].forEach(function (p) {
-            g += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="2.4" fill="' + color + '"/>';
-          });
-          break;
-        case 'check':
-          for (var row = 0; row < 5; row++) {
-            for (var col = 0; col < 3; col++) {
-              if ((row + col) % 2 === 0) g += '<rect x="' + (13 + col * 5) + '" y="' + (14 + row * 5.5) + '" width="5" height="5.5" fill="' + color + '"/>';
-            }
-          }
-          break;
-        case 'chevron':
-          g += '<path d="M13,20 L20,26 L27,20 L27,25 L20,31 L13,25 Z" fill="' + color + '"/><path d="M14,30 L20,35 L26,30 L26,35 L20,40 L14,35 Z" fill="' + color + '"/>';
-          break;
-        case 'sash':
-          g += '<rect x="10" y="24" width="20" height="6" fill="' + color + '" transform="rotate(-25 20 27)"/>';
-          break;
-        default:
-          break;
-      }
-      return g + '</g>';
+    // Replaced 18 Sep 2026, per Dinesh -- was a hand-drawn shape per pattern
+    // (8 total, switch-case above). Now overlays the actual pattern/icon PNG
+    // (public/silks/patterns|icons/<slug>.png -- copied from Dinesh's asset
+    // library) as an SVG mask over a solid rect in the pattern's colour, so
+    // any of the ~70 real patterns/icons in SILK_OVERLAY_MAP can be drawn
+    // without a bespoke shape for each one. The PNGs are opaque-black
+    // shape-on-transparent-background (confirmed by sampling STARS.png),
+    // so `mask-type="alpha"` is required -- SVG's default mask mode uses
+    // LUMINANCE, which would make these solid-black source pixels read as
+    // *hidden* (luminance 0) instead of visible. Generalised to any clip
+    // region (body/cap/sleeves) same day, so a description can carry a
+    // different pattern per region (e.g. "Seams Cap").
+    function silkRegionOverlay(overlay, clipId, boxX, boxY, boxW, boxH) {
+      var folder = overlay.kind === 'icon' ? 'icons' : 'patterns';
+      var maskId = 'silkPatMask' + (_silkClipIdSeq++);
+      // Two DIFFERENT authoring conventions turned up across the asset
+      // library (confirmed 18 Sep 2026, per Dinesh: "Black, White Stripes,
+      // White Sleeves, White Cap ye idu load agudilla" -- the whole body
+      // rendered solid white, base colour invisible): sparse single-emblem
+      // assets (stars, circle, horse...) are drawn opaque-shape-on-
+      // TRANSPARENT-background, needing `mask-type="alpha"`; but ~10 big
+      // two-tone TILING patterns (checks/stripes/chevrons/hoops/quarters/
+      // halved/braces/diablo/diagonal-halves) turned out to be fully OPAQUE
+      // everywhere with the pattern encoded as black-vs-white LUMINANCE
+      // instead (confirmed by sampling stripes.png: 0% transparent pixels,
+      // exactly two luminance values) -- alpha-masking one of those just
+      // shows the whole rect, hiding the base colour completely. Each
+      // overlay entry now carries which convention its own asset uses
+      // (classified once via Python/PIL, see mode: "alpha"|"luminance" in
+      // SILK_OVERLAY_MAP); "luminance" mode omits mask-type entirely so SVG
+      // falls back to its default (luminance-based) masking instead.
+      var maskTypeAttr = overlay.mode === 'luminance' ? '' : ' mask-type="alpha"';
+      // preserveAspectRatio="none" stretches the (square) source PNG to
+      // fill the region's own bounding box -- same trade-off as every
+      // other best-effort visual here.
+      return '<mask id="' + maskId + '"' + maskTypeAttr + ' maskUnits="userSpaceOnUse" x="' + boxX + '" y="' + boxY + '" width="' + boxW + '" height="' + boxH + '">' +
+          '<image href="/silks/' + folder + '/' + overlay.slug + '.png" x="' + boxX + '" y="' + boxY + '" width="' + boxW + '" height="' + boxH + '" preserveAspectRatio="none"/>' +
+        '</mask>' +
+        '<g clip-path="url(#' + clipId + ')">' +
+          '<rect x="' + boxX + '" y="' + boxY + '" width="' + boxW + '" height="' + boxH + '" fill="' + overlay.color + '" mask="url(#' + maskId + ')"/>' +
+        '</g>';
     }
 
     var _silkClipIdSeq = 0;
     function renderSilkSvg(description) {
       var parsed = parseSilkDescription(description);
       if (!parsed) return renderMissingSilk();
-      var clipId = 'silkClip' + (_silkClipIdSeq++);
-      return '<svg class="silk-icon" viewBox="0 0 40 44" width="35" height="38" title="' + escapeHtmlClient(description) + '">' +
+      var bodyClipId = 'silkClip' + (_silkClipIdSeq++);
+      var capClipId = 'silkClip' + (_silkClipIdSeq++);
+      var sleeveClipId = 'silkClip' + (_silkClipIdSeq++);
+      return '<svg class="silk-icon" viewBox="0 0 40 44" width="52" height="57" title="' + escapeHtmlClient(description) + '">' +
         '<title>' + escapeHtmlClient(description) + '</title>' +
-        '<defs><clipPath id="' + clipId + '"><path d="' + SILK_BODY_PATH + '"/></clipPath></defs>' +
+        '<defs>' +
+          '<clipPath id="' + bodyClipId + '"><path d="' + SILK_BODY_PATH + '"/></clipPath>' +
+          '<clipPath id="' + capClipId + '"><path d="' + SILK_CAP_PATH + '"/></clipPath>' +
+          '<clipPath id="' + sleeveClipId + '"><path d="' + SILK_LEFT_SLEEVE_PATH + '"/><path d="' + SILK_RIGHT_SLEEVE_PATH + '"/></clipPath>' +
+        '</defs>' +
         '<path d="' + SILK_LEFT_SLEEVE_PATH + '" fill="' + parsed.sleeve + '" stroke="#0003" stroke-width="0.5"/>' +
         '<path d="' + SILK_RIGHT_SLEEVE_PATH + '" fill="' + parsed.sleeve + '" stroke="#0003" stroke-width="0.5"/>' +
+        parsed.sleevePattern.map(function (o) { return silkRegionOverlay(o, sleeveClipId, 6, 14, 28, 25); }).join('') +
         '<path d="' + SILK_BODY_PATH + '" fill="' + parsed.base + '" stroke="#0003" stroke-width="0.5"/>' +
-        (parsed.patternType ? silkPatternOverlay(parsed.patternType, parsed.patternColor, clipId) : '') +
-        '<circle cx="20" cy="7" r="6" fill="' + parsed.cap + '" stroke="#0003" stroke-width="0.5"/>' +
+        parsed.bodyPattern.map(function (o) { return silkRegionOverlay(o, bodyClipId, 13, 14, 14, 26); }).join('') +
+        '<path d="' + SILK_CAP_PATH + '" fill="' + parsed.cap + '" stroke="#0003" stroke-width="0.5"/>' +
+        parsed.capPattern.map(function (o) { return silkRegionOverlay(o, capClipId, 14, 1, 12, 12); }).join('') +
+        '<path d="' + SILK_COLLAR_SEAM + '" fill="none" stroke="#0003" stroke-width="0.4"/>' +
+        '<path d="' + SILK_LEFT_CUFF_SEAM + '" fill="none" stroke="#0003" stroke-width="0.4"/>' +
+        '<path d="' + SILK_RIGHT_CUFF_SEAM + '" fill="none" stroke="#0003" stroke-width="0.4"/>' +
+        '<path d="' + SILK_LEFT_SIDE_SEAM + '" fill="none" stroke="#0003" stroke-width="0.4"/>' +
+        '<path d="' + SILK_RIGHT_SIDE_SEAM + '" fill="none" stroke="#0003" stroke-width="0.4"/>' +
         '</svg>';
+    }
+
+    // Greyhounds don't wear jockey silks -- there's no description to
+    // parse a colour scheme out of, so every runner fell back to
+    // renderMissingSilk()'s dashed placeholder. Dinesh supplied a standard
+    // set of box-number icons (14 Sep 2026) to use instead, one per box
+    // number 1-10 (greyhound fields never run more than that), served from
+    // public/greyhound-silks/.
+    function renderGreyhoundBoxIcon(tabNo) {
+      if (!tabNo || tabNo < 1 || tabNo > 10) return renderMissingSilk();
+      return '<img class="silk-icon" src="/greyhound-silks/' + tabNo + '.png" width="52" height="57" alt="Box ' + tabNo + '" title="Box ' + tabNo + '">';
     }
 
     // Highlights a runner with no silk description at all in the DB (rather
     // than just leaving the cell blank) -- a dashed, muted outline of the
     // same jacket shape so it still reads as "silk", just visibly missing.
     function renderMissingSilk() {
-      return '<svg class="silk-icon silk-missing" viewBox="0 0 40 44" width="35" height="38" title="No silk data available">' +
+      return '<svg class="silk-icon silk-missing" viewBox="0 0 40 44" width="52" height="57" title="No silk data available">' +
         '<title>No silk data available</title>' +
         '<path d="' + SILK_LEFT_SLEEVE_PATH + '"/>' +
         '<path d="' + SILK_RIGHT_SLEEVE_PATH + '"/>' +
         '<path d="' + SILK_BODY_PATH + '"/>' +
-        '<circle cx="20" cy="7" r="6"/>' +
+        '<path d="' + SILK_CAP_PATH + '"/>' +
         '</svg>';
     }
 
@@ -292,8 +798,41 @@
       });
     }
 
+    // Plays a race-replay video as an overlay on top of the current page,
+    // instead of the link's own target="_blank" navigating away to a new
+    // tab (18 Sep 2026, per Dinesh: "video play click panna, video overlap
+    // play aganum"). Pausing + clearing src on close stops it playing (and
+    // downloading) in the background once dismissed.
+    function playVideoOverlay(url) {
+      var player = document.getElementById('videoModalPlayer');
+      player.src = url;
+      document.getElementById('videoModal').classList.add('open');
+    }
+    function closeVideoOverlay() {
+      var player = document.getElementById('videoModalPlayer');
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+      document.getElementById('videoModal').classList.remove('open');
+    }
+
     function closeRaceDetail() {
       document.getElementById('detailModal').classList.remove('open');
+      // Closing a race opened in its own full-screen tab (see
+      // .race-standalone-view below) reveals the normal schedule-grid
+      // dashboard right there in that same tab, instead of leaving it on a
+      // blank/half-rendered page.
+      document.body.classList.remove('race-standalone-view');
+      if (_originalExportPanelHtml !== null) {
+        var panel = document.getElementById('exportDataPanel');
+        if (panel) panel.innerHTML = _originalExportPanelHtml;
+      }
+      try {
+        var params = new URLSearchParams(location.search);
+        params.delete('race');
+        var qs = params.toString();
+        history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
+      } catch (e) { /* ignore */ }
     }
 
     // Which runners in the currently-open popup are flagged "Missing form
@@ -312,8 +851,107 @@
     var _currentMeetingRaces = [];
     // Grid-cell classes that mean "this race has an issue", other than
     // missing-form (tracked separately since confirming can clear just
-    // that one, live, without a fresh read of the grid).
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'horse-age-issue', 'missing-race-comment'];
+    // that one, live, without a fresh read of the grid). These started
+    // life as literal CSS class names on the grid cell; the cell doesn't
+    // carry them as classes any more (15 Sep 2026, per Dinesh -- issues
+    // only show via the meeting's Status column now), but the exact same
+    // words are still used as the space-separated tokens in each cell's
+    // data-otherissue-flags attribute (see raceView.js), so this list is
+    // reused unchanged as the set of tokens to check for.
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
+
+    // Friendly label + issueFilter <select> code for every token that can
+    // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
+    // below to rebuild the cell warning triangle and the meeting's Status
+    // column live, in place, right after an ignore/confirm click -- without
+    // this those kept showing the OLD warning even after the exact issue
+    // they were about had just been cleared (16 Sep 2026, per Dinesh:
+    // "Issues Ignore pannandu, Warning mark poiranu").
+    var ISSUE_META = {
+      'missing-jockeys': { label: 'Missing Jockey', code: 'missingjockey' },
+      'duplicate-jockey': { label: 'Duplicate Jockey', code: 'duplicatejockey' },
+      'tab-issue': { label: 'Missing/Duplicate TAB number', code: 'missingtab' },
+      'missing-trainer': { label: 'Missing Trainer', code: 'missingtrainer' },
+      'bad-time': { label: 'Schedule Issue', code: 'scheduleissue' },
+      'missing-video': { label: 'Missing Video', code: 'missingvideo' },
+      'horse-age-issue': { label: 'Horse Age Issue', code: 'ageissue' },
+      'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
+      'missing-race-comment': { label: 'Missing Race Comment', code: 'missingracecomment' },
+    };
+
+    // Every ignorable issue currently still active on one race cell, read
+    // straight off its live data-formissue/data-otherissue-flags (the same
+    // two attributes the sync functions below already keep up to date).
+    function cellIssues(cell) {
+      var out = cell.dataset.formissue === 'true' ? [{ label: 'Missing Form Lines', code: 'missingform' }] : [];
+      (cell.dataset.otherissueFlags || '').split(' ').filter(Boolean).forEach(function (tok) {
+        if (ISSUE_META[tok]) out.push(ISSUE_META[tok]);
+      });
+      return out;
+    }
+
+    // Rebuilds this cell's warning triangle (or removes it once every issue
+    // on it is cleared) and the whole meeting row's Status column icon +
+    // race-by-race breakdown, from the current data-formissue/
+    // data-otherissue-flags of every race cell in the row -- called after
+    // every syncGrid*Badge() so an ignore/confirm click is reflected right
+    // away instead of only on the next auto-refresh.
+    function refreshIssueIcons(cell) {
+      var row = cell.closest('tr');
+      if (!row) return;
+
+      var issues = cellIssues(cell);
+      var icon = cell.querySelector('.cell-issue-icon');
+      if (icon) {
+        if (issues.length) icon.setAttribute('title', issues.map(function (i) { return i.label; }).join(', '));
+        else icon.remove();
+      }
+
+      var raceCells = Array.prototype.slice.call(row.querySelectorAll('td.cell.time.clickable[data-race-id]'));
+      var meetingIssueRows = raceCells.map(function (c) {
+        var iss = cellIssues(c);
+        return iss.length ? { rno: c.getAttribute('data-rno'), issues: iss } : null;
+      }).filter(Boolean);
+
+      var statusCell = row.querySelector('td.status-cell');
+      if (!statusCell) return;
+
+      var allCodes = [];
+      meetingIssueRows.forEach(function (ri) {
+        ri.issues.forEach(function (i) { if (allCodes.indexOf(i.code) === -1) allCodes.push(i.code); });
+      });
+      row.setAttribute('data-issues', allCodes.join(' '));
+
+      if (meetingIssueRows.length) {
+        var allReasons = [];
+        meetingIssueRows.forEach(function (ri) {
+          ri.issues.forEach(function (i) { if (allReasons.indexOf(i.label) === -1) allReasons.push(i.label); });
+        });
+        var wasOpen = Boolean(statusCell.querySelector('details.status-detail[open]'));
+        statusCell.innerHTML = '<details class="status-detail"' + (wasOpen ? ' open' : '') + '><summary class="status-icon status-issue" title="' +
+          escapeHtmlClient(allReasons.join(', ')) + ' -- click for a race-by-race breakdown"><i class="fa-solid fa-triangle-exclamation"></i></summary>' +
+          '<div class="status-detail-menu">' + meetingIssueRows.map(function (ri) {
+            return '<div class="status-detail-row"><strong>R' + escapeHtmlClient(ri.rno) + ':</strong> ' + escapeHtmlClient(ri.issues.map(function (i) { return i.label; }).join(', ')) + '</div>';
+          }).join('') + '</div></details>';
+        row.setAttribute('data-hasissue', 'true');
+      } else {
+        statusCell.innerHTML = '<span class="status-icon status-ok" title="Healthy -- no missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing runner comment, missing video, missing race comment, or schedule issue"><i class="fa-solid fa-circle-check"></i></span>';
+        row.setAttribute('data-hasissue', 'false');
+      }
+    }
+
+    // Adds/removes one token from a cell's space-separated
+    // data-otherissue-flags attribute (the live-updatable twin of
+    // OTHER_ISSUE_CLASSES above) -- used by the per-issue-type "confirm/
+    // ignore" sync functions below so each one only touches its own token,
+    // leaving whatever the others currently say alone.
+    function setOtherIssueFlag(cell, flagName, present) {
+      var flags = (cell.dataset.otherissueFlags || '').split(' ').filter(Boolean);
+      var idx = flags.indexOf(flagName);
+      if (present && idx === -1) flags.push(flagName);
+      else if (!present && idx !== -1) flags.splice(idx, 1);
+      cell.dataset.otherissueFlags = flags.join(' ');
+    }
 
     // Race id of whatever's currently shown in the popup -- lets the
     // "confirm no form" handlers below find and live-update the matching
@@ -334,6 +972,19 @@
       }).join('');
     }
 
+    // The schedule grid's race cells are real <a target="_blank" href>
+    // links now (so right-click -> "Open in new tab" and ctrl/cmd/middle-
+    // click work), but a PLAIN click still just opens the popup in place,
+    // same as before that change -- only the modifier-click/right-click
+    // path should navigate anywhere (18 Sep 2026, per Dinesh: "Normal
+    // Click panna, Palaya madhiri open aganu").
+    function handleRaceCellClick(event, id, aEl) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return true;
+      event.preventDefault();
+      showRaceDetail(id, aEl.closest('td'));
+      return false;
+    }
+
     function showRaceDetail(id, cellEl) {
       _currentRaceId = id;
       var modal = document.getElementById('detailModal');
@@ -341,19 +992,44 @@
       content.innerHTML = '<p class="modal-loading">Loading...</p>';
       modal.classList.add('open');
 
-      if (cellEl) {
-        var row = cellEl.closest('tr');
-        _currentMeetingRaces = row
-          ? Array.prototype.slice.call(row.querySelectorAll('td.cell.time.clickable[data-race-id]')).map(function (td) {
-              return {
-                rno: td.getAttribute('data-rno'),
-                id: td.getAttribute('data-race-id'),
-                hasFormIssue: td.classList.contains('missing-form'),
-                hasOtherIssue: OTHER_ISSUE_CLASSES.some(function (c) { return td.classList.contains(c); }),
-              };
-            })
-          : [];
+      // Keeps the address bar (and so "copy link"/"open in new tab" from
+      // THIS tab, and browser back/forward) in sync with whichever race is
+      // actually open -- matches the href already on the grid cell. Skipped
+      // when the URL already says this race (e.g. the initial deep-link
+      // load below), so opening a shared link doesn't push a pointless
+      // duplicate history entry on top of itself.
+      try {
+        var params = new URLSearchParams(location.search);
+        if (params.get('race') !== id) {
+          params.set('race', id);
+          history.pushState(null, '', location.pathname + '?' + params.toString());
+        }
+      } catch (e) { /* ignore */ }
+
+      // Falls back to finding the matching grid cell by its data-race-id
+      // when none was passed in directly (the standalone full-screen view
+      // opened via a fresh ?race=<id> load, with no click to hand us one)
+      // -- the schedule grid is still rendered in the DOM there, just
+      // hidden by .race-standalone-view's CSS, so the OTHER race numbers
+      // for this same meeting are still right there in the same row. Lets
+      // the nav bar (R1/R2/R3...) populate and work in that view too (18
+      // Sep 2026, per Dinesh: "Other races kaattunga Race numbers, click
+      // panni next races poradukku").
+      var row = cellEl ? cellEl.closest('tr') : null;
+      if (!row) {
+        var matchingCell = document.querySelector('td.cell.time.clickable[data-race-id="' + id + '"]');
+        row = matchingCell ? matchingCell.closest('tr') : null;
       }
+      _currentMeetingRaces = row
+        ? Array.prototype.slice.call(row.querySelectorAll('td.cell.time.clickable[data-race-id]')).map(function (td) {
+            return {
+              rno: td.getAttribute('data-rno'),
+              id: td.getAttribute('data-race-id'),
+              hasFormIssue: td.dataset.formissue === 'true',
+              hasOtherIssue: Boolean(td.dataset.otherissueFlags),
+            };
+          })
+        : [];
 
       fetch('/api/race/' + encodeURIComponent(id))
         .then(function (res) {
@@ -364,6 +1040,31 @@
         .catch(function (err) {
           content.innerHTML = '<p class="modal-error">Could not load race detail: ' + escapeHtmlClient(err.message) + '</p>';
         });
+    }
+
+    // Cached at load so closeRaceDetail can put the normal day-wide Export
+    // Data links back once a standalone race view's per-race ones (see
+    // updateExportPanelForRace) are no longer relevant.
+    var _originalExportPanelHtml = null;
+
+    function updateExportPanelForRace(race) {
+      var panel = document.getElementById('exportDataPanel');
+      if (!panel) return;
+      if (_originalExportPanelHtml === null) _originalExportPanelHtml = panel.innerHTML;
+      var params = new URLSearchParams(location.search);
+      var dateStr = params.get('date') || '';
+      var qs = 'date=' + encodeURIComponent(dateStr) +
+        '&race=' + encodeURIComponent(race.id) +
+        '&meeting=' + encodeURIComponent(race.meeting || '') +
+        '&country=' + encodeURIComponent(race.country || '') +
+        '&discipline=' + encodeURIComponent(race.discipline || '');
+      panel.innerHTML = '<span class="report-links">' +
+        '<span class="report-links-label">&#11015; Download this race:</span>' +
+        '<a class="report-link" href="/race-report.csv?' + qs + '">CSV</a>' +
+        '<a class="report-link" href="/race-report.xlsx?' + qs + '">Excel</a>' +
+        '<a class="report-link" href="/race-report.json?' + qs + '">JSON</a>' +
+        '<a class="report-link" href="/race-report.pdf?' + qs + '">PDF</a>' +
+        '</span>';
     }
 
     // Cached so "Back to race" from the horse-detail view can redraw the
@@ -379,6 +1080,12 @@
       _currentRaceData = race;
       var content = document.getElementById('detailContent');
 
+      // The full-screen standalone view's Export Data menu offers only
+      // THIS race, not the whole day/meeting (18 Sep 2026, per Dinesh:
+      // "Download option anda raceku mattu wainga"). Restored back to the
+      // normal day-wide links in closeRaceDetail.
+      if (document.body.classList.contains('race-standalone-view')) updateExportPanelForRace(race);
+
       // Tracked so the "Confirm no form for all" button (built below)
       // knows exactly which runners to ignore without re-parsing the
       // table -- reset per popup open/race.
@@ -386,6 +1093,10 @@
         return !r.isScratched && r.runnerId && r.issue && r.issue.indexOf('Missing form lines') !== -1;
       }).map(function (r) { return { runnerId: r.runnerId, horseName: r.horseName }; });
 
+      // Weight is only tracked/meaningful for Thoroughbred runners -- Harness
+      // (no weight carried, sulky-drawn) and Greyhound (not tracked here)
+      // don't need the column (15 Sep 2026, per Dinesh).
+      var showWeight = race.discipline === 'T';
       var rows = race.runners.map(function (r) {
         var issueClass = '';
         if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
@@ -440,7 +1151,17 @@
           ? '<button type="button" class="horse-name-link" onclick="showHorseDetail(\'' + escapeHtmlClient(r.runnerId) + '\')" title="View pedigree and past races">' + escapeHtmlClient(r.horseName) + '</button>'
           : escapeHtmlClient(r.horseName);
         var regionHtml = r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '';
-        var silkHtml = renderSilkSvg(r.silkDescription);
+        var silkHtml = race.discipline === 'G' ? renderGreyhoundBoxIcon(r.tabNo) : renderSilkSvg(r.silkDescription);
+        // Current/live odds (14 Sep 2026, per Dinesh, matching a reference
+        // punting site) -- a green pill with the price, "Favourite" badge
+        // under the single lowest-priced runner (see raceView.js). Blank
+        // when this runner's market isn't priced yet (most races, still --
+        // see currentOdds' own comment), same as a scratched runner.
+        var oddsHtml = r.isScratched
+          ? '-'
+          : r.currentOdds
+            ? '<span class="odds-pill">$' + escapeHtmlClient(r.currentOdds) + '</span>' + (r.isFavourite ? '<span class="odds-favourite-tag">Favourite</span>' : '')
+            : '-';
         return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
           positionCell +
           '<td class="tab-cell">' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
@@ -448,13 +1169,17 @@
           '<td class="horse-cell">' + horseNameHtml + regionHtml + '</td>' +
           '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
           '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
+          '<td class="barrier-cell">' + (r.barrierPosition != null ? r.barrierPosition : '-') + '</td>' +
+          (showWeight ? '<td class="weight-cell">' + (r.weightKg ? escapeHtmlClient(r.weightKg) + 'kg' : '-') + '</td>' : '') +
+          (showWeight ? '<td class="form-figures-cell">' + (r.formFigures ? escapeHtmlClient(r.formFigures.slice(-10)) : '-') + '</td>' : '') +
+          '<td class="odds-cell">' + oddsHtml + '</td>' +
           '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + siteCheckHtml)) + '</td>' +
           '</tr>';
       }).join('');
 
       var positionHeader = race.hasResult ? '<th class="position-cell">Pos</th>' : '';
       var resultLine = race.hasResult
-        ? '<p class="modal-result">&#127937; Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
+        ? '<p class="modal-result">Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
         : '';
       var formIgnoreAllLine = _currentFormFlaggedRunners.length
         ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
@@ -464,6 +1189,9 @@
       // Races that still have an issue (not just this one) show red.
       var raceNavHtml = _currentMeetingRaces.length > 1
         ? '<div class="race-nav" id="raceNavBar">' + renderRaceNavButtons() + '</div>'
+        : '';
+      var popupTopRowHtml = raceNavHtml
+        ? '<div class="popup-top-row">' + raceNavHtml + '</div>'
         : '';
       // Speed Map tab (8 Sep 2026, per Dinesh, a reference site + screenshot)
       // -- only shown when this race actually has predictions (most races
@@ -476,14 +1204,23 @@
       // race, fetched lazily (see loadRawView) same as Speed Map. Always
       // shown, unlike Speed Map, since every Thoroughbred race has a
       // racecards document even when it has none of the other tabs' data.
+      // "Watch race video" sits in this SAME row, pushed to the right of the
+      // 4 tab buttons (18 Sep 2026, per Dinesh, annotated screenshot -- moved
+      // here from the top-right corner next to the popup's close button) --
+      // own class so switchPopupTab()'s id-based active/hidden toggling
+      // (POPUP_TABS below) never touches it.
+      var videoButtonHtml = race.videoUrl
+        ? '<button type="button" class="popup-tab-btn video-watch-btn" onclick="playVideoOverlay(\'' + escapeHtmlClient(race.videoUrl) + '\')">Watch race video</button>'
+        : '';
       var popupTabsHtml = '<div class="popup-tabs">' +
           '<button type="button" class="popup-tab-btn active" id="raceFieldTabBtn" onclick="switchPopupTab(\'field\')">Race Field</button>' +
-          (hasSpeedMap ? '<button type="button" class="popup-tab-btn" id="speedMapTabBtn" onclick="switchPopupTab(\'speedmap\')">&#127943; Speed Map</button>' : '') +
+          (hasSpeedMap ? '<button type="button" class="popup-tab-btn" id="speedMapTabBtn" onclick="switchPopupTab(\'speedmap\')">Speed Map</button>' : '') +
           '<button type="button" class="popup-tab-btn" id="raceCardTabBtn" onclick="switchPopupTab(\'racecard\')">Race Card</button>' +
           '<button type="button" class="popup-tab-btn" id="dataDumpTabBtn" onclick="switchPopupTab(\'datadump\')">Data Dump</button>' +
+          videoButtonHtml +
         '</div>';
       content.innerHTML =
-        raceNavHtml +
+        popupTopRowHtml +
         '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
         (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
         '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
@@ -494,18 +1231,17 @@
           (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
           (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
           (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +
-          (race.videoUrl ? ' | <a class="video-watch-link" href="' + escapeHtmlClient(race.videoUrl) + '" target="_blank" rel="noopener">&#127909; Watch race video</a>' : '') +
           (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
         (race.raceComment ? '<p class="modal-race-comment">' + escapeHtmlClient(race.raceComment) + '</p>' : '') +
         resultLine +
         popupTabsHtml +
-        '<div id="raceFieldView">' +
+        '<div id="raceFieldView" class="popup-tab-panel">' +
           formIgnoreAllLine +
-          '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>BP</th>' + (showWeight ? '<th>Wgt</th><th>Form</th>' : '') + '<th>Odds</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
-        (hasSpeedMap ? '<div id="speedMapView" hidden></div>' : '') +
-        '<div id="raceCardView" hidden></div>' +
-        '<div id="dataDumpView" hidden></div>';
+        (hasSpeedMap ? '<div id="speedMapView" class="popup-tab-panel" hidden></div>' : '') +
+        '<div id="raceCardView" class="popup-tab-panel" hidden></div>' +
+        '<div id="dataDumpView" class="popup-tab-panel" hidden></div>';
     }
 
     // Switches between the popup's tabs (Race Field / Speed Map / Race Card
@@ -527,10 +1263,13 @@
         btn.classList.toggle('active', active);
       });
       if (tab === 'speedmap') {
+        // Rebuilt fresh on EVERY switch to this tab (not just the first
+        // time) so the run animation replays each time, per Dinesh (14 Sep
+        // 2026): switching away to Race Card and back to Speed Map should
+        // show the horses/dogs run again, not sit at their final position.
         var speedView = document.getElementById('speedMapView');
-        if (speedView && !speedView.dataset.rendered) {
+        if (speedView) {
           speedView.innerHTML = renderSpeedMapHtml(_currentRaceData);
-          speedView.dataset.rendered = '1';
           playSpeedMapAnimation(speedView);
         }
       } else if (tab === 'racecard' || tab === 'datadump') {
@@ -728,6 +1467,15 @@
       var hasAnyData = entries.some(function (p) { return p.paceRating || (p.paceCategory && p.paceCategory !== 'Not Known'); });
       if (!hasAnyData) return '<p class="modal-sub">No speed map data available for this race.</p>';
       entries = entries.slice().sort(function (a, b) { return (a.runnerNumber || 0) - (b.runnerNumber || 0); });
+      // Running-gait GIF per discipline, named to match disciplineLabel()
+      // exactly (14 Sep 2026, per Dinesh) -- e.g. "Thoroughbred.gif" --
+      // so dropping in a new one for another discipline (a "Greyhound.gif"
+      // once he has one) is just an FTP upload, no code change needed. The
+      // emoji fallback (an <img> onerror swaps it in) covers a discipline
+      // that hasn't got a GIF uploaded yet.
+      var fallbackEmoji = race.discipline === 'G' ? '&#128021;' : '&#127943;';
+      var runnerIcon = '<img src="/speedmap-icons/' + encodeURIComponent(race.disciplineLabel) + '.gif" alt="' + fallbackEmoji + '" onerror="this.outerHTML=this.alt">';
+      var iconClass = 'speedmap-icon speedmap-icon-gif';
       var rowsHtml = entries.map(function (p) {
         var isKnown = Boolean(p.paceCategory && p.paceCategory !== 'Not Known' && p.paceRating);
         var pct = isKnown ? Math.max(0, Math.min(100, 100 - p.paceRating)) : 0;
@@ -738,7 +1486,7 @@
         if (p.closingSpeedRating) tooltipParts.push('Closing speed: ' + p.closingSpeedRating);
         var label = (p.runnerNumber != null ? p.runnerNumber + '. ' : '') + escapeHtmlClient(p.runnerName || '');
         var barClass = 'speedmap-bar' + (isKnown ? '' : ' speedmap-bar-unknown');
-        var silkHtml = renderSilkSvg(silkByRunnerId[p.runnerId]);
+        var silkHtml = race.discipline === 'G' ? renderGreyhoundBoxIcon(p.runnerNumber) : renderSilkSvg(silkByRunnerId[p.runnerId]);
         // Data attributes carry the FINAL width/left -- the row renders at
         // 0 first, then playSpeedMapAnimation (called once after the whole
         // tab is in the DOM) flips these to trigger the CSS transition
@@ -750,7 +1498,7 @@
           '<div class="speedmap-track" title="' + escapeHtmlClient(tooltipParts.join(' | ')) + '">' +
             '<div class="' + barClass + '" style="width:0%" data-final-width="' + pct.toFixed(1) + '"></div>' +
             '<span class="speedmap-name">' + label + '</span>' +
-            '<span class="speedmap-icon" style="left:0%" data-final-left="' + pct.toFixed(1) + '">&#127943;</span>' +
+            '<span class="' + iconClass + '" style="left:0%" data-final-left="' + pct.toFixed(1) + '">' + runnerIcon + '</span>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -812,6 +1560,14 @@
         r.dam ? 'Dam: ' + escapeHtmlClient(r.dam) : '',
       ].filter(Boolean).join(' | ');
 
+      // Per-runner narrative comment (18 Sep 2026, per Dinesh: "runner
+      // click panna runner profile a runner comment kaattunga... missing'na
+      // warning kaattunga") -- reuses the same box style as the race-level
+      // comment/"not available" tag elsewhere in this popup.
+      var runnerCommentHtml = r.runnerComment
+        ? '<p class="modal-race-comment">' + escapeHtmlClient(r.runnerComment) + '</p>'
+        : '<p class="modal-sub"><span class="nocomment-tag">Runner comment not available</span></p>';
+
       var statTiles = HORSE_STAT_LABELS
         .filter(function (pair) { return r.performanceStatistics && r.performanceStatistics[pair[0]]; })
         .map(function (pair) {
@@ -847,6 +1603,7 @@
         '<button type="button" class="back-to-race-btn" onclick="renderRacePopup(_currentRaceData)">&larr; Back to race</button>' +
         '<h2 class="horse-detail-name">' + escapeHtmlClient(r.horseName) + (r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '') + '</h2>' +
         '<p class="modal-sub">' + [escapeHtmlClient(ageSexLine), pedigreeLine].filter(Boolean).join(' | ') + '</p>' +
+        runnerCommentHtml +
         statsHtml +
         '<h3 class="horse-past-races-heading">Past Races</h3>' +
         pastRacesHtml;
@@ -875,7 +1632,7 @@
             if (!result.hasVideo) return;
             var slot = document.getElementById('video-slot-' + result.id);
             if (!slot) return;
-            slot.innerHTML = '<a class="video-icon-link" href="' + escapeHtmlClient(result.videoUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Watch race video">&#127909;</a>';
+            slot.innerHTML = '<a class="video-icon-link" href="javascript:void(0)" onclick="event.stopPropagation(); playVideoOverlay(\'' + escapeHtmlClient(result.videoUrl) + '\')" title="Watch race video">&#127909;</a>';
           });
         })
         .catch(function () { /* best-effort -- silently leave icons blank */ });
@@ -897,6 +1654,15 @@
       win.document.write(
         '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
         '<link rel="stylesheet" href="/styles.css"></head><body class="past-race-page">' +
+        // Same RacingHub header as every other page (18 Sep 2026, per
+        // Dinesh: "Anda open agura pagela Racing Hub Name and Logo... home
+        // page button venu") -- this window has no dashboard grid of its
+        // own to go "back" to, so the logo/Home link both just point home.
+        '<header class="app-header"><div class="app-header-left"><a class="brand" href="/">' +
+          '<img src="/logo.png" class="brand-icon" alt="RacingHub logo">' +
+          '<div class="brand-text"><span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>' +
+          '<span class="brand-subtitle">Race Day Dashboard</span></div></a></div>' +
+          '<div class="app-header-right"><a class="meetings-list-link" href="/"><i class="fa-solid fa-house"></i> Home</a></div></header>' +
         '<div class="past-race-card">' +
         '<h1>' + escapeHtmlClient(fl.Course || 'Unknown track') + '</h1>' +
         '<p class="modal-sub">' + escapeHtmlClient(fl.Date || '-') +
@@ -924,6 +1690,11 @@
     // still flagged in the popup and patches the grid cell directly,
     // instead of making you reopen the race or reload the whole page to
     // see it "go back to normal".
+    // The grid cell itself no longer shows a badge/outline for any issue
+    // type (15 Sep 2026, per Dinesh -- issues only ever show via the
+    // meeting's Status column now), so this just keeps the data-attribute
+    // (in case the same race is opened again without a page reload) and
+    // the popup's own race-nav bar in sync.
     function syncGridFormBadge() {
       if (!_currentRaceId) return;
       var remaining = document.querySelectorAll('#detailContent .form-ignore-btn:not(.form-ignore-all-btn)').length;
@@ -931,20 +1702,8 @@
 
       var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
       if (cell) {
-        var badge = cell.querySelector('.form-badge');
-        if (flagged) {
-          if (!badge) {
-            badge = document.createElement('sup');
-            badge.className = 'form-badge';
-            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
-          }
-          badge.textContent = 'FL' + remaining;
-          badge.title = remaining + ' runner(s) missing form lines';
-          cell.classList.add('missing-form');
-        } else {
-          if (badge) badge.remove();
-          cell.classList.remove('missing-form');
-        }
+        cell.dataset.formissue = flagged;
+        refreshIssueIcons(cell);
       }
 
       // Keep this race's dot in the race-nav bar in sync too, so it goes
@@ -993,27 +1752,16 @@
 
       var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
       if (cell) {
-        var badge = cell.querySelector('.age-issue-badge');
-        if (flagged) {
-          if (!badge) {
-            badge = document.createElement('sup');
-            badge.className = 'age-issue-badge';
-            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
-          }
-          badge.textContent = 'AGE' + remaining;
-          badge.title = remaining + ' runner(s) over age limit';
-          cell.classList.add('horse-age-issue');
-        } else {
-          if (badge) badge.remove();
-          cell.classList.remove('horse-age-issue');
-        }
+        setOtherIssueFlag(cell, 'horse-age-issue', flagged);
+        refreshIssueIcons(cell);
       }
 
-      // Recomputed straight from the (now updated) cell's classes, same
-      // check showRaceDetail used when it first built _currentMeetingRaces --
-      // covers every "other issue" class at once, age included.
+      // Recomputed straight from the (now updated) cell's data-attribute,
+      // same check showRaceDetail used when it first built
+      // _currentMeetingRaces -- covers every "other issue" type at once,
+      // age included.
       var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
-      if (navEntry) navEntry.hasOtherIssue = OTHER_ISSUE_CLASSES.some(function (c) { return cell && cell.classList.contains(c); });
+      if (navEntry) navEntry.hasOtherIssue = Boolean(cell && cell.dataset.otherissueFlags);
       var navBar = document.getElementById('raceNavBar');
       if (navBar) navBar.innerHTML = renderRaceNavButtons();
     }
@@ -1046,32 +1794,26 @@
         });
     }
 
-    // Duplicate jockey has no dedicated grid cell outline (only the "D#"
-    // badge -- see raceView.js's renderMeetingsTable), so this only needs
-    // to update/remove that badge, unlike syncGridAgeBadge/FormBadge.
+    // Same live-patch idea as syncGridFormBadge/syncGridAgeBadge, for
+    // Duplicate Jockey -- "flagged" is whether ANY jockey in this race
+    // still has an unconfirmed duplicate (one confirm click can clear
+    // several rows sharing the same jockey, but other jockeys in the same
+    // race may still be flagged).
     function syncGridDuplicateJockeyBadge() {
       if (!_currentRaceId) return;
-      var remainingJockeys = {};
-      document.querySelectorAll('#detailContent .dup-jockey-ignore-btn').forEach(function (b) {
-        remainingJockeys[b.getAttribute('data-jockey')] = true;
-      });
-      var remaining = Object.keys(remainingJockeys).length;
+      var remaining = document.querySelectorAll('#detailContent .dup-jockey-ignore-btn').length;
+      var flagged = remaining > 0;
 
       var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
       if (cell) {
-        var badge = cell.querySelector('.dup-badge');
-        if (remaining > 0) {
-          if (!badge) {
-            badge = document.createElement('sup');
-            badge.className = 'dup-badge';
-            cell.insertBefore(badge, cell.querySelector('.video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
-          }
-          badge.textContent = 'D' + remaining;
-          badge.title = remaining + ' jockey(s) duplicated across runners';
-        } else if (badge) {
-          badge.remove();
-        }
+        setOtherIssueFlag(cell, 'duplicate-jockey', flagged);
+        refreshIssueIcons(cell);
       }
+
+      var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
+      if (navEntry) navEntry.hasOtherIssue = Boolean(cell && cell.dataset.otherissueFlags);
+      var navBar = document.getElementById('raceNavBar');
+      if (navBar) navBar.innerHTML = renderRaceNavButtons();
     }
 
     // One jockey-name confirm can affect MULTIPLE rows at once -- every
@@ -1118,24 +1860,12 @@
 
       var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
       if (cell) {
-        var badge = cell.querySelector('.mj-badge');
-        if (flagged) {
-          if (!badge) {
-            badge = document.createElement('sup');
-            cell.insertBefore(badge, cell.querySelector('.dup-badge, .tab-badge, .trainer-badge, .form-badge, .age-issue-badge, .video-link, .trial-line, .result-line, .abandoned-line, .novideo-line') || null);
-          }
-          badge.className = 'mj-badge mj-badge-alert';
-          badge.textContent = 'M' + remaining;
-          badge.title = remaining + ' runner(s) missing a jockey';
-          cell.classList.add('missing-jockeys');
-        } else {
-          if (badge) badge.remove();
-          cell.classList.remove('missing-jockeys');
-        }
+        setOtherIssueFlag(cell, 'missing-jockeys', flagged);
+        refreshIssueIcons(cell);
       }
 
       var navEntry = _currentMeetingRaces.filter(function (r) { return r.id === _currentRaceId; })[0];
-      if (navEntry) navEntry.hasOtherIssue = OTHER_ISSUE_CLASSES.some(function (c) { return cell && cell.classList.contains(c); });
+      if (navEntry) navEntry.hasOtherIssue = Boolean(cell && cell.dataset.otherissueFlags);
       var navBar = document.getElementById('raceNavBar');
       if (navBar) navBar.innerHTML = renderRaceNavButtons();
     }
@@ -1528,17 +2258,33 @@
       applyFilters();
     };
 
-    // ---- Light / Dark theme ----
+    // ---- Light / Dark theme (15 Sep 2026, per Dinesh -- re-added after
+    // the RacingHub redesign went dark-only; default stays dark, "light"
+    // is now an explicit opt-in via [data-theme="light"]). ----
     function applyTheme(theme) {
       document.documentElement.setAttribute('data-theme', theme);
       var btn = document.getElementById('themeToggle');
-      if (btn) btn.innerHTML = theme === 'dark' ? '&#9728;&#65039; Light' : '&#127769; Dark';
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
     }
     function toggleTheme() {
-      var current = document.documentElement.getAttribute('data-theme') || 'light';
-      var next = current === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem('rdd_theme', next); } catch (e) { /* ignore */ }
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
       applyTheme(next);
+    }
+
+    // ---- Show/hide the per-meeting download widget (15 Sep 2026, per
+    // Dinesh) -- a plain CSS class toggle, remembered across reloads the
+    // same way the other filters are. ----
+    function applyDownloadsVisibility(show) {
+      document.body.classList.toggle('hide-downloads', !show);
+      var checkbox = document.getElementById('showDownloadsToggle');
+      if (checkbox) checkbox.checked = show;
+    }
+    function toggleMeetingDownloads() {
+      var show = document.getElementById('showDownloadsToggle').checked;
+      try { localStorage.setItem('rdd_showDownloads', show ? '1' : '0'); } catch (e) { /* ignore */ }
+      applyDownloadsVisibility(show);
     }
 
     // ---- Auto-refresh every 3 minutes, with a live countdown ----
@@ -1553,8 +2299,8 @@
       var el = document.getElementById('refreshIndicator');
       if (!el) return;
       el.textContent = paused
-        ? '· Auto-refresh paused (runner detail open)'
-        : '· Auto-refresh in ' + formatCountdown(refreshSecondsLeft);
+        ? 'Auto-refresh paused (runner detail open)'
+        : 'Auto-refresh in ' + formatCountdown(refreshSecondsLeft);
     }
     function scheduleAutoRefresh() {
       updateRefreshIndicator(false);
@@ -1578,12 +2324,43 @@
     }
 
     (function init() {
-      var savedTheme = 'light';
-      try { savedTheme = localStorage.getItem('rdd_theme') || 'light'; } catch (e) { /* ignore */ }
+      // Reads the v2 key only (17 Sep 2026, per Dinesh: "Default dark theme
+      // kudunga") -- anyone whose browser still has the OLD 'rdd_theme'
+      // key saved as "light" from before RacingHub made dark the default
+      // now gets a fresh dark load instead of that stale preference; they
+      // can still flip to light and it'll stick, just under the new key.
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
       applyTheme(savedTheme);
+      var savedShowDownloads = true;
+      try { savedShowDownloads = localStorage.getItem('rdd_showDownloads') !== '0'; } catch (e) { /* ignore */ }
+      applyDownloadsVisibility(savedShowDownloads);
       restoreFilterState();
       applyFilters();
       scheduleAutoRefresh();
+
+      // Opening a race's link directly (a fresh load, a new tab, a shared
+      // URL) should land straight on that race's popup instead of just the
+      // plain schedule grid (18 Sep 2026, per Dinesh: "Race a new Tab open
+      // panna. Racinghub varanu" -- a new tab was showing the homepage,
+      // not the race). The nav-bar's other race numbers only populate once
+      // the matching grid row has rendered, same as a normal click.
+      //
+      // race-standalone-view (see styles.css) makes that popup fill the
+      // whole tab -- full-screen instead of a small modal box -- while
+      // keeping the RacingHub header (with its Home link) visible above it
+      // (18 Sep 2026, per Dinesh: "Race view full screen varanu" / "Anda
+      // open agura pagela Racing Hub Name and Logo... home page button
+      // venu"). Only applied for this deep-link entry point, not a normal
+      // in-page click, since a click already has the schedule grid to go
+      // back to.
+      try {
+        var deepLinkRaceId = new URLSearchParams(location.search).get('race');
+        if (deepLinkRaceId) {
+          document.body.classList.add('race-standalone-view');
+          showRaceDetail(deepLinkRaceId);
+        }
+      } catch (e) { /* ignore */ }
     })();
   </script>
 </body>

@@ -326,9 +326,9 @@ async function fetchMeetingExtrasByMeetingId(meetingIds) {
   const client = await getClient();
   const meetingDocs = await client.db().collection('meetings')
     .find({ _id: { $in: meetingIds } })
-    .project({ _id: 1, isTAB: 1 })
+    .project({ _id: 1, isTAB: 1, isHidden: 1 })
     .toArray();
-  for (const m of meetingDocs) map.set(m._id, { isTAB: m.isTAB !== false });
+  for (const m of meetingDocs) map.set(m._id, { isTAB: m.isTAB !== false, isHidden: m.isHidden === true });
   return map;
 }
 
@@ -343,7 +343,12 @@ async function fetchMeetingExtrasByMeetingId(meetingIds) {
 // which this view doesn't render anyway).
 async function fetchRaceDocsForDateRange(fromDate, toDate, includeTrials) {
   const client = await getClient();
-  const filter = { rDate: { $gte: fromDate, $lte: toDate } };
+  // isHidden (16 Sep 2026, per Dinesh) -- the upstream provider's own flag
+  // for races it doesn't want published (hiddenReason samples: "Non-TAB",
+  // "Extra race", "Abandoned"/"Abended"), left unfiltered until now so
+  // these were showing on the dashboard/meetings-list/exports right
+  // alongside real races.
+  const filter = { rDate: { $gte: fromDate, $lte: toDate }, isHidden: { $ne: true } };
   if (!includeTrials) filter.isTrail = false;
 
   const docs = await client.db().collection('races')
@@ -356,12 +361,19 @@ async function fetchRaceDocsForDateRange(fromDate, toDate, includeTrials) {
 
   const meetingIds = [...new Set(docs.map((d) => d.meetingId).filter(Boolean))];
   const meetingExtrasByMeetingId = await fetchMeetingExtrasByMeetingId(meetingIds);
+  const visibleDocs = [];
   for (const doc of docs) {
     const extras = meetingExtrasByMeetingId.get(doc.meetingId);
+    // A race not individually flagged isHidden can still belong to a
+    // meeting the provider hid outright (confirmed 16 Sep 2026 -- several
+    // meetings were isHidden:true with no race-level flag to match), so
+    // the meeting's own isHidden is checked too, not just the race's.
+    if (extras && extras.isHidden) continue;
     doc.isTAB = extras ? extras.isTAB : true;
     doc.runners = [];
+    visibleDocs.push(doc);
   }
-  return docs;
+  return visibleDocs;
 }
 
 // Race-replay videos (1 Sep 2026, per Dinesh) -- uploaded to an S3-compatible
@@ -492,7 +504,7 @@ async function attachFormLineStatus(docs) {
     .project({
       RaceId: 1, Client: 1, Style: 1, RaceComment: 1, SexRestriction: 1, 'Runners.RunnerId': 1, 'Runners.FormLines': 1,
       'Runners.Region': 1, 'Runners.Sire': 1, 'Runners.Dam': 1, 'Runners.Colour': 1,
-      'Runners.PerformanceStatistics': 1,
+      'Runners.PerformanceStatistics': 1, 'Runners.CurrentOdds': 1, 'Runners.CarryingWeight': 1, 'Runners.Comment': 1, 'Runners.Form': 1,
     })
     .toArray();
 
@@ -544,7 +556,7 @@ async function attachFormLineStatus(docs) {
       perRunner[clientLabel] = perRunner[clientLabel] || hasLines;
 
       if (!enrichByRunnerId.has(r.RunnerId)) {
-        enrichByRunnerId.set(r.RunnerId, { region: null, sire: null, dam: null, colour: null, formLinesVariants: [], performanceStatistics: null });
+        enrichByRunnerId.set(r.RunnerId, { region: null, sire: null, dam: null, colour: null, formLinesVariants: [], performanceStatistics: null, currentOdds: null, weightKg: null, comment: null, form: null });
       }
       const enrich = enrichByRunnerId.get(r.RunnerId);
       if (!enrich.region && r.Region) enrich.region = r.Region;
@@ -553,6 +565,24 @@ async function attachFormLineStatus(docs) {
       if (!enrich.colour && r.Colour) enrich.colour = r.Colour;
       if (Array.isArray(r.FormLines) && r.FormLines.length) enrich.formLinesVariants.push(r.FormLines);
       if (!enrich.performanceStatistics && r.PerformanceStatistics) enrich.performanceStatistics = r.PerformanceStatistics;
+      // "0.0" is the feed's placeholder for "not priced yet", not a real
+      // price (14 Sep 2026, per Dinesh -- confirmed most racecards docs
+      // carry this default rather than a genuine quote).
+      if (!enrich.currentOdds && r.CurrentOdds && r.CurrentOdds !== '0.0' && r.CurrentOdds !== '0') enrich.currentOdds = r.CurrentOdds;
+      // Carrying weight (14 Sep 2026, per Dinesh) -- races.runners[].weight
+      // is almost always blank (checked: 0 of 124 T runners sampled today),
+      // this racecards field is the reliable source.
+      if (!enrich.weightKg && r.CarryingWeight && r.CarryingWeight.WeightKg) enrich.weightKg = r.CarryingWeight.WeightKg;
+      // Per-runner narrative comment (18 Sep 2026, per Dinesh -- "Runner
+      // comments ongalukku access irukka"), a last-run summary distinct from
+      // the race-level RaceComment above. Same "first variant found wins"
+      // pattern as sire/dam.
+      if (!enrich.comment && r.Comment) enrich.comment = r.Comment;
+      // Compact form-figures string (e.g. "8x61", "34350x153" -- 18 Sep
+      // 2026, per Dinesh, a reference screenshot) -- distinct from FormLines
+      // above (the structured past-race table); same "first variant found
+      // wins" pattern as everything else here.
+      if (!enrich.form && r.Form) enrich.form = r.Form;
     }
   }
 
@@ -588,6 +618,10 @@ async function attachFormLineStatus(docs) {
       r.colour = enrich ? enrich.colour : null;
       r.pastRaces = enrich ? enrich.formLines : [];
       r.performanceStatistics = enrich ? enrich.performanceStatistics : null;
+      r.currentOdds = enrich ? enrich.currentOdds : null;
+      r.weightKg = enrich ? enrich.weightKg : null;
+      r.runnerComment = enrich ? enrich.comment : null;
+      r.formFigures = enrich ? enrich.form : null;
     }
   }
 }
@@ -616,10 +650,14 @@ async function fetchRaceDocs(dateStr, includeTrials) {
   // a "Race status" filter (Upcoming/Running/Completed/Abandoned/Resulted)
   // that needs abandoned races present in the payload to filter for them.
   // Default view ("All statuses") now includes abandoned races too.
-  const filter = { rDate: dateStr };
+  // isHidden (16 Sep 2026, per Dinesh) -- the upstream provider's own flag
+  // for races it doesn't want published (hiddenReason samples: "Non-TAB",
+  // "Extra race", "Abandoned"/"Abended"), left unfiltered until now so
+  // these were showing on the dashboard right alongside real races.
+  const filter = { rDate: dateStr, isHidden: { $ne: true } };
   if (!includeTrials) filter.isTrail = false;
 
-  const docs = await client.db().collection('races')
+  const rawDocs = await client.db().collection('races')
     .find(filter)
     .project({
       _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1,
@@ -630,8 +668,16 @@ async function fetchRaceDocs(dateStr, includeTrials) {
     .sort({ rCourseDisplayName: 1, rNo: 1 })
     .toArray();
 
-  const meetingIds = [...new Set(docs.map((d) => d.meetingId).filter(Boolean))];
+  const meetingIds = [...new Set(rawDocs.map((d) => d.meetingId).filter(Boolean))];
   const meetingExtrasByMeetingId = await fetchMeetingExtrasByMeetingId(meetingIds);
+  // A race not individually flagged isHidden can still belong to a meeting
+  // the provider hid outright (confirmed 16 Sep 2026 -- several meetings
+  // were isHidden:true with no race-level flag to match), so the meeting's
+  // own isHidden is checked too, not just the race's.
+  const docs = rawDocs.filter((doc) => {
+    const extras = meetingExtrasByMeetingId.get(doc.meetingId);
+    return !(extras && extras.isHidden);
+  });
   for (const doc of docs) {
     doc.isTAB = meetingExtrasByMeetingId.has(doc.meetingId) ? meetingExtrasByMeetingId.get(doc.meetingId).isTAB : true;
   }
@@ -653,7 +699,7 @@ async function fetchRaceById(id) {
         rName: 1, rDisplayName: 1, isTrail: 1,
         rDate: 1, createdAt: 1,
         'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
-        'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1,
+        'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1, 'runners.bp': 1,
       },
     }
   );
@@ -684,7 +730,9 @@ async function fetchRaceById(id) {
 // full runner list -- not just the fields the grid cells need to render.
 async function fetchMeetingRaceDocs(dateStr, meeting, country, discipline, includeTrials) {
   const client = await getClient();
-  const filter = { rDate: dateStr, rCourseDisplayName: meeting, rCountry: country, rDiscipline: discipline };
+  // isHidden (16 Sep 2026, per Dinesh) -- keeps this report in sync with
+  // what the grid actually shows for the meeting (see fetchRaceDocs).
+  const filter = { rDate: dateStr, rCourseDisplayName: meeting, rCountry: country, rDiscipline: discipline, isHidden: { $ne: true } };
   if (!includeTrials) filter.isTrail = false;
 
   return client.db().collection('races')
@@ -1347,6 +1395,93 @@ app.get('/meeting-report.pdf', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     res.status(500).send(`Error generating meeting report: ${err.message}`);
+  }
+});
+
+// Same shape as parseMeetingRequestOptions, plus the specific race's id --
+// the standalone full-screen race view's Export Data menu should only
+// offer THAT race, not the whole meeting/day (18 Sep 2026, per Dinesh:
+// "Download option anda raceku mattu wainga"). Reuses
+// fetchMeetingRaceDocs/buildMeetingDetailsReport as-is (same projection,
+// same row shape) and just filters the meeting's races down to the one
+// asked for, rather than duplicating that fetch/report logic for a
+// single-race case.
+function parseSingleRaceRequestOptions(req) {
+  const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+  const includeTrials = req.query.includeTrials === 'true';
+  const discipline = ['T', 'H', 'G'].includes(req.query.discipline) ? req.query.discipline : 'T';
+  const meeting = (req.query.meeting || '').trim();
+  const country = (req.query.country || '').trim();
+  const raceId = (req.query.race || '').trim();
+  if (!meeting || !country || !raceId) return null;
+  return { dateStr, includeTrials, discipline, meeting, country, raceId };
+}
+
+async function fetchSingleRaceDoc(opts) {
+  const docs = await fetchMeetingRaceDocs(opts.dateStr, opts.meeting, opts.country, opts.discipline, opts.includeTrials);
+  return docs.filter((d) => d._id === opts.raceId);
+}
+
+app.get('/race-report.csv', async (req, res) => {
+  const opts = parseSingleRaceRequestOptions(req);
+  if (!opts) return res.status(400).send('Missing required "meeting", "country" and "race" query params.');
+  try {
+    const docs = await fetchSingleRaceDoc(opts);
+    const rows = buildMeetingDetailsReport(docs, opts.dateStr);
+    const csv = meetingDetailsReportToCsv(rows);
+    const rNoPart = docs[0] ? `-R${docs[0].rNo}` : '';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilenamePart(opts.meeting)}${rNoPart}-${opts.dateStr}.csv"`);
+    res.send(csv);
+  } catch (err) {
+    res.status(500).send(`Error generating race report: ${err.message}`);
+  }
+});
+
+app.get('/race-report.json', async (req, res) => {
+  const opts = parseSingleRaceRequestOptions(req);
+  if (!opts) return res.status(400).json({ error: 'Missing required "meeting", "country" and "race" query params.' });
+  try {
+    const docs = await fetchSingleRaceDoc(opts);
+    const rows = buildMeetingDetailsReport(docs, opts.dateStr);
+    const rNoPart = docs[0] ? `-R${docs[0].rNo}` : '';
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilenamePart(opts.meeting)}${rNoPart}-${opts.dateStr}.json"`);
+    res.send(JSON.stringify(rows, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/race-report.xlsx', async (req, res) => {
+  const opts = parseSingleRaceRequestOptions(req);
+  if (!opts) return res.status(400).send('Missing required "meeting", "country" and "race" query params.');
+  try {
+    const docs = await fetchSingleRaceDoc(opts);
+    const rows = buildMeetingDetailsReport(docs, opts.dateStr);
+    const buffer = await buildMeetingDetailsXlsxBuffer(rows, opts.meeting, opts.dateStr);
+    const rNoPart = docs[0] ? `-R${docs[0].rNo}` : '';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilenamePart(opts.meeting)}${rNoPart}-${opts.dateStr}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    res.status(500).send(`Error generating race report: ${err.message}`);
+  }
+});
+
+app.get('/race-report.pdf', async (req, res) => {
+  const opts = parseSingleRaceRequestOptions(req);
+  if (!opts) return res.status(400).send('Missing required "meeting", "country" and "race" query params.');
+  try {
+    const docs = await fetchSingleRaceDoc(opts);
+    const rows = buildMeetingDetailsReport(docs, opts.dateStr);
+    const buffer = await buildMeetingDetailsPdfBuffer(rows, opts.meeting, opts.country, opts.discipline, opts.dateStr);
+    const rNoPart = docs[0] ? `-R${docs[0].rNo}` : '';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilenamePart(opts.meeting)}${rNoPart}-${opts.dateStr}.pdf"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).send(`Error generating race report: ${err.message}`);
   }
 });
 
