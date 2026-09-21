@@ -1,152 +1,313 @@
+/* RacingHub theme (15 Sep 2026, per Dinesh -- an exact reference mockup:
+   dark slate structure + a single amber brand accent, FontAwesome icons,
+   rounded panel cards). Dark is the default look everywhere (:root, no
+   attribute needed); Dinesh later asked for light mode back too, added
+   below as an explicit opt-in via [data-theme="light"] instead of the
+   original auto light/[data-theme="dark"] split. */
 :root {
-  color-scheme: light dark;
-  --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --card-bg: #fff; --border: #e0e0e0;
-  --header-bg: #1F4E79; --header-fg: #fff; --header-bg-hover: #163a5c;
-  --sub-bg: #f5f7fa; --hover-bg: #eef4fb; --shadow: rgba(0,0,0,0.1);
-  --country-header-bg: #eef2f6; --country-header-fg: #444; --country-header-border: #d5dbe2;
-  --input-border: #ccc; --tab-btn-bg: #fff; --tab-btn-fg: #333; --tab-btn-border: #d5dbe2;
-  --modal-bg: #fff; --modal-shadow: rgba(0,0,0,0.25); --modal-overlay: rgba(0,0,0,0.4);
-  --legend-fg: #555; --scratched-fg: #aaa; --empty-fg: #ccc; --meta-fg: #888;
-  --result-fg: #1a7431;
+  color-scheme: dark;
+  --bg: #0b0f17; --fg: #e2e8f0; --muted: #94a3b8; --card-bg: #151c28; --border: #1e293b;
+  --header-bg: #0f172a; --header-fg: #fff; --header-bg-hover: #1e293b;
+  --accent: #f59e0b; --accent-fg: #1e1300; --accent-hover: #fbbf24;
+  --sub-bg: #1c2531; --hover-bg: #1e293b; --shadow: rgba(0, 0, 0, 0.5);
+  --country-header-bg: #0f172a; --country-header-fg: #94a3b8; --country-header-border: #1e293b;
+  --input-border: #334155; --tab-btn-bg: #0f172a; --tab-btn-fg: #94a3b8; --tab-btn-border: #1e293b;
+  --modal-bg: #151c28; --modal-shadow: rgba(0, 0, 0, 0.7); --modal-overlay: rgba(0, 0, 0, 0.68);
+  --legend-fg: #94a3b8; --scratched-fg: #475569; --empty-fg: #334155; --meta-fg: #94a3b8;
+  --result-fg: #34d399;
+  --radius: 12px; --radius-sm: 8px;
 }
-[data-theme="dark"] {
-  --bg: #14181c; --fg: #e8e8e8; --muted: #a9b2ba; --card-bg: #1b2126; --border: #333c44;
-  --header-bg: #13324d; --header-fg: #fff; --header-bg-hover: #0d243a;
-  --sub-bg: #20272d; --hover-bg: #263540; --shadow: rgba(0,0,0,0.6);
-  --country-header-bg: #1e252b; --country-header-fg: #c3ccd3; --country-header-border: #333c44;
-  --input-border: #4a545c; --tab-btn-bg: #1e252b; --tab-btn-fg: #dfe4e8; --tab-btn-border: #3a444d;
-  --modal-bg: #1e252b; --modal-shadow: rgba(0,0,0,0.7); --modal-overlay: rgba(0,0,0,0.65);
-  --legend-fg: #b7c0c7; --scratched-fg: #6d767d; --empty-fg: #555; --meta-fg: #8b949c;
-  --result-fg: #4ad07f;
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f5f9; --fg: #0f172a; --muted: #64748b; --card-bg: #fff; --border: #e2e8f0;
+  --header-bg: #0f172a; --header-fg: #fff; --header-bg-hover: #1e293b;
+  /* A darker amber than the dark-theme one -- the plain #f59e0b accent is
+     also used as plain TEXT colour in several spots (today-link, logout,
+     horse-name-link), which reads fine on the dark card background but
+     fails contrast on a white one, so light mode needs its own deeper
+     shade rather than reusing the same token value. */
+  --accent: #b45309; --accent-fg: #fff; --accent-hover: #92400e;
+  --sub-bg: #f1f5f9; --hover-bg: #e2e8f0; --shadow: rgba(15, 23, 42, 0.1);
+  --country-header-bg: #f1f5f9; --country-header-fg: #475569; --country-header-border: #e2e8f0;
+  --input-border: #cbd5e1; --tab-btn-bg: #fff; --tab-btn-fg: #334155; --tab-btn-border: #e2e8f0;
+  --modal-bg: #fff; --modal-shadow: rgba(15, 23, 42, 0.3); --modal-overlay: rgba(8, 16, 26, 0.55);
+  --legend-fg: #475569; --scratched-fg: #94a3b8; --empty-fg: #cbd5e1; --meta-fg: #64748b;
+  --result-fg: #059669;
 }
-body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background: var(--bg); color: var(--fg); }
-h1 { margin: 0 0 4px; font-size: 26px; display: inline-block; }
-.top-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--fg); line-height: 1.45; }
+h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.3px; display: inline-block; }
+.top-row {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  background: var(--card-bg); border: 1px solid var(--border); border-top: 3px solid var(--accent);
+  border-radius: var(--radius); box-shadow: 0 1px 2px var(--shadow), 0 4px 14px var(--shadow);
+  padding: 18px 22px; margin-bottom: 18px;
+}
 .top-row-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.session-info { font-size: 13px; color: var(--muted); }
-.logout-link { color: var(--header-bg); font-weight: 600; text-decoration: none; }
+.session-info { font-size: 16px; font-weight: 600; color: var(--fg); }
+.logout-link { color: var(--accent); font-weight: 600; text-decoration: none; }
 .logout-link:hover { text-decoration: underline; }
-.login-page-body { display: flex; align-items: center; justify-content: center; min-height: 80vh; margin: 0; }
-.login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 10px var(--shadow); padding: 32px 36px; width: 320px; }
+
+/* Full-bleed app header + control bar (15 Sep 2026, per Dinesh -- an exact
+   "RacingHub" reference mockup). Replaces the dashboard's old stacked
+   .top-row/.controls/.disc-tabs cards with one always-visible header bar
+   (brand + discipline tabs + status/user/logout) and a second bar for
+   date-nav + search/filters/export, both edge-to-edge like the reference,
+   with page content padded inside <main class="app-main"> below them. */
+.app-header {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+  background: var(--card-bg); border-bottom: 1px solid var(--border);
+  padding: 28px 24px;
+}
+.app-header-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 20px; text-decoration: none; }
+.brand-icon { height: 100px; width: auto; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-name { font-weight: 800; font-size: 42px; letter-spacing: 0.5px; color: var(--fg); }
+.brand-name-accent { color: var(--accent); }
+.brand-subtitle { font-size: 16px; font-weight: 600; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; margin-top: 2px; }
+/* Single-row header-right, shared by dashboard.html and meetings-list.html
+   -- just the action buttons/back-link + theme toggle + logged-in block. */
+.app-header-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* Auto-refresh + the date, moved below the header entirely (18 Sep 2026,
+   per Dinesh -- annotated screenshot: they'd crept up right against the
+   header's bottom edge, still inside its dark card; "Down konduvanga" --
+   bring them further down, out of the header, onto the plain page
+   background). Right-aligned as a pair, same as they were in the header. */
+.header-status-bar { display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 10px 24px; }
+.refresh-pill { display: inline-flex; align-items: center; font-size: 12px; color: var(--muted); background: var(--sub-bg); border: 1px solid var(--border); padding: 5px 12px; border-radius: 20px; }
+
+/* Date-nav + search/filters share one row, discipline tabs sit on their
+   own row below it (15 Sep 2026, per Dinesh -- "Date Column keela...
+   varanum"). */
+.control-bar {
+  display: flex; flex-direction: column; gap: 12px;
+  background: rgba(21, 28, 40, 0.5); border-bottom: 1px solid var(--border);
+  padding: 20px 24px;
+}
+.control-bar-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.date-heading { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.export-data-panel { min-width: 260px; }
+.export-data-panel .report-links { display: flex; flex-wrap: wrap; }
+.export-data-panel .report-links-label { display: block; width: 100%; margin: 6px 0 2px; }
+.export-caret { font-size: 9px; margin-left: 2px; }
+.show-downloads-filter { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* Hides every per-meeting download widget when the "Show meeting
+   downloads" filter checkbox is unchecked (15 Sep 2026, per Dinesh). */
+body.hide-downloads .meeting-download:not(.export-data-menu) { display: none; }
+
+.app-main { padding: 24px; max-width: none; margin: 0; }
+
+/* Card header row on each discipline's meeting table (calendar icon,
+   title, meeting count) -- matches the reference's "Today's Race
+   Schedule" panel header sitting above the grid. */
+.disc-section-card-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  background: var(--card-bg); border: 1px solid var(--border); border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0; padding: 14px 18px;
+}
+.disc-section-card-header h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+.disc-section-card-header h2 i { color: var(--accent); }
+.disc-section-count { font-size: 12px; color: var(--muted); }
+.disc-section table { border-radius: 0 0 var(--radius) var(--radius); }
+
+/* Meeting-name cell: name+country left, TAB pill + download widget right,
+   flexed apart instead of all run together on one nowrap line. */
+.meeting-cell-inner { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.meeting-name-group { white-space: nowrap; }
+.meeting-tags-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* Trailing per-meeting Status column -- a single check/warning icon
+   (replaces the old inline "Issue"/"Healthy" text tag). */
+th.status-col { width: 60px; }
+td.status-cell { text-align: center; position: relative; }
+.status-icon { font-size: 15px; }
+.status-ok { color: #34d399; }
+.status-issue { color: #fb7185; cursor: pointer; }
+/* Click-to-expand race-by-race issue breakdown on the Status warning icon
+   (15 Sep 2026, per Dinesh) -- same <details> disclosure pattern as the
+   per-meeting download widget, right-aligned so it opens back over the
+   table instead of off the right edge (Status is the last column). */
+.status-detail { position: relative; display: inline-block; }
+.status-detail > summary { list-style: none; }
+.status-detail > summary::-webkit-details-marker { display: none; }
+.status-detail-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 55;
+  background: var(--card-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px var(--shadow); padding: 8px 10px; min-width: 220px; max-width: 320px;
+  text-align: left; white-space: normal;
+}
+.status-detail-row { font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); color: var(--fg); }
+.status-detail-row:last-child { border-bottom: none; }
+.status-detail-row strong { color: var(--accent); margin-right: 4px; }
+
+/* Race-time cells as individual rounded pill buttons (15 Sep 2026, per
+   Dinesh, reference mockup) instead of plain table cells. */
+td.time.clickable { background: var(--tab-btn-bg); border-radius: 999px; padding: 5px 10px; }
+td.time.clickable:hover { background: var(--hover-bg); }
+/* The race-time cell's content is a real <a href> now (so right-click ->
+   "Open in new tab" works, 18 Sep 2026, per Dinesh) -- block + inherited
+   colour/no-underline so it still reads as plain cell text, not a link. */
+.race-cell-link, .race-cell-link:hover, .race-cell-link:visited { display: block; color: inherit; text-decoration: none; }
+/* "R5" prefix on every race-time cell, and a small warning icon on cells
+   whose race has an issue (15 Sep 2026, per Dinesh -- race numbers were
+   hard to track on a meeting with lots of races, and issues needed a
+   quicker at-a-glance signal than opening the meeting's Status dropdown
+   every time). */
+.race-no-label { color: var(--muted); font-size: 10px; font-weight: 700; margin-right: 2px; }
+.cell-issue-icon { color: #fb7185; font-size: 10px; margin-left: 2px; }
+/* Login background photo (14 Sep 2026, per Dinesh) -- the horse/jockey sit
+   right-of-centre in the source image with a plain dark area bottom-left,
+   so the card is pinned there (flex-start + left padding) rather than
+   centred, to sit on the plain part of the photo instead of overlapping
+   the subject. */
+.login-page-body { display: flex; align-items: center; justify-content: flex-start; min-height: 100vh; margin: 0; padding-left: 8vw; box-sizing: border-box; background: #0b1622 url('/login-bg.png') center/cover no-repeat; }
+.login-card { background: rgba(15, 23, 34, 0.78); backdrop-filter: blur(6px); border: 1px solid rgba(255, 255, 255, 0.14); border-top: 3px solid var(--accent); border-radius: var(--radius); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45); padding: 32px 36px; width: 320px; color: #fff; }
+.login-card h1, .login-card p.sub, .login-card label { color: #fff; }
 .login-card h1 { font-size: 20px; margin: 0 0 4px; display: block; }
 .login-card p.sub { margin: 0 0 20px; }
 .login-card label { display: block; font-size: 13px; margin-bottom: 14px; }
 .login-card input[type="text"], .login-card input[type="password"] { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; font-size: 14px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); }
 .login-card button[type="submit"] { width: 100%; padding: 9px; font-size: 14px; font-weight: 600; border: none; border-radius: 4px; background: var(--header-bg); color: var(--header-fg); cursor: pointer; }
 .login-card button[type="submit"]:hover { background: var(--header-bg-hover); }
-.login-error { background: #fdecea; color: #a12622; border: 1px solid #f4c7c3; border-radius: 4px; padding: 8px 10px; font-size: 13px; margin-bottom: 16px; }
-[data-theme="dark"] .login-error { background: #3a1f1f; color: #ff9d95; border-color: #5c2e2c; }
+.login-error { background: #3a1f1f; color: #ff9d95; border: 1px solid #5c2e2c; border-radius: 4px; padding: 8px 10px; font-size: 13px; margin-bottom: 16px; }
 .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
 .disc-section { margin-bottom: 28px; }
 .disc-section[hidden] { display: none; }
 .section-count { font-size: 11px; font-weight: 400; opacity: 0.8; }
-.disc-tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+.disc-tabs {
+  display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; align-items: center;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 1px 2px var(--shadow); padding: 20px 16px;
+}
 .grid-filters { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .country-filter, .tabmeeting-filter, .issue-filter, .status-filter, .meeting-search-filter { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; }
 .country-filter select, .tabmeeting-filter select, .issue-filter select, .status-filter select, .meeting-search-filter input {
-  font-size: 13px; padding: 5px 8px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg);
+  font-size: 13px; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--card-bg); color: var(--fg);
 }
-.meeting-search-filter input { width: 170px; }
+.meeting-search-filter input { width: 170px; padding-left: 26px; }
 .meeting-search-wrap { position: relative; display: inline-block; }
+.meeting-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 11px; pointer-events: none; }
 .meeting-suggestions { display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 4px; max-height: 190px; overflow-y: auto; z-index: 60; box-shadow: 0 4px 12px var(--shadow); }
 .meeting-suggestions.open { display: block; }
 .meeting-suggestions div { padding: 5px 9px; font-size: 12px; cursor: pointer; color: var(--fg); white-space: nowrap; }
 .meeting-suggestions div:hover, .meeting-suggestions div.active { background: var(--hover-bg); }
-.tabmeeting-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
-.tabmeeting-tag.tab { background: #e3f2e6; color: #1a7431; }
-.tabmeeting-tag.nontab { background: #f2f2f2; color: #777; }
-.health-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
-.health-tag.issue { background: #fde3e3; color: #a11b1b; }
-.health-tag.healthy { background: #e3f2e6; color: #1a7431; }
+.tabmeeting-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 4px; vertical-align: middle; }
+.tabmeeting-tag.tab { background: rgba(52, 211, 153, 0.12); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.25); }
+.tabmeeting-tag.nontab { background: var(--sub-bg); color: var(--muted); border: 1px solid var(--border); }
 .abandoned-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; background: #6b6b6b; color: #fff; }
 tr.country-header-row td { background: var(--country-header-bg); font-weight: 700; font-size: 11px; color: var(--country-header-fg); text-align: left; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid var(--country-header-border); }
 tr.row-hidden { display: none; }
-.tab-btn { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; padding: 8px 14px; border: 1px solid var(--tab-btn-border); border-radius: 6px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.tab-btn { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; padding: 8px 14px; border: 1px solid var(--tab-btn-border); border-radius: var(--radius-sm); background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
 .tab-btn:hover { background: var(--hover-bg); }
-.tab-btn.active { background: var(--header-bg); color: #fff; border-color: var(--header-bg); }
-.tab-btn.active .section-count { color: #dbe6f0; }
-table { border-collapse: collapse; width: 100%; background: var(--card-bg); box-shadow: 0 1px 3px var(--shadow); }
-th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: center; font-size: 13px; white-space: nowrap; }
-th { background: var(--header-bg); color: var(--header-fg); position: sticky; top: 0; }
+.tab-btn.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); box-shadow: 0 2px 6px rgba(201, 153, 42, 0.35); }
+.tab-btn.active .section-count { color: var(--accent-fg); opacity: 0.75; }
+/* Discipline tab icons (18 Sep 2026, per Dinesh -- his own jockey/harness/
+   greyhound silhouettes, replacing FontAwesome's generic horse/trophy/dog).
+   Rendered as a CSS mask filled with `background-color: currentColor`
+   instead of a plain <img> so the silhouette recolours along with the
+   button text on hover/active/theme changes, exactly like the FontAwesome
+   glyphs it replaces did via `color` -- a flat black image would just
+   vanish against the dark inactive tab background. */
+.disc-icon {
+  display: inline-block; width: 22px; height: 22px; flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+}
+/* Thoroughbred's source silhouette has more empty margin inside its own
+   image than Harness/Greyhound do, so at the same box size it "contain"s
+   down to a visibly smaller horse -- sized up further here so all three
+   read as the same size (18 Sep 2026, per Dinesh). */
+.disc-icon-thoroughbred { width: 30px; height: 30px; -webkit-mask-image: url('/discipline-icons/thoroughbred.png'); mask-image: url('/discipline-icons/thoroughbred.png'); }
+/* Harness's silhouette is a short, wide band within its square source
+   image (horse+cart+driver, low profile) -- needs the biggest box of the
+   three to read as the same size as Thoroughbred/Greyhound once "contain"
+   shrinks it back down. */
+.disc-icon-harness { width: 32px; height: 32px; -webkit-mask-image: url('/discipline-icons/harness.png'); mask-image: url('/discipline-icons/harness.png'); }
+.disc-icon-greyhound { -webkit-mask-image: url('/discipline-icons/greyhound.png'); mask-image: url('/discipline-icons/greyhound.png'); }
+table { border-collapse: collapse; width: 100%; background: var(--card-bg); box-shadow: 0 1px 2px var(--shadow), 0 4px 14px var(--shadow); }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: center; font-size: 13px; white-space: nowrap; }
+th { background: var(--header-bg); color: var(--header-fg); position: sticky; top: 0; font-weight: 600; letter-spacing: 0.2px; }
 td.meeting { text-align: left; font-weight: 600; background: var(--sub-bg); white-space: nowrap; }
 td.empty { color: var(--empty-fg); }
 td.cell.clickable { cursor: pointer; }
 td.cell.clickable:hover { background: var(--hover-bg); }
-td.time.highlight { background: #ffdcdc; color: #8a1f1f; font-weight: 700; }
-td.time.highlight:hover { background: #ffc9c9; }
-td.time.missing-jockeys { outline: 2px solid #cc0000; outline-offset: -2px; }
-td.time.tab-issue { outline: 2px solid #cc0000; outline-offset: -2px; background: #fff0f0; }
-td.time.bad-time { background: #e60000; color: #fff; font-weight: 700; }
-td.time.bad-time:hover { background: #cc0000; }
 td.time.status-filtered { opacity: 0.15; pointer-events: none; }
 td.time.has-result { white-space: normal; }
-td.time.missing-trainer { outline: 2px solid #6b46c1; outline-offset: -2px; }
-td.time.missing-form { outline: 2px solid #b7791f; outline-offset: -2px; }
-td.time.horse-age-issue { outline: 2px solid #b7791f; outline-offset: -2px; }
-td.time.missing-video { outline: 2px solid #ad1457; outline-offset: -2px; white-space: normal; }
-td.time.missing-race-comment { outline: 2px solid #0e7490; outline-offset: -2px; white-space: normal; }
 td.time.abandoned-race { white-space: normal; text-decoration: line-through; opacity: 0.85; }
 td.time.trial-race { white-space: normal; }
 .result-line { font-size: 10px; font-weight: 700; color: var(--result-fg); margin-top: 2px; }
-.abandoned-line { font-size: 10px; font-weight: 700; color: #a11b1b; margin-top: 2px; text-decoration: none; }
-.trial-line { font-size: 10px; font-weight: 700; color: #2b6cb0; margin-top: 2px; text-decoration: none; }
-.trial-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #dbe9f7; color: #2b6cb0; }
-[data-theme="dark"] .trial-tag { background: #1c3b57; color: #8fc0ee; }
-.novideo-line { font-size: 10px; font-weight: 700; color: #ad1457; margin-top: 2px; text-decoration: none; }
-.novideo-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #fbe1ec; color: #ad1457; }
-[data-theme="dark"] .novideo-tag { background: #4a1530; color: #ef9dc3; }
-.nocomment-line { font-size: 10px; font-weight: 700; color: #0e7490; margin-top: 2px; text-decoration: none; }
-.nocomment-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #d7f0f3; color: #0e7490; }
-[data-theme="dark"] .nocomment-tag { background: #123a42; color: #7dd3e0; }
-.video-link { text-decoration: none; margin-left: 3px; cursor: pointer; }
-.video-watch-link { display: inline-block; font-size: 12px; font-weight: 600; color: #ad1457; text-decoration: none; }
-.video-watch-link:hover { text-decoration: underline; }
-[data-theme="dark"] .video-watch-link { color: #ef9dc3; }
+.abandoned-line { font-size: 10px; font-weight: 700; color: #ff9d95; margin-top: 2px; text-decoration: none; }
+.trial-line { font-size: 10px; font-weight: 700; color: #8fc0ee; margin-top: 2px; text-decoration: none; }
+.trial-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #1c3b57; color: #8fc0ee; }
+.novideo-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #4a1530; color: #ef9dc3; }
+/* Current/live runner odds (14 Sep 2026, per Dinesh, matching a reference
+   punting site) -- green price pill + a "Favourite" badge under the
+   single lowest-priced runner. */
+.modal-box .odds-cell { text-align: center; white-space: nowrap; }
+.modal-box .weight-cell, .modal-box .barrier-cell, .modal-box .form-figures-cell { text-align: center; white-space: nowrap; }
+.odds-pill { display: inline-block; background: #1a9c4b; color: #fff; font-weight: 700; font-size: 12px; padding: 3px 11px; border-radius: 20px; box-shadow: 0 1px 3px rgba(26, 156, 75, 0.4); }
+.odds-favourite-tag { display: block; margin-top: 3px; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 20px; background: #6b4a00; color: #f5c344; }
+.nocomment-line { font-size: 10px; font-weight: 700; color: #7dd3e0; margin-top: 2px; text-decoration: none; }
+.nocomment-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #123a42; color: #7dd3e0; }
 td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-align: center; }
-.badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; color: #fff; }
-.badge.disc-T { background: #2b6cb0; }
-.badge.disc-H { background: #6b46c1; }
-.badge.disc-G { background: #38761d; }
 .country { font-weight: 400; color: var(--muted); font-size: 11px; }
-.mj-badge { color: var(--muted); font-size: 10px; font-weight: 700; margin-left: 2px; }
-.mj-badge.mj-badge-alert { color: #e14b4b; }
-.dup-badge { display: inline-block; background: #e07b00; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
-.tab-badge { display: inline-block; background: #cc0000; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
-.trainer-badge { display: inline-block; background: #6b46c1; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
-.form-badge { display: inline-block; background: #b7791f; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
-.age-issue-badge { display: inline-block; background: #b7791f; color: #fff; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 /* Per-meeting "download this meeting's full details" widget (10 Aug 2026)
    -- a native <details>/<summary> disclosure, no JS needed to open/close.
    Only downside: it doesn't auto-close on an outside click like the
    meeting-search dropdown does -- acceptable tradeoff for a rarely-used,
    one-off action button. */
 .meeting-download { display: inline-block; position: relative; margin-left: 4px; vertical-align: middle; }
-.meeting-download > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 11px; font-weight: 700; color: var(--header-bg); background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 3px; padding: 1px 6px; }
+.meeting-download > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 3px; padding: 1px 6px; }
 .meeting-download > summary::-webkit-details-marker { display: none; }
 .meeting-download > summary:hover { background: var(--hover-bg); }
 .meeting-download[open] > summary { background: var(--hover-bg); }
 .meeting-download-menu { position: absolute; top: 100%; left: 0; margin-top: 2px; background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 4px; box-shadow: 0 4px 12px var(--shadow); z-index: 55; padding: 4px; display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
 .meeting-download-menu a { display: block; font-size: 12px; font-weight: 400; color: var(--fg); text-decoration: none; padding: 4px 10px; border-radius: 3px; text-align: left; }
 .meeting-download-menu a:hover { background: var(--hover-bg); }
-.controls { margin-bottom: 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.controls {
+  margin-bottom: 18px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 1px 2px var(--shadow); padding: 14px 18px;
+}
 .controls label { font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; margin-right: 16px; }
-.controls a.today-link { font-size: 12px; color: var(--header-bg); text-decoration: none; margin-left: 4px; }
-.meetings-list-link, .back-to-dashboard-link { font-size: 13px; padding: 6px 12px; border-radius: 6px; color: #ffffff; background: #26527a; text-decoration: none; display: inline-block; }
-.meetings-list-link:hover, .back-to-dashboard-link:hover { opacity: 0.9; }
+.controls a.today-link { font-size: 12px; color: var(--accent); text-decoration: none; margin-left: 4px; }
+.meetings-list-link, .back-to-dashboard-link { font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: var(--radius-sm); color: #ffffff; background: var(--header-bg); text-decoration: none; display: inline-block; transition: background 0.15s ease, box-shadow 0.15s ease; }
+.meetings-list-link:hover, .back-to-dashboard-link:hover { background: var(--header-bg-hover); box-shadow: 0 2px 6px var(--shadow); }
+/* Only shown once a race has taken over the tab full-screen (see
+   .race-standalone-view below) -- redundant on the plain dashboard, where
+   the logo itself already goes home and the grid is right there. */
+.home-link { display: none; }
+.race-standalone-view .home-link { display: inline-block; }
+/* A focused race-only tab has no business offering to log the whole
+   session out (18 Sep 2026, per Dinesh: "New Tab open pandra racela
+   Logout Remove pannunga"). */
+.race-standalone-view .session-info { display: none; }
 .report-links { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
 .report-links-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
-.controls a.report-link { font-size: 12px; color: #fff; background: var(--header-bg); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+.controls a.report-link { font-size: 12px; font-weight: 600; color: #fff; background: var(--header-bg); text-decoration: none; padding: 5px 10px; border-radius: var(--radius-sm); transition: background 0.15s ease; }
 .controls a.report-link:hover { background: var(--header-bg-hover); }
-.meetings-list-links select { font-size: 12px; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--tab-btn-border); background: var(--tab-btn-bg); color: var(--tab-btn-fg); }
-.controls button.day-nav { font-size: 13px; padding: 5px 10px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--header-bg); cursor: pointer; }
+.meetings-list-links select { font-size: 12px; padding: 4px 6px; border-radius: var(--radius-sm); border: 1px solid var(--tab-btn-border); background: var(--tab-btn-bg); color: var(--tab-btn-fg); }
+.controls button.day-nav { font-size: 13px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--card-bg); color: var(--accent); cursor: pointer; transition: background 0.15s ease; }
 .controls button.day-nav:hover { background: var(--hover-bg); }
+/* Meetings-list page's filter form only (17 Sep 2026, per Dinesh) -- bigger
+   labels/inputs/buttons/download links than the dashboard's date-nav card,
+   which shares the same base .controls/.day-nav/.report-link classes and
+   wasn't asked to change. */
+.meetings-filters label { font-size: 15px; }
+.meetings-filters input[type="date"], .meetings-filters select { font-size: 15px; padding: 6px 8px; }
+.meetings-filters button.day-nav { font-size: 15px; padding: 8px 16px; }
+.meetings-filters .report-links-label { font-size: 14px; }
+.meetings-filters a.report-link { font-size: 14px; padding: 6px 12px; }
 
 /* Custom date picker (7 Sep 2026, per Dinesh) -- replaces the plain native
    <input type="date"> with a dropdown: a Yesterday/Today/Tomorrow/Next 2
    Days shortcut row plus a month calendar, built in dashboard.html
    (renderDatePickerCalendar). */
 .date-picker-wrap { position: relative; display: inline-block; }
-.date-picker-trigger { font-size: 13px; padding: 5px 10px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.date-picker-trigger { font-size: 13px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--card-bg); color: var(--fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: background 0.15s ease; }
 .date-picker-trigger:hover { background: var(--hover-bg); }
 .date-picker-icon { flex-shrink: 0; }
 .date-picker-panel { display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: var(--card-bg); border: 1px solid var(--input-border); border-radius: 6px; box-shadow: 0 4px 12px var(--shadow); z-index: 60; padding: 10px; }
@@ -154,7 +315,7 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .date-picker-shortcuts { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--input-border); padding-right: 10px; min-width: 110px; }
 .date-picker-shortcut { font-size: 12px; text-align: left; padding: 6px 8px; border: none; border-radius: 4px; background: none; color: var(--fg); cursor: pointer; white-space: nowrap; }
 .date-picker-shortcut:hover { background: var(--hover-bg); }
-.date-picker-shortcut.active { background: var(--header-bg); color: #fff; font-weight: 600; }
+.date-picker-shortcut.active { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
 .date-picker-calendar { min-width: 220px; }
 .date-picker-cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--fg); }
 .date-picker-nav { border: none; background: none; color: var(--fg); font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 3px; }
@@ -165,35 +326,114 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .date-picker-day:hover { background: var(--hover-bg); }
 .date-picker-day.other-month { color: var(--muted); opacity: 0.4; cursor: default; }
 .date-picker-day.other-month:hover { background: none; }
-.date-picker-day.today { font-weight: 700; color: var(--header-bg); }
-.date-picker-day.selected { background: var(--header-bg); color: #fff; font-weight: 700; }
-.date-picker-day.selected:hover { background: var(--header-bg); }
-.theme-toggle { font-size: 13px; padding: 6px 12px; border: 1px solid var(--tab-btn-border); border-radius: 6px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
+.date-picker-day.today { font-weight: 700; color: var(--accent-hover); }
+.date-picker-day.selected { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.date-picker-day.selected:hover { background: var(--accent); }
+.theme-toggle { font-size: 13px; font-weight: 600; padding: 7px 14px; border: 1px solid var(--tab-btn-border); border-radius: var(--radius-sm); background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; transition: background 0.15s ease; }
 .theme-toggle:hover { background: var(--hover-bg); }
 .refresh-indicator { font-size: 11px; color: var(--muted); margin-left: 4px; }
+.refresh-indicator::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; margin-right: 5px; animation: refresh-pulse 1.6s ease-in-out infinite; vertical-align: middle; }
+@keyframes refresh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .meta { font-size: 12px; color: var(--meta-fg); margin-top: 6px; }
 
 .modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-overlay); align-items: center; justify-content: center; z-index: 50; }
 .modal-overlay.open { display: flex; }
-.modal-box { background: var(--modal-bg); color: var(--fg); border-radius: 6px; max-width: 1000px; width: 92%; max-height: 80vh; overflow-y: auto; padding: 20px 24px; box-shadow: 0 8px 30px var(--modal-shadow); }
-.modal-box h2 { margin: 0 0 4px; font-size: 18px; display: block; }
-.modal-box .modal-race-name { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
-.modal-box .modal-sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
-.modal-box .modal-race-comment { font-size: 13px; line-height: 1.45; color: var(--fg); background: var(--sub-bg); border-radius: 4px; padding: 8px 10px; margin: 0 0 14px; }
-.modal-box .modal-result { color: var(--result-fg); font-weight: 700; font-size: 13px; margin: 0 0 10px; }
+.modal-box { box-sizing: border-box; background: var(--modal-bg); color: var(--fg); border-radius: 12px; max-width: 1300px; width: 92%; max-height: 80vh; overflow-y: auto; padding: 22px 26px; box-shadow: 0 16px 50px var(--modal-shadow); }
+
+/* A race opened via its own link (schedule-grid cell, target="_blank")
+   loads this same page fresh in a new tab; dashboard.html's init() adds
+   this class so that race fills the WHOLE tab -- full-screen, edge to
+   edge -- instead of the small centred modal box the SAME markup renders
+   as when a race is opened from within an already-open dashboard tab (18
+   Sep 2026, per Dinesh: "Race view full screen varanu"). The app header
+   above it (RacingHub logo/name + the Home link, only shown here -- see
+   .home-link above) stays visible and usable, since this only hides the
+   date/filter controls and schedule grid, not the header. */
+body.race-standalone-view .header-status-bar,
+body.race-standalone-view .control-bar,
+body.race-standalone-view .app-main { display: none; }
+body.race-standalone-view #detailModal.open { position: static; display: block; background: none; padding: 0; }
+body.race-standalone-view #detailModal .modal-box { position: relative; max-width: none; width: 100%; max-height: none; overflow-y: visible; min-height: calc(100vh - 100px); border-radius: 0; box-shadow: none; margin: 0; font-size: 13px; }
+/* The race-number nav strip (R1/R2/R3...) reads as a stray small box in
+   the corner otherwise -- stretched into its own full-width band, flush
+   with the page edges via the modal-box's own padding negated (18 Sep
+   2026, per Dinesh: "Race Numbers move pannunga"), buttons enlarged and
+   moved to the right end of that band instead of clumped on the left (19
+   Sep 2026, per Dinesh: "Race Numbers Size konjom perusakki, Matta side
+   move pannunga"). There's no "X" in this row any more to make room for
+   -- a standalone full-screen tab has nothing behind it to reveal by
+   closing, and Dinesh asked for that mark gone here too ("Anda Cross
+   mark a remove pannunga"); the Home link in the header is the way back. */
+body.race-standalone-view #detailModal .popup-top-row { margin: -22px -26px 16px; padding: 12px 26px; background: var(--sub-bg); }
+body.race-standalone-view #detailModal .race-nav { margin: 0; justify-content: flex-end; }
+body.race-standalone-view #detailModal .race-nav-btn { font-size: 15px; padding: 7px 14px; }
+body.race-standalone-view #detailModal .modal-close { display: none; }
+/* Race Field's runner table, Speed Map's track view, and the Race Card/
+   Data Dump raw views all sit inside one .popup-tab-panel -- ALL of them
+   go edge-to-edge now, not just the table, so every tab matches (18 Sep
+   2026, per Dinesh: "Speed Map, Race Card, and Data Dump Inda columns
+   also Race Filed column madhiri seinga"). */
+body.race-standalone-view .popup-tab-panel { width: calc(100% + 52px); margin: 0 -26px; box-sizing: border-box; padding: 0 26px; }
+body.race-standalone-view .popup-tab-panel table { width: 100%; }
+/* Race Card/Data Dump's raw JSON block first kept its own bordered,
+   internally-scrolling box on the reasoning that a fixed-height code
+   block was fine there -- Dinesh then asked for the SAME "no box, no
+   inner scroll" treatment as Race Field for these too (18 Sep 2026:
+   "Speed Map, Race Card, Data Dump Inda 3 pages... Race filed page size
+   podinga box ullukku scrole pannama summa veliya podunga"). Grows with
+   its content and lets the whole PAGE scroll instead, same as everything
+   else in this view. */
+body.race-standalone-view .raw-json-block { max-height: none; overflow-y: visible; overflow-x: visible; white-space: pre-wrap; word-break: break-word; }
+/* The Race Field/Speed Map/Race Card/Data Dump tab content normally sits
+   in a fixed 480px box that scrolls internally (see .popup-tab-panel
+   below) so switching tabs never resizes the small in-page popup -- that
+   same fixed box, in the full-screen standalone view, is exactly the
+   nested "scroll inside a box" Dinesh flagged (18 Sep 2026: "inda box
+   ullukka scrol panna vena... full pagekum vainga"). Let it grow with its
+   content instead, so the whole PAGE scrolls, like the reference site's
+   full-length runner table. */
+body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; }
+
+.video-modal-box { background: #000; border-radius: 8px; padding: 0; width: min(92vw, 1100px); position: relative; box-shadow: 0 16px 50px var(--modal-shadow); }
+.video-modal-box video { display: block; width: 100%; max-height: 80vh; border-radius: 8px; }
+.video-modal-box .modal-close { position: absolute; top: -34px; right: 0; color: #fff; }
+.modal-box h2 { margin: 0 0 4px; font-size: 21px; font-weight: 700; letter-spacing: -0.2px; display: block; }
+.modal-box .modal-race-name { font-weight: 600; font-size: 15px; margin: 0 0 4px; }
+.modal-box .modal-sub { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+.modal-box .modal-race-comment { font-size: 14px; line-height: 1.45; color: var(--fg); background: var(--sub-bg); border-radius: 4px; padding: 8px 10px; margin: 0 0 14px; }
+.modal-box .modal-result { color: var(--result-fg); font-weight: 700; font-size: 14px; margin: 0 0 10px; }
 .modal-box table { width: 100%; box-shadow: none; }
-.modal-box th, .modal-box td { font-size: 13px; padding: 5px 8px; text-align: left; white-space: normal; }
+.modal-box th, .modal-box td { font-size: 14px; padding: 7px 8px; text-align: left; white-space: normal; }
 .modal-box th { background: var(--header-bg); }
+.modal-box table tbody tr:nth-child(even):not(.scratched) { background: var(--sub-bg); }
+.modal-box table tbody tr:hover:not(.scratched) { background: var(--hover-bg); }
 .modal-close { float: right; cursor: pointer; font-size: 20px; color: var(--muted); border: none; background: none; line-height: 1; }
 .modal-close:hover { color: var(--fg); }
 
 /* Popup "Race Field" / "Speed Map" tabs (8 Sep 2026, per Dinesh) -- only
-   rendered when a race actually has speed-map predictions. */
-.popup-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
-.popup-tab-btn { font-size: 13px; font-weight: 600; padding: 8px 14px; border: none; background: none; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.popup-tab-btn:hover { color: var(--fg); }
-.popup-tab-btn.active { color: var(--header-bg); border-bottom-color: var(--header-bg); }
-[data-theme="dark"] .popup-tab-btn.active { color: #6fa8dc; border-bottom-color: #6fa8dc; }
+   rendered when a race actually has speed-map predictions. Styled as actual
+   bordered buttons rather than flat underline tabs (18 Sep 2026, per Dinesh:
+   "Button podunga"), "Watch race video" included in the same row/style. */
+.popup-tabs { display: flex; gap: 8px; margin: 0 0 14px; flex-wrap: wrap; }
+.popup-tab-btn {
+  font-size: 14px; font-weight: 600; padding: 8px 16px; cursor: pointer; text-decoration: none;
+  border: 1px solid var(--tab-btn-border); border-radius: var(--radius-sm);
+  background: var(--tab-btn-bg); color: var(--tab-btn-fg);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.popup-tab-btn:hover { background: var(--hover-bg); }
+.popup-tab-btn.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* Its own accent border (not filled/active-colored like the view tabs) so
+   it still reads as a distinct action -- opens a video, not a view -- and
+   pushed to the right end of the row, away from the 4 view-switch buttons
+   (18 Sep 2026, per Dinesh, annotated screenshot). */
+.video-watch-btn { margin-left: auto; border-color: var(--accent); color: var(--accent); }
+.video-watch-btn:hover { background: var(--accent); color: var(--accent-fg); }
+/* All 4 tab panels (Race Field/Speed Map/Race Card/Data Dump) share one
+   fixed-size box so switching tabs never resizes the popup (9 Sep 2026,
+   per Dinesh) -- any tab whose content is taller scrolls within its own
+   panel instead of growing the box. */
+.popup-tab-panel { height: 480px; overflow-y: auto; }
 .raw-doc-heading { font-size: 13px; margin: 14px 0 4px; color: var(--muted); }
 .raw-doc-heading:first-child { margin-top: 0; }
 .raw-json-block { font-family: Consolas, Monaco, monospace; font-size: 11px; line-height: 1.5; background: var(--sub-bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; overflow-x: auto; white-space: pre; max-height: 400px; overflow-y: auto; }
@@ -203,8 +443,7 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .raw-version-btn { font-size: 11px; font-weight: 600; padding: 4px 10px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
 .raw-version-btn:hover { background: var(--hover-bg); }
 .raw-version-btn.active { background: var(--header-bg); color: #fff; border-color: var(--header-bg); }
-.raw-download-btn { margin-left: 10px; border-color: #2b6cb0; color: #2b6cb0; }
-[data-theme="dark"] .raw-download-btn { border-color: #8fc0ee; color: #8fc0ee; }
+.raw-download-btn { margin-left: 10px; border-color: #8fc0ee; color: #8fc0ee; }
 
 /* Speed Map bar chart -- bar width/icon position = early pace (100 -
    paceRating), i.e. how far forward this runner is predicted to be
@@ -214,8 +453,7 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .speedmap-tab { position: relative; flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
 .speedmap-tab .silk-icon { width: 24px; height: 26px; }
 .speedmap-tab-number { position: absolute; bottom: -4px; right: -4px; min-width: 14px; height: 14px; padding: 0 2px; border-radius: 50%; background: #fff; color: #161616; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
-.speedmap-track { position: relative; flex: 1; height: 28px; background: #16602b; border-radius: 3px; }
-[data-theme="dark"] .speedmap-track { background: #0e3d1c; }
+.speedmap-track { position: relative; flex: 1; height: 28px; background: #0e3d1c; border-radius: 3px; }
 .speedmap-bar { position: absolute; top: 0; left: 0; bottom: 0; min-width: 4px; background: #4ad07f; border-radius: 3px; transition: width 2.5s cubic-bezier(0.4, 0, 0.2, 1); }
 .speedmap-bar-unknown { background: #4a5560; }
 .speedmap-name { position: relative; z-index: 1; display: flex; align-items: center; height: 100%; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); white-space: nowrap; padding-left: 8px; text-transform: uppercase; }
@@ -224,6 +462,11 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .speedmap-legend-cell { flex: 1; text-align: center; background: #7a4a1e; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; padding: 6px 2px; border-right: 1px solid rgba(255, 255, 255, 0.25); }
 .speedmap-legend-cell:last-child { border-right: none; }
 .speedmap-icon { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: left 2.5s cubic-bezier(0.4, 0, 0.2, 1); }
+/* Thoroughbred/Harness marker (14 Sep 2026, per Dinesh) -- an actual
+   running-gait GIF, not an emoji, so drop the circular badge styling and
+   size it to the GIF's own (wider-than-tall) aspect ratio instead. */
+.speedmap-icon-gif { width: 40px; height: 30px; border-radius: 0; background: none; box-shadow: none; }
+.speedmap-icon-gif img { width: 100%; height: 100%; object-fit: contain; }
 tr.scratched td { color: var(--scratched-fg); text-decoration: line-through; }
 td.issue-cell.missing { color: #e14b4b; font-weight: 600; }
 td.issue-cell.duplicate { color: #e07b00; font-weight: 600; }
@@ -236,28 +479,26 @@ td.position-cell { font-weight: 700; }
 .form-ignore-btn, .age-ignore-btn, .dup-jockey-ignore-btn, .missing-jockey-ignore-btn { font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid var(--tab-btn-border); border-radius: 3px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
 .form-ignore-btn:hover, .age-ignore-btn:hover, .dup-jockey-ignore-btn:hover, .missing-jockey-ignore-btn:hover { background: var(--hover-bg); }
 .form-ignore-btn:disabled, .age-ignore-btn:disabled, .dup-jockey-ignore-btn:disabled, .missing-jockey-ignore-btn:disabled { opacity: 0.6; cursor: default; }
-.site-check-link { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid #2b6cb0; border-radius: 3px; background: none; color: #2b6cb0; text-decoration: none; }
-.site-check-link:hover { background: #dbe9f7; }
-[data-theme="dark"] .site-check-link { border-color: #8fc0ee; color: #8fc0ee; }
-[data-theme="dark"] .site-check-link:hover { background: #1c3b57; }
+.site-check-link { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; margin-left: 6px; border: 1px solid #8fc0ee; border-radius: 3px; background: none; color: #8fc0ee; text-decoration: none; }
+.site-check-link:hover { background: #1c3b57; }
 .form-ignore-all-line { margin: 0 0 10px; }
 .form-ignore-all-btn { margin-left: 0; font-size: 12px; padding: 4px 10px; }
+.popup-top-row { margin: 0 0 12px; }
+.popup-top-row .race-nav { margin: 0; }
 .race-nav { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
 .race-nav-btn { font-size: 12px; font-weight: 600; padding: 4px 9px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
 .race-nav-btn:hover { background: var(--hover-bg); }
 .race-nav-btn.active { background: var(--header-bg); color: #fff; border-color: var(--header-bg); cursor: default; }
-.race-nav-btn.has-issue { border-color: #cc0000; color: #cc0000; }
-.race-nav-btn.has-issue:hover { background: #fff0f0; }
+.race-nav-btn.has-issue { border-color: #e14b4b; color: #ff9d95; }
+.race-nav-btn.has-issue:hover { background: #3a1f1f; }
 .race-nav-btn.has-issue.active { color: #fff; box-shadow: inset 0 0 0 2px #ff8a8a; }
-[data-theme="dark"] .race-nav-btn.has-issue { border-color: #e14b4b; color: #ff9d95; }
-[data-theme="dark"] .race-nav-btn.has-issue:hover { background: #3a1f1f; }
 
-.horse-name-link { font: inherit; padding: 0; border: none; background: none; color: var(--header-bg); text-decoration: underline; cursor: pointer; }
-.horse-name-link:hover { color: var(--header-bg-hover); }
+.horse-name-link { font: inherit; padding: 0; border: none; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.horse-name-link:hover { color: var(--accent-hover); }
 .horse-region { font-weight: 400; color: var(--muted); font-size: 11px; }
 .modal-box .tab-cell { text-align: center; width: 34px; }
 .horse-cell { min-width: 130px; white-space: nowrap; text-transform: uppercase; }
-.modal-box .silk-cell { width: 34px; text-align: center; padding-left: 6px; padding-right: 2px; }
+.modal-box .silk-cell { width: 60px; text-align: center; padding-left: 6px; padding-right: 2px; }
 .silk-icon { vertical-align: middle; flex-shrink: 0; }
 .silk-missing path, .silk-missing circle { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 2.5 2; }
 .silk-missing { background: rgba(214, 84, 47, 0.12); border-radius: 4px; }
@@ -271,7 +512,7 @@ td.position-cell { font-weight: 700; }
 .horse-past-name { text-transform: uppercase; }
 .horse-past-races-heading { font-size: 14px; margin: 14px 0 6px; }
 .horse-past-races { width: 100%; box-shadow: none; }
-.horse-past-races th, .horse-past-races td { font-size: 12px; padding: 5px 8px; text-align: left; white-space: normal; }
+.horse-past-races th, .horse-past-races td { font-size: 12px; padding: 5px 8px; text-align: left; white-space: normal; color: inherit; text-decoration: none; }
 .horse-past-races th { background: var(--header-bg); }
 .horse-past-races tr.past-race-row { cursor: pointer; }
 .horse-past-races tr.past-race-row:hover { background: var(--hover-bg); }
@@ -287,6 +528,16 @@ body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
 
 .table-scroll { width: 100%; }
 
+.meetings-list-table tbody tr:nth-child(even) { background: var(--sub-bg); }
+.meetings-list-table tbody tr:hover { background: var(--hover-bg); }
+/* Country (AUS/GB/...) and Discipline (T/H/G, 17 Sep 2026, per Dinesh --
+   shortened from the full name) are both short codes -- narrower + centred
+   columns instead of the full-width auto-sized ones they got by default. */
+.meetings-list-table th:nth-child(2), .meetings-list-table td:nth-child(2),
+.meetings-list-table th:nth-child(3), .meetings-list-table td:nth-child(3) {
+  width: 64px; text-align: center;
+}
+
 /* ---- Phone view (added 9 Aug 2026, per "phone'la open panna sariya
    kaatudilla") ---- the grid was unusable on phones mainly because there
    was no <meta name="viewport"> tag at all, so mobile browsers rendered
@@ -297,6 +548,14 @@ body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
 @media (max-width: 760px) {
   body { margin: 12px; }
   h1 { font-size: 20px; }
+  /* The bigger RacingHub logo/wordmark (17 Sep 2026, per Dinesh) is sized
+     for a wide desktop header -- at 42px "RACINGHUB" alone is wider than a
+     phone screen and got clipped, so scale both back down under 760px. */
+  .app-header { padding: 16px; }
+  .brand { gap: 12px; }
+  .brand-icon { height: 48px; }
+  .brand-name { font-size: 22px; }
+  .brand-subtitle { font-size: 11px; }
   .top-row { gap: 6px; }
   .sub { font-size: 12px; margin-bottom: 14px; }
   .disc-tabs { gap: 6px; margin-bottom: 14px; }
@@ -341,6 +600,13 @@ body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
     position: sticky; left: 0; z-index: 3; box-shadow: 2px 0 4px var(--shadow);
   }
   .table-scroll thead th:first-child { z-index: 6; }
+  /* The "R5" race-number prefix (15 Sep 2026, per Dinesh) reads fine
+     inline before the time on desktop's wider pill cells, but at phone
+     column widths "R5 16:05" doesn't fit on one line inside the pill and
+     spills into the next cell -- stack it above the time instead so it
+     only ever needs vertical room, which these cells already have
+     (checkered-flag/result lines already stack the same way). */
+  .race-no-label { display: block; margin: 0; }
   .modal-box { width: 94%; padding: 16px 16px; max-height: 88vh; }
   .modal-box h2 { font-size: 16px; }
   .modal-box table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }

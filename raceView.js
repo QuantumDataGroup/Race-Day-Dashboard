@@ -83,6 +83,17 @@ function parseClock(rScheduleTime) {
   return { label: `${match[1]}:${match[2]}`, minutes: hh * 60 + mm };
 }
 
+// `createdAt` is a plain "YYYY-MM-DD HH:mm:ss" UTC string, reset fresh every
+// time a race document is actually re-scraped (see server.js's
+// parseIngestTimestamp for the full reasoning). Returns -Infinity for a
+// missing/unparseable value so a doc without one always loses a comparison
+// against a doc that has one, rather than throwing off NaN comparisons.
+function ingestTime(createdAt) {
+  if (!createdAt) return -Infinity;
+  const d = new Date(String(createdAt).replace(' ', 'T') + 'Z');
+  return isNaN(d.getTime()) ? -Infinity : d.getTime();
+}
+
 function disciplineLabel(code) {
   return DISCIPLINE_LABELS[code] || code || '?';
 }
@@ -237,6 +248,18 @@ function countMissingFormLines(runners, discipline) {
   return runners.filter((r) => !r.isScratched && r.hasFormLines === false).length;
 }
 
+// `runnerComment` is attached server-side (server.js's attachFormLineStatus)
+// from the racecards join, same as pastRaces/sire/dam above -- Thoroughbred
+// only (18 Sep 2026, per Dinesh: "Runner comments ongalukku access irukka" --
+// checked the DB: Harness/Greyhound racecards have 0 runners with this field
+// populated today vs. 99.7% coverage for Thoroughbred, so "missing" only
+// means something there).
+function countMissingRunnerComments(runners, discipline) {
+  if (discipline !== 'T') return null;
+  if (!Array.isArray(runners)) return 0;
+  return runners.filter((r) => !r.isScratched && !r.runnerComment).length;
+}
+
 // --- Timezone/UTC cross-check: REMOVED 11 Aug 2026 -------------------------
 //
 // A whole timezone/UTC-offset validation feature (within-meeting peer
@@ -291,6 +314,7 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (isBlank(runner.trainer)) parts.push('Missing trainer');
   if (discipline === 'T' && runner.hasFormLines === false) parts.push(formLinesIssueLabel(runner.formLinesByClient));
   if (discipline === 'T' && isAgeIssue(runner)) parts.push(`Horse age issue (${runner.age} years, over ${MAX_EXPECTED_HORSE_AGE})`);
+  if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
   return parts.join(' | ');
 }
 
@@ -354,8 +378,23 @@ function buildSchedule(docs, dateStr) {
         races: new Map(),
       });
     }
-    groups.get(key).races.set(doc.rNo, {
+    // Duplicate race documents for the same meeting+race number do happen
+    // (confirmed 15 Sep 2026, per Dinesh -- Greyhound MANDURAH had a full
+    // second doc per race, an older one whose rScheduleTime never got
+    // corrected sitting alongside a freshly re-scraped one with the real
+    // time). Without this check, whichever doc the DB query happened to
+    // return LAST for that race number silently won -- not necessarily the
+    // freshest one -- so one meeting could show a random mix of stale and
+    // current times across its races. Always keep the doc with the newer
+    // createdAt.
+    const group = groups.get(key);
+    const existingRace = group.races.get(doc.rNo);
+    if (existingRace && ingestTime(existingRace.createdAt) >= ingestTime(doc.createdAt)) {
+      continue;
+    }
+    group.races.set(doc.rNo, {
       id: doc._id,
+      createdAt: doc.createdAt || null,
       clock: parseClock(doc.rScheduleTime),
       rScheduleTime: doc.rScheduleTime || null,
       rClass: doc.rClass || '',
@@ -366,6 +405,7 @@ function buildSchedule(docs, dateStr) {
       missingTrainerCount: countMissingTrainers(doc.runners),
       missingFormCount: countMissingFormLines(doc.runners, doc.rDiscipline),
       ageIssueCount: countAgeIssues(doc.runners, doc.rDiscipline),
+      missingRunnerCommentCount: countMissingRunnerComments(doc.runners, doc.rDiscipline),
       // Race-level (not per-runner), attached server-side the same way as
       // hasVideo -- `doc.hasRaceComment` is null for non-Thoroughbred races
       // (see attachFormLineStatus), so this stays false for them too rather
@@ -403,7 +443,7 @@ function buildSchedule(docs, dateStr) {
     for (const rNo of raceNos) {
       const {
         id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingFormCount, ageIssueCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl,
+        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -441,6 +481,8 @@ function buildSchedule(docs, dateStr) {
             missingFormFlagged: missingFormCount > MISSING_FORM_BORDER_THRESHOLD,
             ageIssueCount,
             ageIssueFlagged: ageIssueCount > 0,
+            missingRunnerCommentCount,
+            missingRunnerCommentFlagged: missingRunnerCommentCount > 0,
             missingRaceComment,
             status,
             resultString,
@@ -466,6 +508,7 @@ function buildSchedule(docs, dateStr) {
     let hasMissingTrainer = false;
     let hasMissingForm = false;
     let hasAgeIssue = false;
+    let hasMissingRunnerComment = false;
     let hasMissingVideo = false;
     let hasMissingRaceComment = false;
     let hasScheduleIssue = false;
@@ -479,16 +522,17 @@ function buildSchedule(docs, dateStr) {
       if (race.missingTrainerCount > 0) hasMissingTrainer = true;
       if (race.missingFormFlagged) hasMissingForm = true;
       if (race.ageIssueFlagged) hasAgeIssue = true;
+      if (race.missingRunnerCommentFlagged) hasMissingRunnerComment = true;
       if (race.missingVideo) hasMissingVideo = true;
       if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingVideo || hasMissingRaceComment || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingRaceComment || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingVideo, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
       races,
     });
   }
@@ -649,6 +693,11 @@ function buildRaceDetail(doc) {
       trainer: r.trainer || '',
       age: r.age != null ? r.age : null,
       sex: r.sex || null,
+      // Barrier/box position (14 Sep 2026, per Dinesh) -- native field on
+      // the runner subdocument (`bp`, no join needed), reliably populated
+      // for every discipline: a real barrier draw for Thoroughbred/Harness,
+      // and the box number for Greyhound (same as tabNo there by nature).
+      barrierPosition: r.bp != null ? r.bp : null,
       // region/sire/dam/colour/pastRaces/performanceStatistics come from the
       // racecards join (server.js's attachFormLineStatus) -- Thoroughbred
       // only, so these are null for Harness/Greyhound runners.
@@ -665,9 +714,38 @@ function buildRaceDetail(doc) {
       silkDescription: r.colors || null,
       pastRaces: Array.isArray(r.pastRaces) ? r.pastRaces : [],
       performanceStatistics: r.performanceStatistics || null,
+      // Per-runner narrative comment (18 Sep 2026, per Dinesh) -- same
+      // racecards join as sire/dam/pastRaces above, Thoroughbred only.
+      runnerComment: r.runnerComment || null,
+      // Current/live odds (14 Sep 2026, per Dinesh) -- same racecards join
+      // as region/sire/dam above, Thoroughbred only. A decimal-odds string
+      // (e.g. "4.4"), or null when this runner's market isn't priced yet.
+      currentOdds: r.currentOdds || null,
+      // Carrying weight in kg (14 Sep 2026, per Dinesh) -- same racecards
+      // join as currentOdds above, Thoroughbred only.
+      weightKg: r.weightKg || null,
+      // Compact form-figures string (e.g. "8x61") -- same racecards join,
+      // Thoroughbred only (18 Sep 2026, per Dinesh).
+      formFigures: r.formFigures || null,
       isScratched: Boolean(r.isScratched),
       issue: issueForRunner(r, doc.rDiscipline, counts, tabCounts),
     }));
+
+  // Marks the single lowest-priced non-scratched runner as the market
+  // favourite (14 Sep 2026, per Dinesh, matching reference punting sites)
+  // -- only when at least one runner actually has a real price; most races
+  // have none yet (see currentOdds comment above), and this stays unset then.
+  let favouriteIdx = -1;
+  let favouriteOdds = Infinity;
+  runners.forEach((r, i) => {
+    if (r.isScratched || !r.currentOdds) return;
+    const val = parseFloat(r.currentOdds);
+    if (!isNaN(val) && val > 0 && val < favouriteOdds) {
+      favouriteOdds = val;
+      favouriteIdx = i;
+    }
+  });
+  if (favouriteIdx !== -1) runners[favouriteIdx].isFavourite = true;
 
   return {
     id: doc._id,
@@ -878,6 +956,7 @@ function buildMeetingsListReport(docs, dateStr, disciplineFilter) {
         date: dateStr,
         country: m.country,
         discipline: disciplineLabel(disc),
+        disciplineCode: disc,
         meeting: m.meeting,
         tab: m.isTAB ? 'TAB' : 'Non-TAB',
         raceCount: raceNos.length,
@@ -1024,70 +1103,107 @@ function renderTemplate(template, vars) {
 
 function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
   const cols = Array.from({ length: maxRaceNo }, (_, i) => i + 1);
-  const headerCells = cols.map((n) => `<th>R${n}</th>`).join('');
+  const headerCells = cols.map((n) => `<th>R${n}</th>`).join('') + '<th class="status-col">Status</th>';
 
   let lastCountry = null;
   const rows = meetings.length
     ? meetings.map((m) => {
+        // Per-race issue breakdown for this meeting (15 Sep 2026, per Dinesh
+        // -- "Edawadu missing issues... Dash board'la Status-la mattu
+        // warning waranu... Warning click panna enda racela enna
+        // issues-nu kaattanu"). Every data-quality flag (jockey/tab/
+        // trainer/form/age/video/comment/schedule) used to show up as its
+        // own coloured outline + superscript badge directly on the
+        // race-time cell -- all removed below, replaced by one row per
+        // affected race here, shown when the meeting's Status icon (built
+        // further down) is clicked.
+        const meetingRaceIssues = [];
         const cells = cols.map((n) => {
           const race = m.races[n];
           if (!race) return '<td class="cell empty">&mdash;</td>';
 
           let cls = 'cell time clickable';
-          if (race.highlighted) cls += ' highlight';
-          if (race.missingJockeysFlagged) cls += ' missing-jockeys';
-          if (race.tabIssueCount > 0) cls += ' tab-issue';
-          if (race.missingTrainerCount > 0) cls += ' missing-trainer';
-          if (race.missingFormFlagged) cls += ' missing-form';
-          if (race.ageIssueFlagged) cls += ' horse-age-issue';
-          if (race.missingVideo) cls += ' missing-video';
-          if (race.missingRaceComment) cls += ' missing-race-comment';
-          if (race.badTime) cls += ' bad-time';
           if (race.resultString) cls += ' has-result';
           if (race.status === 'abandoned') cls += ' abandoned-race';
           if (race.isTrial) cls += ' trial-race';
 
+          const raceIssueLines = [];
+          if (race.missingJockeyCount > 0) raceIssueLines.push(`Missing Jockey (${race.missingJockeyCount})`);
+          if (race.duplicateJockeyCount > 0) raceIssueLines.push(`Duplicate Jockey (${race.duplicateJockeyCount})`);
+          if (race.tabIssueCount > 0) raceIssueLines.push(`Missing/Duplicate TAB number (${race.tabIssueCount})`);
+          if (race.missingTrainerCount > 0) raceIssueLines.push(`Missing Trainer (${race.missingTrainerCount})`);
+          if (race.missingFormFlagged) raceIssueLines.push(`Missing Form Lines (${race.missingFormCount})`);
+          if (race.ageIssueFlagged) raceIssueLines.push(`Horse Age Issue (${race.ageIssueCount})`);
+          if (race.missingRunnerCommentFlagged) raceIssueLines.push(`Missing Runner Comment (${race.missingRunnerCommentCount})`);
+          if (race.missingVideo) raceIssueLines.push('Missing Video');
+          if (race.missingRaceComment) raceIssueLines.push('Missing Race Comment');
+          if (race.badTime) raceIssueLines.push(`Schedule Issue (${race.badTimeReason})`);
+          else if (race.highlighted) raceIssueLines.push(`Schedule Issue (${race.gapMinutes} min after the previous race)`);
+          if (raceIssueLines.length) meetingRaceIssues.push({ rNo: n, lines: raceIssueLines });
+
+          // These used to be readable straight off the cell's CSS classes
+          // (removed above) -- dashboard.html's popup race-nav bar (the
+          // R1/R2/R3... strip inside an open race popup, unrelated to this
+          // grid) still needs to know which OTHER races at this meeting
+          // have an issue, so that data moves to explicit data-attributes
+          // instead of piggy-backing on now-gone presentation classes.
+          const otherIssueFlags = [];
+          if (race.missingJockeysFlagged) otherIssueFlags.push('missing-jockeys');
+          if (race.duplicateJockeyCount > 0) otherIssueFlags.push('duplicate-jockey');
+          if (race.tabIssueCount > 0) otherIssueFlags.push('tab-issue');
+          if (race.missingTrainerCount > 0) otherIssueFlags.push('missing-trainer');
+          if (race.badTime) otherIssueFlags.push('bad-time');
+          if (race.missingVideo) otherIssueFlags.push('missing-video');
+          if (race.ageIssueFlagged) otherIssueFlags.push('horse-age-issue');
+          if (race.missingRunnerCommentFlagged) otherIssueFlags.push('missing-runner-comment');
+          if (race.missingRaceComment) otherIssueFlags.push('missing-race-comment');
+
           const titleParts = [];
           if (race.isTrial) titleParts.push('Trial race');
           titleParts.push(`Status: ${STATUS_LABELS[race.status] || race.status}`);
-          if (race.badTime) titleParts.push(race.badTimeReason);
-          if (race.gapMinutes !== null) titleParts.push(`${race.gapMinutes} min after the previous race`);
           if (race.rClass) titleParts.push(`Class: ${race.rClass}`);
           if (race.rPrizeMoney) titleParts.push(`Prize: ${race.rPrizeMoney}`);
-          if (race.missingJockeyCount > 0) titleParts.push(`${race.missingJockeyCount} runner(s) missing jockey`);
-          if (race.duplicateJockeyCount > 0) titleParts.push(`${race.duplicateJockeyCount} jockey(s) duplicated across runners`);
-          if (race.tabIssueCount > 0) titleParts.push(`${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number`);
-          if (race.missingTrainerCount > 0) titleParts.push(`${race.missingTrainerCount} runner(s) missing trainer`);
-          if (race.missingFormFlagged) titleParts.push(`${race.missingFormCount} runner(s) missing form lines`);
-          if (race.ageIssueFlagged) titleParts.push(`${race.ageIssueCount} runner(s) over age limit (${MAX_EXPECTED_HORSE_AGE})`);
-          if (race.missingVideo) titleParts.push('Videos not available');
-          if (race.missingRaceComment) titleParts.push('Race comment not available');
-          if (race.videoUrl) titleParts.push('Race video available -- click the camera icon to watch');
           if (race.resultString) titleParts.push(`Result (tab numbers, 1st-4th): ${race.resultString}`);
+          if (raceIssueLines.length) titleParts.push(`Issues: ${raceIssueLines.join(', ')}`);
           titleParts.push('Click for runner details');
 
-          const mjBadgeClass = `mj-badge${race.missingJockeysFlagged ? ' mj-badge-alert' : ''}`;
-          const mjBadge = race.missingJockeyCount > 0 ? `<sup class="${mjBadgeClass}" title="${race.missingJockeyCount} runner(s) missing a jockey">M${race.missingJockeyCount}</sup>` : '';
-          const dupBadge = race.duplicateJockeyCount > 0 ? `<sup class="dup-badge" title="${race.duplicateJockeyCount} jockey(s) duplicated across runners">D${race.duplicateJockeyCount}</sup>` : '';
-          const tabBadge = race.tabIssueCount > 0 ? `<sup class="tab-badge" title="${race.tabIssueCount} runner(s) with missing/zero/duplicate tab number">T${race.tabIssueCount}</sup>` : '';
-          const trainerBadge = race.missingTrainerCount > 0 ? `<sup class="trainer-badge" title="${race.missingTrainerCount} runner(s) missing trainer">TR${race.missingTrainerCount}</sup>` : '';
-          const formBadge = race.missingFormFlagged ? `<sup class="form-badge" title="${race.missingFormCount} runner(s) missing form lines">FL${race.missingFormCount}</sup>` : '';
-          const ageBadge = race.ageIssueFlagged ? `<sup class="age-issue-badge" title="${race.ageIssueCount} runner(s) over age limit (${MAX_EXPECTED_HORSE_AGE})">AGE${race.ageIssueCount}</sup>` : '';
-          const resultLine = race.resultString ? `<div class="result-line">&#127937; ${escapeHtml(race.resultString)}</div>` : '';
+          // "R5 16:05" instead of just "16:05" (15 Sep 2026, per Dinesh --
+          // "Race number kandu pudikka konja kastam" -- hard to tell which
+          // column is which race for a meeting with lots of races), plus a
+          // small warning icon right on the cell for races that DO have an
+          // issue (a quick at-a-glance signal -- the full race-by-race
+          // breakdown still lives on the meeting's Status icon).
+          const raceNoLabel = `<span class="race-no-label">R${n}</span> `;
+          const cellIssueIcon = raceIssueLines.length
+            ? ` <i class="fa-solid fa-triangle-exclamation cell-issue-icon" title="${escapeHtml(raceIssueLines.join(', '))}"></i>`
+            : '';
+          const resultLine = race.resultString ? `<div class="result-line">${escapeHtml(race.resultString)}</div>` : '';
           const abandonedLine = race.status === 'abandoned' ? `<div class="abandoned-line">Abandoned</div>` : '';
           const trialLine = race.isTrial ? `<div class="trial-line">Trial</div>` : '';
-          const novideoLine = race.missingVideo ? `<div class="novideo-line">Videos not available</div>` : '';
-          const nocommentLine = race.missingRaceComment ? `<div class="nocomment-line">No race comment</div>` : '';
-          const videoLink = race.videoUrl
-            ? `<a class="video-link" href="${escapeHtml(race.videoUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Watch race video">&#127909;</a>`
-            : '';
-          return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" title="${escapeHtml(titleParts.join(' | '))}" onclick="showRaceDetail('${escapeHtml(race.id)}', this)">${race.label}${mjBadge}${dupBadge}${tabBadge}${trainerBadge}${formBadge}${ageBadge}${videoLink}${trialLine}${resultLine}${abandonedLine}${novideoLine}${nocommentLine}</td>`;
+          // Once a race has resulted, the scheduled time is no longer useful
+          // on the grid -- just the race number and the result (17 Sep 2026,
+          // per Dinesh: "Race mudinjadu Race Times remove pannunga...
+          // Race number and Results mattu kaattunga").
+          const timeLabel = race.resultString ? '' : race.label;
+          // A real <a target="_blank" href> -- right-click -> "Open in new
+          // tab" and ctrl/cmd/middle-click open this race in its own
+          // full-screen tab (see .race-standalone-view in styles.css). A
+          // PLAIN click goes back to the original in-place popup instead
+          // (18 Sep 2026, per Dinesh: "Right Click Panni open panna mattu
+          // da new Tab open aganu" / "Normal Click panna, Palaya madhiri
+          // open aganu" -- every click opening a new tab, from the
+          // previous pass at this, was one step too far). handleRaceCellClick
+          // (dashboard.html) does the preventDefault for that plain-click
+          // case; modifier-clicks/right-click bypass it entirely, same as
+          // any other link.
+          const raceHref = `/?date=${encodeURIComponent(dateStr)}&race=${encodeURIComponent(race.id)}`;
+          return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" data-formissue="${Boolean(race.missingFormFlagged)}" data-otherissue-flags="${otherIssueFlags.join(' ')}" title="${escapeHtml(titleParts.join(' | '))}"><a class="race-cell-link" href="${escapeHtml(raceHref)}" target="_blank" onclick="return handleRaceCellClick(event, '${escapeHtml(race.id)}', this)">${raceNoLabel}${timeLabel}${cellIssueIcon}${trialLine}${resultLine}${abandonedLine}</a></td>`;
         }).join('');
 
         let countryHeaderRow = '';
         if (m.country !== lastCountry) {
           lastCountry = m.country;
-          countryHeaderRow = `<tr class="country-header-row" data-country="${escapeHtml(m.country)}"><td colspan="${cols.length + 1}">${escapeHtml(m.country)}</td></tr>\n`;
+          countryHeaderRow = `<tr class="country-header-row" data-country="${escapeHtml(m.country)}"><td colspan="${cols.length + 2}">${escapeHtml(m.country)}</td></tr>\n`;
         }
 
         const tabMeetingValue = m.isTAB ? 'tab' : 'nontab';
@@ -1100,6 +1216,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingTrainer) issueCodes.push('missingtrainer');
         if (m.hasMissingForm) issueCodes.push('missingform');
         if (m.hasAgeIssue) issueCodes.push('ageissue');
+        if (m.hasMissingRunnerComment) issueCodes.push('missingrunnercomment');
         if (m.hasMissingVideo) issueCodes.push('missingvideo');
         if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
@@ -1116,13 +1233,25 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingTrainer) issueReasons.push('Missing Trainer');
         if (m.hasMissingForm) issueReasons.push('Missing Form Lines');
         if (m.hasAgeIssue) issueReasons.push('Horse Age Issue');
+        if (m.hasMissingRunnerComment) issueReasons.push('Missing Runner Comment');
         if (m.hasMissingVideo) issueReasons.push('Missing Video');
         if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
-        const healthTag = m.hasAnyIssue
-          ? `<span class="health-tag issue" title="${escapeHtml(issueReasons.join(', '))}">Issue</span>`
-          : '<span class="health-tag healthy" title="No missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing video, missing race comment, or schedule issue at this meeting">Healthy</span>';
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
+        // Trailing "Status" column (15 Sep 2026, per Dinesh, a reference
+        // mockup) -- a single check/warning icon replacing the old inline
+        // "Issue"/"Healthy" text tag, moved out of the crowded meeting-name
+        // cell into its own column at the end of the row. The warning icon
+        // is clickable (a <details> disclosure, same zero-JS pattern as the
+        // per-meeting download widget) -- opens a race-by-race breakdown of
+        // exactly which race(s) have which issue(s), since every one of
+        // those used to be its own badge/outline directly on the race-time
+        // cell and is no longer shown there at all.
+        const statusIcon = m.hasAnyIssue
+          ? `<details class="status-detail"><summary class="status-icon status-issue" title="${escapeHtml(issueReasons.join(', ') || 'Issue')} -- click for a race-by-race breakdown"><i class="fa-solid fa-triangle-exclamation"></i></summary>` +
+            `<div class="status-detail-menu">${meetingRaceIssues.map((ri) => `<div class="status-detail-row"><strong>R${ri.rNo}:</strong> ${escapeHtml(ri.lines.join(', '))}</div>`).join('') || '<div class="status-detail-row">No per-race detail available</div>'}</div>` +
+            `</details>`
+          : `<span class="status-icon status-ok" title="Healthy -- no missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing runner comment, missing video, missing race comment, or schedule issue"><i class="fa-solid fa-circle-check"></i></span>`;
 
         // Per-meeting "download this meeting's full details" widget -- added
         // 10 Aug 2026 per Dinesh ("Edwadu oru meeting full details download
@@ -1139,11 +1268,19 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         const closeOnClick = `onclick="this.closest('details').removeAttribute('open')"`;
         const downloadWidget = `<details class="meeting-download"><summary title="Download this meeting's full race &amp; runner details (CSV / Excel / JSON / PDF)">&#11015;</summary><div class="meeting-download-menu"><a href="/meeting-report.csv${dlQuery}" ${closeOnClick}>CSV</a><a href="/meeting-report.xlsx${dlQuery}" ${closeOnClick}>Excel</a><a href="/meeting-report.json${dlQuery}" ${closeOnClick}>JSON</a><a href="/meeting-report.pdf${dlQuery}" ${closeOnClick}>PDF</a></div></details>`;
 
-        return `${countryHeaderRow}<tr class="meeting-row" data-country="${escapeHtml(m.country)}" data-tabmeeting="${tabMeetingValue}" data-issues="${issueCodes.join(' ')}" data-hasissue="${m.hasAnyIssue}" data-meeting="${escapeHtml(String(m.meeting || '').toLowerCase())}" data-meeting-name="${escapeHtml(m.meeting || '')}"><td class="meeting">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span> ${tabMeetingTag} ${healthTag} ${abandonedTag} ${downloadWidget}</td>${cells}</tr>`;
-      }).join('\n')
-    : `<tr><td class="empty-state" colspan="${cols.length + 1}">No meetings.</td></tr>`;
+        // Meeting cell (15 Sep 2026, per Dinesh, a reference mockup) --
+        // name+country on the left, TAB/Non-TAB pill on the right, flexed
+        // apart rather than all run together on one line.
+        const meetingCell = `<td class="meeting"><div class="meeting-cell-inner">` +
+          `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span></span>` +
+          `<span class="meeting-tags-group">${tabMeetingTag}${abandonedTag}${downloadWidget}</span>` +
+          `</div></td>`;
 
-  const noMatchRow = `<tr class="no-match-row" hidden><td class="empty-state" colspan="${cols.length + 1}">No meetings match the selected filters.</td></tr>`;
+        return `${countryHeaderRow}<tr class="meeting-row" data-country="${escapeHtml(m.country)}" data-tabmeeting="${tabMeetingValue}" data-issues="${issueCodes.join(' ')}" data-hasissue="${m.hasAnyIssue}" data-meeting="${escapeHtml(String(m.meeting || '').toLowerCase())}" data-meeting-name="${escapeHtml(m.meeting || '')}">${meetingCell}${cells}<td class="status-cell">${statusIcon}</td></tr>`;
+      }).join('\n')
+    : `<tr><td class="empty-state" colspan="${cols.length + 2}">No meetings.</td></tr>`;
+
+  const noMatchRow = `<tr class="no-match-row" hidden><td class="empty-state" colspan="${cols.length + 2}">No meetings match the selected filters.</td></tr>`;
 
   return `<div class="table-scroll"><table>
     <thead><tr><th style="text-align:left;">Meeting</th>${headerCells}</tr></thead>
@@ -1202,11 +1339,24 @@ function renderHtml(dateStr, schedule, options = {}) {
       </div>
     </div>`;
 
+  // Icons per discipline (15 Sep 2026, per Dinesh -- a reference mockup
+  // used FontAwesome's horse/trophy/dog icons for these same 3 tabs, and a
+  // later revision of that same reference dropped the "(count)" suffix
+  // shown on each button -- kept as a hover title instead of losing the
+  // info entirely).
+  // Swapped from FontAwesome's generic horse/trophy/dog glyphs to Dinesh's
+  // own silhouette images, one per discipline (18 Sep 2026). Rendered as a
+  // CSS mask (see .disc-icon in styles.css) rather than a plain <img> so the
+  // silhouette still recolours with the button's text colour on hover/
+  // active/theme changes, the same way the FontAwesome glyphs used to via
+  // `color` -- a plain <img> would stay flat black and vanish against the
+  // dark inactive tab background.
+  const DISC_ICON = { T: 'thoroughbred', H: 'harness', G: 'greyhound' };
   const tabs = DISCIPLINE_ORDER.map((disc) => {
     const { meetings } = byDiscipline[disc];
     const active = disc === selectedDiscipline ? ' active' : '';
-    return `<button type="button" class="tab-btn${active}" data-disc="${disc}" onclick="switchDiscipline('${disc}')">` +
-      `<span class="badge disc-${disc}">${disc}</span> ${escapeHtml(disciplineLabel(disc))} <span class="section-count">(${meetings.length})</span></button>`;
+    return `<button type="button" class="tab-btn${active}" data-disc="${disc}" title="${meetings.length} meeting(s)" onclick="switchDiscipline('${disc}')">` +
+      `<span class="disc-icon disc-icon-${DISC_ICON[disc]}"></span> ${escapeHtml(disciplineLabel(disc))}</button>`;
   }).join('\n');
 
   const sections = DISCIPLINE_ORDER.map((disc) => {
@@ -1214,12 +1364,16 @@ function renderHtml(dateStr, schedule, options = {}) {
     const hidden = disc === selectedDiscipline ? '' : ' hidden';
     return `
   <section class="disc-section" id="section-${disc}"${hidden}>
+    <div class="disc-section-card-header">
+      <h2><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(disciplineLabel(disc))} Race Schedule</h2>
+      <span class="disc-section-count">Showing ${meetings.length} meeting${meetings.length === 1 ? '' : 's'}</span>
+    </div>
     ${renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials)}
   </section>`;
   }).join('\n');
 
   const usernameBlock = username
-    ? `<span class="session-info">Logged in as <strong>${username}</strong> | <a class="logout-link" href="/logout">Logout</a></span>`
+    ? `<span class="session-info">Logged in as <strong>${username}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`
     : '';
 
   const todayLinkHtml = `<a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}" onclick="clearSavedFilters()">Jump to today</a>`;
@@ -1312,7 +1466,7 @@ function renderMeetingsListPage(rows, options = {}) {
     : `${formatDateHeading(fromDate)} to ${formatDateHeading(toDate)}`;
 
   const usernameBlock = username
-    ? `<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout">Logout</a></span>`
+    ? `<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`
     : '';
 
   const countryOptionsHtml = countries
@@ -1328,7 +1482,7 @@ function renderMeetingsListPage(rows, options = {}) {
     .join('\n');
 
   const rowsHtml = rows.length
-    ? rows.map((r) => `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.country)}</td><td>${escapeHtml(r.discipline)}</td>` +
+    ? rows.map((r) => `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.country)}</td><td>${escapeHtml(r.disciplineCode || r.discipline)}</td>` +
         `<td class="meeting">${escapeHtml(r.meeting)}</td><td>${escapeHtml(r.tab)}</td><td>${r.raceCount}</td>` +
         `<td>${escapeHtml(r.firstRaceTime)}</td><td>${escapeHtml(r.trial)}</td><td>${escapeHtml(r.abandoned)}</td></tr>`).join('\n')
     : `<tr><td class="empty-state" colspan="9">No meetings found for this date range/filters.</td></tr>`;
