@@ -13,7 +13,7 @@
   --country-header-bg: #0f172a; --country-header-fg: #94a3b8; --country-header-border: #1e293b;
   --input-border: #334155; --tab-btn-bg: #0f172a; --tab-btn-fg: #94a3b8; --tab-btn-border: #1e293b;
   --modal-bg: #151c28; --modal-shadow: rgba(0, 0, 0, 0.7); --modal-overlay: rgba(0, 0, 0, 0.68);
-  --legend-fg: #94a3b8; --scratched-fg: #475569; --empty-fg: #334155; --meta-fg: #94a3b8;
+  --legend-fg: #94a3b8; --scratched-fg: #475569; --empty-fg: #334155;
   --result-fg: #34d399;
   --radius: 12px; --radius-sm: 8px;
 }
@@ -31,7 +31,7 @@
   --country-header-bg: #f1f5f9; --country-header-fg: #475569; --country-header-border: #e2e8f0;
   --input-border: #cbd5e1; --tab-btn-bg: #fff; --tab-btn-fg: #334155; --tab-btn-border: #e2e8f0;
   --modal-bg: #fff; --modal-shadow: rgba(15, 23, 42, 0.3); --modal-overlay: rgba(8, 16, 26, 0.55);
-  --legend-fg: #475569; --scratched-fg: #94a3b8; --empty-fg: #cbd5e1; --meta-fg: #64748b;
+  --legend-fg: #475569; --scratched-fg: #94a3b8; --empty-fg: #cbd5e1;
   --result-fg: #059669;
 }
 body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--fg); line-height: 1.45; }
@@ -68,6 +68,22 @@ h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
 /* Single-row header-right, shared by dashboard.html and meetings-list.html
    -- just the action buttons/back-link + theme toggle + logged-in block. */
 .app-header-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.global-search { position: relative; display: flex; align-items: center; gap: 8px; background: var(--sub-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 8px 12px; width: 280px; }
+.global-search:focus-within { border-color: var(--accent); }
+.global-search-icon { color: var(--muted); font-size: 12px; }
+.global-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--fg); font-size: 13px; }
+.global-search input::placeholder { color: var(--muted); }
+.global-search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 80;
+  background: var(--card-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm);
+  box-shadow: 0 10px 30px var(--shadow); padding: 8px; max-height: 420px; overflow-y: auto;
+}
+.global-search-group + .global-search-group { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.global-search-group-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); padding: 4px 8px; }
+.global-search-item { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 7px 8px; border-radius: 4px; font-size: 13px; color: var(--fg); text-decoration: none; cursor: pointer; }
+.global-search-item:hover { background: var(--hover-bg); }
+.global-search-item .gs-sub { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.global-search-empty { padding: 12px 8px; color: var(--muted); font-size: 13px; text-align: center; }
 /* Auto-refresh + the date, moved below the header entirely (18 Sep 2026,
    per Dinesh -- annotated screenshot: they'd crept up right against the
    header's bottom edge, still inside its dark card; "Down konduvanga" --
@@ -196,7 +212,8 @@ td.time.clickable:hover { background: var(--hover-bg); }
 .tabmeeting-tag.tab { background: rgba(52, 211, 153, 0.12); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.25); }
 .tabmeeting-tag.nontab { background: var(--sub-bg); color: var(--muted); border: 1px solid var(--border); }
 .abandoned-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; background: #6b6b6b; color: #fff; }
-tr.country-header-row td { background: var(--country-header-bg); font-weight: 700; font-size: 11px; color: var(--country-header-fg); text-align: left; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid var(--country-header-border); }
+tr.country-header-row td { background: var(--country-header-bg); font-weight: 750; font-size: 16px; color: var(--country-header-fg); text-align: left; padding: 10px 12px; text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid var(--country-header-border); }
+.country-flag { display: inline-block; vertical-align: middle; border-radius: 2px; margin: 0 1px -2px 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); }
 tr.row-hidden { display: none; }
 .tab-btn { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; padding: 8px 14px; border: 1px solid var(--tab-btn-border); border-radius: var(--radius-sm); background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
 .tab-btn:hover { background: var(--hover-bg); }
@@ -334,7 +351,6 @@ td.empty-state { padding: 24px; color: var(--muted); font-style: italic; text-al
 .refresh-indicator { font-size: 11px; color: var(--muted); margin-left: 4px; }
 .refresh-indicator::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; margin-right: 5px; animation: refresh-pulse 1.6s ease-in-out infinite; vertical-align: middle; }
 @keyframes refresh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-.meta { font-size: 12px; color: var(--meta-fg); margin-top: 6px; }
 
 .modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-overlay); align-items: center; justify-content: center; z-index: 50; }
 .modal-overlay.open { display: flex; }
@@ -449,14 +465,14 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
    paceRating), i.e. how far forward this runner is predicted to be
    early in the race. Runners without a computed rating ("Not Known")
    get a muted bar pinned to the left, before the "Out the Back" zone. */
-.speedmap-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.speedmap-tab { position: relative; flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+.speedmap-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.speedmap-tab { position: relative; flex: 0 0 24px; height: var(--sm-row-h, 30px); display: flex; align-items: center; justify-content: center; }
 .speedmap-tab .silk-icon { width: 24px; height: 26px; }
 .speedmap-tab-number { position: absolute; bottom: -4px; right: -4px; min-width: 14px; height: 14px; padding: 0 2px; border-radius: 50%; background: #fff; color: #161616; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
-.speedmap-track { position: relative; flex: 1; height: 28px; background: #0e3d1c; border-radius: 3px; }
+.speedmap-track { position: relative; flex: 1; height: var(--sm-row-h, 40px); background: #0f3b1c; border-radius: 3px; }
 .speedmap-bar { position: absolute; top: 0; left: 0; bottom: 0; min-width: 4px; background: #4ad07f; border-radius: 3px; transition: width 2.5s cubic-bezier(0.4, 0, 0.2, 1); }
 .speedmap-bar-unknown { background: #4a5560; }
-.speedmap-name { position: relative; z-index: 1; display: flex; align-items: center; height: 100%; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); white-space: nowrap; padding-left: 8px; text-transform: uppercase; }
+.speedmap-name { position: relative; z-index: 1; display: flex; align-items: center; height: 100%; font-size: 13px; font-weight: 600; color: #000000; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); white-space: nowrap; padding-left: 8px; text-transform: uppercase; }
 .speedmap-legend-row { margin-top: 6px; }
 .speedmap-legend { flex: 1; display: flex; border-radius: 3px; overflow: hidden; }
 .speedmap-legend-cell { flex: 1; text-align: center; background: #7a4a1e; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; padding: 6px 2px; border-right: 1px solid rgba(255, 255, 255, 0.25); }
@@ -465,7 +481,7 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
 /* Thoroughbred/Harness marker (14 Sep 2026, per Dinesh) -- an actual
    running-gait GIF, not an emoji, so drop the circular badge styling and
    size it to the GIF's own (wider-than-tall) aspect ratio instead. */
-.speedmap-icon-gif { width: 40px; height: 30px; border-radius: 0; background: none; box-shadow: none; }
+.speedmap-icon-gif { width: var(--sm-row-h, 40px); height: calc(var(--sm-row-h, 40px) * 0.75); border-radius: 0; background: none; box-shadow: none; }
 .speedmap-icon-gif img { width: 100%; height: 100%; object-fit: contain; }
 tr.scratched td { color: var(--scratched-fg); text-decoration: line-through; }
 td.issue-cell.missing { color: #e14b4b; font-weight: 600; }
@@ -504,11 +520,18 @@ td.position-cell { font-weight: 700; }
 .silk-missing { background: rgba(214, 84, 47, 0.12); border-radius: 4px; }
 .back-to-race-btn { display: block; margin: 0 0 12px; font-size: 12px; font-weight: 600; padding: 5px 10px; border: 1px solid var(--tab-btn-border); border-radius: 4px; background: var(--tab-btn-bg); color: var(--tab-btn-fg); cursor: pointer; }
 .back-to-race-btn:hover { background: var(--hover-bg); }
-.horse-stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin: 12px 0; }
-.horse-stat-tile { background: var(--sub-bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
-.horse-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
-.horse-stat-value { font-size: 14px; font-weight: 700; margin-top: 2px; }
+.horse-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+@media (max-width: 480px) { .horse-stats-grid { grid-template-columns: repeat(2, 1fr); } }
+.horse-stat-tile { background: #0a1f3b; border: 1px solid #6a5530; border-radius: 4px; padding: 10px 8px; min-height: 64px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.horse-stat-label { font-size: 12px; color: #a4cee9; text-transform: uppercase; letter-spacing: 0.3px; }
+.horse-stat-value { font-size: 17px; font-weight: 700; margin-top: 2px; color: #f4f6f8; }
+.horse-stat-bar { width: 100%; height: 15px; border: 1px solid #a78143; border-radius: 4px; overflow: hidden; margin-top: 6px; background: #000000; }
+.horse-stat-bar-fill { height: 100%; background: var(--accent); }
 .horse-detail-name { text-transform: uppercase; }
+.horse-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 24px; background: var(--sub-bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; margin: 10px 0 14px; }
+@media (max-width: 480px) { .horse-detail-grid { grid-template-columns: repeat(2, 1fr); } }
+.horse-detail-cell { font-size: 13px; color: var(--fg); }
+.horse-detail-label { color: var(--muted); font-weight: 600; }
 .horse-past-name { text-transform: uppercase; }
 .horse-past-races-heading { font-size: 14px; margin: 14px 0 6px; }
 .horse-past-races { width: 100%; box-shadow: none; }

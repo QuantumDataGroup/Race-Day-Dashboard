@@ -85,7 +85,7 @@ const { loadConfig, extractConnectionString } = require('./db-config');
 const {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, escapeHtml, buildIssuesReport, issuesReportToCsv,
   buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
-  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange,
+  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock,
 } = require('./raceView');
 
 // Default config-file location changed 9 Sep 2026, per Dinesh: production's
@@ -326,9 +326,15 @@ async function fetchMeetingExtrasByMeetingId(meetingIds) {
   const client = await getClient();
   const meetingDocs = await client.db().collection('meetings')
     .find({ _id: { $in: meetingIds } })
-    .project({ _id: 1, isTAB: 1, isHidden: 1 })
+    // rsMeetingId (21 Sep 2026, per Dinesh) -- the external speed-map stats
+    // service's own meeting id, needed by attachSpeedMapStatus below to
+    // join its per-race EventID ("<rsMeetingId>:<raceNo>") back to one of
+    // OUR races. tabMeetingId (21 Sep 2026, per Dinesh) -- a DIFFERENT
+    // external id, needed by attachScratchingStatus below to join the
+    // scratchings feed's "MeetingID" the same way.
+    .project({ _id: 1, isTAB: 1, isHidden: 1, rsMeetingId: 1, tabMeetingId: 1 })
     .toArray();
-  for (const m of meetingDocs) map.set(m._id, { isTAB: m.isTAB !== false, isHidden: m.isHidden === true });
+  for (const m of meetingDocs) map.set(m._id, { isTAB: m.isTAB !== false, isHidden: m.isHidden === true, rsMeetingId: m.rsMeetingId || null, tabMeetingId: m.tabMeetingId || null });
   return map;
 }
 
@@ -438,6 +444,132 @@ async function attachVideoStatus(docs, dateStr) {
 function buildVideoKey(dateStr, country, course, raceNo) {
   const courseKey = String(course || '').trim().replace(/\s+/g, '_');
   return `client1/${dateStr}/${country}_${courseKey}_race${raceNo}_${dateStr}.mp4`;
+}
+
+// Greyhound speed-map ("pace") predictions come from an external stats
+// service (21 Sep 2026, per Dinesh: "Idu da Speed map varra source"). Each
+// row there carries an EventID shaped "<rsMeetingId>:<raceNo>" -- and
+// meetings.rsMeetingId is that EXACT same id already stored against our
+// own meeting docs (verified against a real DUBBO meeting: rsMeetingId
+// "527050139" matched EventID "527050139:6" for race 6). So a race present
+// in this feed but with no matching doc in our own `speedMaps` collection
+// is a genuine sync gap -- not just "no prediction made yet" -- and gets
+// flagged as "Missing Speed Map", the same way attachVideoStatus above
+// flags a genuinely missing video rather than one that just hasn't been
+// uploaded.
+const SPEED_MAP_GREYHOUND_STATS_URL = 'http://57.181.204.168:8085/getStatsGrey/';
+
+async function fetchGreyhoundSpeedMapEventKeys(dateStr) {
+  // A bigger timeout than the video listing's above -- this returns every
+  // runner-row for every Greyhound race that date (thousands of rows) in
+  // one response, confirmed to genuinely take 8+ seconds even on a plain
+  // curl (21 Sep 2026), not just slow from this dev box.
+  const res = await fetch(SPEED_MAP_GREYHOUND_STATS_URL + dateStr, { signal: AbortSignal.timeout(25000) });
+  if (!res.ok) throw new Error(`Speed map stats request failed (${res.status})`);
+  const json = await res.json();
+  const rows = Array.isArray(json.data) ? json.data : [];
+  const keys = new Set();
+  for (const row of rows) {
+    if (row && row.EventID) keys.add(String(row.EventID));
+  }
+  return keys;
+}
+
+async function attachSpeedMapStatus(docs, dateStr) {
+  // Only Greyhound races have this external source -- `doc.rsMeetingId` is
+  // attached in fetchRaceDocs from fetchMeetingExtrasByMeetingId above;
+  // no id, no way to build the EventID key, so nothing to check.
+  const eligible = docs.filter((d) => d.rDiscipline === 'G' && !d.isTrail && d.rsMeetingId);
+  if (!eligible.length) return;
+
+  let upstreamKeys;
+  try {
+    upstreamKeys = await fetchGreyhoundSpeedMapEventKeys(dateStr);
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: could not fetch greyhound speed map stats for ${dateStr}: ${err.message} -- skipping speed map check`);
+    return;
+  }
+
+  const client = await getClient();
+  const raceIds = eligible.map((d) => d._id);
+  const speedMapDocs = await client.db().collection('speedMaps').find({ rId: { $in: raceIds } }, { projection: { rId: 1 } }).toArray();
+  const syncedRaceIds = new Set(speedMapDocs.map((s) => s.rId));
+
+  for (const doc of eligible) {
+    const eventKey = `${doc.rsMeetingId}:${doc.rNo}`;
+    doc.missingSpeedMap = upstreamKeys.has(eventKey) && !syncedRaceIds.has(doc._id);
+  }
+}
+
+// Scratchings feed (21 Sep 2026, per Dinesh: "Inda Page'la irundu da
+// Scratchings varudu... vanda scratchings ella update aagi irukkanu check
+// pannunga, idula irukka scratchings update aagi illan na, warning
+// kaattunga"). A different external id space than the speed-map source
+// above: each meeting here carries a numeric "MeetingID" that matches
+// meetings.tabMeetingId (NOT rsMeetingId) -- verified against real
+// meetings (21 Sep 2026: ANGERS FR's tabMeetingId "469588" matched
+// MeetingID 469588; Angle Park AUS and FFOS LAS GB matched the same way).
+// Also covers ALL disciplines (Thoroughbred/Harness/Greyhound), unlike the
+// Greyhound-only speed map feed above. A runner listed there as scratched
+// (matched to one of OUR race's runners by tab/box number) but not yet
+// marked isScratched in our own race doc is a genuine sync gap, flagged
+// "Scratching Not Updated" the same way as the other external-source
+// checks. An external RunnerNo with no match in our own runners list
+// (checked 21 Sep 2026: several Yonkers Raceway harness races list a
+// scratched runner numbered 9, one past our field of 8) is a reserve/
+// emergency runner never part of our own field, not a sync gap -- skipped
+// rather than flagged.
+const SCRATCHINGS_STATS_URL = 'http://57.181.204.168:8085/getScratchingsGrey/';
+
+async function fetchScratchingsByMeetingRace(dateStr) {
+  const res = await fetch(SCRATCHINGS_STATS_URL + dateStr, { signal: AbortSignal.timeout(25000) });
+  if (!res.ok) throw new Error(`Scratchings request failed (${res.status})`);
+  const json = await res.json();
+  const meetings = Array.isArray(json.data) ? json.data : [];
+  const map = new Map(); // "<tabMeetingId>:<raceNo>" -> [{RunnerNo, Runner}, ...]
+  for (const m of meetings) {
+    if (!m || m.MeetingID == null || !m.races) continue;
+    for (const raceNoStr of Object.keys(m.races)) {
+      const entry = m.races[raceNoStr];
+      if (entry && Array.isArray(entry.scratchings) && entry.scratchings.length) {
+        map.set(`${m.MeetingID}:${raceNoStr}`, entry.scratchings);
+      }
+    }
+  }
+  return map;
+}
+
+async function attachScratchingStatus(docs, dateStr) {
+  const eligible = docs.filter((d) => !d.isTrail && d.tabMeetingId);
+  if (!eligible.length) return;
+
+  let scratchingsByKey;
+  try {
+    scratchingsByKey = await fetchScratchingsByMeetingRace(dateStr);
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: could not fetch scratchings for ${dateStr}: ${err.message} -- skipping scratching check`);
+    return;
+  }
+
+  for (const doc of eligible) {
+    const scratchings = scratchingsByKey.get(`${doc.tabMeetingId}:${doc.rNo}`);
+    if (!scratchings) { doc.missingScratching = false; continue; }
+    const unsynced = [];
+    for (const scr of scratchings) {
+      const runner = (doc.runners || []).find((r) => r.tabNo === scr.RunnerNo);
+      if (runner && !runner.isScratched) {
+        unsynced.push(runner.horseName || scr.Runner);
+        // Per-runner flag (22 Sep 2026, per Dinesh: "Scratching update aagi
+        // illanna warning waranu... runner name pakkathula like Age, Formline
+        // issues") -- buildRaceDetail (raceView.js) reads this to show
+        // "Scratching Not Updated" in the same per-runner Issue column as
+        // the other checks, not just the race-level grid flag above.
+        runner.missingScratching = true;
+      }
+    }
+    doc.missingScratching = unsynced.length > 0;
+    doc.missingScratchingNames = unsynced;
+  }
 }
 
 // Picks the best of several racecards clients' FormLines arrays for the
@@ -679,9 +811,12 @@ async function fetchRaceDocs(dateStr, includeTrials) {
     return !(extras && extras.isHidden);
   });
   for (const doc of docs) {
-    doc.isTAB = meetingExtrasByMeetingId.has(doc.meetingId) ? meetingExtrasByMeetingId.get(doc.meetingId).isTAB : true;
+    const extras = meetingExtrasByMeetingId.get(doc.meetingId);
+    doc.isTAB = extras ? extras.isTAB : true;
+    doc.rsMeetingId = extras ? extras.rsMeetingId : null;
+    doc.tabMeetingId = extras ? extras.tabMeetingId : null;
   }
-  await Promise.all([attachFormLineStatus(docs), attachVideoStatus(docs, dateStr)]);
+  await Promise.all([attachFormLineStatus(docs), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr)]);
   applyAgeIgnores(docs);
   applyDupJockeyIgnores(docs);
   applyMissingJockeyIgnores(docs);
@@ -697,7 +832,7 @@ async function fetchRaceById(id) {
       projection: {
         rCourseDisplayName: 1, rCourse: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1, resultString: 1,
         rName: 1, rDisplayName: 1, isTrail: 1,
-        rDate: 1, createdAt: 1,
+        rDate: 1, createdAt: 1, meetingId: 1,
         'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
         'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1, 'runners.bp': 1,
       },
@@ -711,12 +846,87 @@ async function fetchRaceById(id) {
     // whole grid), same as the racecards/video joins above.
     const speedMapDoc = await client.db().collection('speedMaps').findOne({ rId: doc._id }, { projection: { predictions: 1 } });
     doc.speedMapPredictions = speedMapDoc && Array.isArray(speedMapDoc.predictions) ? speedMapDoc.predictions : null;
-    await Promise.all([attachFormLineStatus([doc]), attachVideoStatus([doc], doc.rDate)]);
+    // tabMeetingId (22 Sep 2026) -- needed by attachScratchingStatus below,
+    // same join as the schedule grid's own Scratching Not Updated check
+    // (fetchRaceDocs), just scoped to this one race's meeting instead of
+    // every meeting that date.
+    const extras = await fetchMeetingExtrasByMeetingId([doc.meetingId]);
+    doc.tabMeetingId = (extras.get(doc.meetingId) || {}).tabMeetingId || null;
+    await Promise.all([attachFormLineStatus([doc]), attachVideoStatus([doc], doc.rDate), attachScratchingStatus([doc], doc.rDate)]);
     applyAgeIgnores([doc]);
     applyDupJockeyIgnores([doc]);
     applyMissingJockeyIgnores([doc]);
   }
   return doc;
+}
+
+// Global search (22 Sep 2026, per Dinesh: "Search panel onnu podunga, Ella
+// search aaganum -- Runners, Jockeys, Trainers, Meetings, Races") -- scoped
+// to ONE date (same as the rest of this dashboard, which is fundamentally
+// per-day), scanning that date's `races` docs in memory rather than a
+// separate text index, since a single day's race count is small. A query
+// shaped like "R5" or a bare number matches races by race number; anything
+// else is a case-insensitive substring match against course name / horse
+// name / jockey / trainer. Each result carries a raceId so the client can
+// jump straight to that race via the existing `?date=...&race=...` link,
+// same as every other race link on this dashboard.
+async function fetchSearchResults(dateStr, query) {
+  const q = String(query || '').trim();
+  const empty = { meetings: [], races: [], runners: [], jockeys: [], trainers: [] };
+  if (!q) return empty;
+  const qLower = q.toLowerCase();
+  const raceNoMatch = /^r?\s*(\d{1,2})$/i.exec(q);
+  const raceNoWanted = raceNoMatch ? parseInt(raceNoMatch[1], 10) : null;
+
+  const client = await getClient();
+  const docs = await client.db().collection('races')
+    .find({ rDate: dateStr, isHidden: { $ne: true } })
+    .project({
+      _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTime: 1, meetingId: 1,
+      'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1,
+    })
+    .sort({ rCourseDisplayName: 1, rNo: 1 })
+    .toArray();
+
+  const meetingsMap = new Map();
+  const races = [];
+  const runners = [];
+  const jockeysMap = new Map();
+  const trainersMap = new Map();
+
+  for (const doc of docs) {
+    const course = doc.rCourseDisplayName || '';
+    const courseMatches = course.toLowerCase().includes(qLower);
+    const raceNoMatches = raceNoWanted != null && doc.rNo === raceNoWanted;
+    const clock = parseClock(doc.rScheduleTime);
+
+    if (courseMatches && !meetingsMap.has(doc.meetingId)) {
+      meetingsMap.set(doc.meetingId, { meetingId: doc.meetingId, raceId: doc._id, course, country: doc.rCountry, discipline: doc.rDiscipline });
+    }
+    if (courseMatches || raceNoMatches) {
+      races.push({ raceId: doc._id, course, rNo: doc.rNo, time: clock ? clock.label : null, discipline: doc.rDiscipline });
+    }
+    for (const r of (doc.runners || [])) {
+      if (r.horseName && r.horseName.toLowerCase().includes(qLower)) {
+        runners.push({ raceId: doc._id, horseName: r.horseName, course, rNo: doc.rNo });
+      }
+      if (r.jockey && r.jockey.toLowerCase().includes(qLower) && !jockeysMap.has(r.jockey)) {
+        jockeysMap.set(r.jockey, { raceId: doc._id, name: r.jockey, course, rNo: doc.rNo });
+      }
+      if (r.trainer && r.trainer.toLowerCase().includes(qLower) && !trainersMap.has(r.trainer)) {
+        trainersMap.set(r.trainer, { raceId: doc._id, name: r.trainer, course, rNo: doc.rNo });
+      }
+    }
+  }
+
+  const LIMIT = 8;
+  return {
+    meetings: [...meetingsMap.values()].slice(0, LIMIT),
+    races: races.slice(0, LIMIT),
+    runners: runners.slice(0, LIMIT),
+    jockeys: [...jockeysMap.values()].slice(0, LIMIT),
+    trainers: [...trainersMap.values()].slice(0, LIMIT),
+  };
 }
 
 // Fetches every race (all runners, full detail) for ONE specific meeting on
@@ -1094,6 +1304,18 @@ app.get('/api/race/:id', async (req, res) => {
     const doc = await fetchRaceById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Race not found' });
     res.json(buildRaceDetail(doc));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Global search across Meetings/Races/Runners/Jockeys/Trainers, scoped to
+// one date -- see fetchSearchResults above for the matching rules.
+app.get('/api/search', async (req, res) => {
+  try {
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+    const results = await fetchSearchResults(dateStr, req.query.q);
+    res.json(results);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

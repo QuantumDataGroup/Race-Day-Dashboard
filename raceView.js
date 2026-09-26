@@ -315,6 +315,13 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && runner.hasFormLines === false) parts.push(formLinesIssueLabel(runner.formLinesByClient));
   if (discipline === 'T' && isAgeIssue(runner)) parts.push(`Horse age issue (${runner.age} years, over ${MAX_EXPECTED_HORSE_AGE})`);
   if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
+  // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
+  // waranu... runner name pakkathula like Age, Formline issues" -- attached
+  // server-side (attachScratchingStatus) when the external scratchings feed
+  // lists THIS runner as scratched but our own race doc doesn't have it
+  // marked isScratched yet. All disciplines (the feed covers Thoroughbred/
+  // Harness/Greyhound), unlike the T-only checks above.
+  if (runner.missingScratching) parts.push('Scratching not updated');
   return parts.join(' | ');
 }
 
@@ -422,6 +429,19 @@ function buildSchedule(docs, dateStr) {
       // `isToday` above), resulted or not.
       missingVideo: doc.hasVideo === false && isToday,
       videoUrl: doc.videoUrl || null,
+      // `missingSpeedMap` is attached server-side (attachSpeedMapStatus) for
+      // Greyhound races only, and only when the external stats source
+      // actually has this race's prediction data but our own `speedMaps`
+      // collection doesn't -- a genuine sync gap, not "no prediction made
+      // yet" (21 Sep 2026, per Dinesh, re: a Greyhound race with no Speed
+      // Map tab even though the source had data for it).
+      missingSpeedMap: Boolean(doc.missingSpeedMap),
+      // `missingScratching`/`missingScratchingNames` are attached server-side
+      // (attachScratchingStatus) for every discipline, when the external
+      // scratchings feed lists a runner as scratched that our own race doc
+      // doesn't yet have marked isScratched (21 Sep 2026, per Dinesh).
+      missingScratching: Boolean(doc.missingScratching),
+      missingScratchingNames: Array.isArray(doc.missingScratchingNames) ? doc.missingScratchingNames : [],
     });
   }
 
@@ -443,7 +463,8 @@ function buildSchedule(docs, dateStr) {
     for (const rNo of raceNos) {
       const {
         id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl,
+        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
+        missingScratching, missingScratchingNames,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -489,9 +510,32 @@ function buildSchedule(docs, dateStr) {
             isTrial,
             missingVideo,
             videoUrl,
+            missingSpeedMap,
+            missingScratching,
+            missingScratchingNames,
           }
         : null;
       if (clock) prevMinutes = clock.minutes;
+    }
+
+    // Missing Results gap detection (24 Sep 2026, per Dinesh, re: ANKARA --
+    // "R1 and R3 Results update aagi irukku, R2 results missing" -- flags a
+    // race with NO result when a LATER race at the SAME meeting already has
+    // one, since a later race couldn't genuinely have resulted before an
+    // earlier one -- that only happens when the earlier race's result is
+    // missing from our feed, a real sync gap. Abandoned races (and trials,
+    // which don't get published results either) are excluded -- no result
+    // is ever expected there, so that's not a gap to flag ("Without
+    // abandoned, or canceled race ha irunda ignore pannunga").
+    {
+      let laterHasResult = false;
+      for (let i = raceNos.length - 1; i >= 0; i--) {
+        const race = races[raceNos[i]];
+        if (!race) continue;
+        const hasResult = Boolean(race.resultString);
+        race.missingResult = !hasResult && race.status !== 'abandoned' && !race.isTrial && laterHasResult;
+        if (hasResult) laterHasResult = true;
+      }
     }
 
     // Meeting-level issue summary -- true if ANY race at this meeting has
@@ -510,6 +554,9 @@ function buildSchedule(docs, dateStr) {
     let hasAgeIssue = false;
     let hasMissingRunnerComment = false;
     let hasMissingVideo = false;
+    let hasMissingSpeedMap = false;
+    let hasMissingScratching = false;
+    let hasMissingResults = false;
     let hasMissingRaceComment = false;
     let hasScheduleIssue = false;
     let hasAbandoned = false;
@@ -524,15 +571,18 @@ function buildSchedule(docs, dateStr) {
       if (race.ageIssueFlagged) hasAgeIssue = true;
       if (race.missingRunnerCommentFlagged) hasMissingRunnerComment = true;
       if (race.missingVideo) hasMissingVideo = true;
+      if (race.missingSpeedMap) hasMissingSpeedMap = true;
+      if (race.missingScratching) hasMissingScratching = true;
+      if (race.missingResult) hasMissingResults = true;
       if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingRaceComment || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasMissingResults || hasMissingRaceComment || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasMissingResults, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
       races,
     });
   }
@@ -1063,6 +1113,30 @@ function escapeHtml(str) {
   }[c]));
 }
 
+// Country flags (22 Sep 2026, per Dinesh: "Idella podunga Country name
+// munnukku" -- a flag before every country name/code) -- this DB's own
+// `rCountry` codes are a messy mix of 2/3-letter codes (some countries have
+// two: "GB"/"GBR", "IRE"/"IRL", "NZ"/"NZL", "SAF"/"ZAF", "CA"/"CAN",
+// "PA"/"PAN", all seen in real data), none of them the real ISO 3166-1
+// alpha-2 code flag image CDNs expect, so this maps each one seen in the DB
+// to its ISO2. Images come from flagcdn.com (a free, public flag-image CDN
+// -- confirmed reachable, and its 40x27/40x20-px file sizes exactly match
+// the reference flag images Dinesh attached, i.e. that's already his
+// source) at a fixed 20x15 box so every flag lines up regardless of the
+// country's own flag aspect ratio, with a 2x (40x30) srcset for sharpness.
+const COUNTRY_FLAG_ISO = {
+  ARE: 'ae', ARG: 'ar', AUS: 'au', BRZ: 'br', CA: 'ca', CAN: 'ca', CHI: 'cl',
+  DEN: 'dk', FR: 'fr', GB: 'gb', GBR: 'gb', GER: 'de', HK: 'hk', IRE: 'ie',
+  IRL: 'ie', ITY: 'it', JPN: 'jp', KOR: 'kr', MAL: 'my', MEX: 'mx', MUS: 'mu',
+  NZ: 'nz', NZL: 'nz', PA: 'pa', PAN: 'pa', SAF: 'za', SAU: 'sa', SPA: 'es',
+  SRB: 'rs', SWE: 'se', TUR: 'tr', UAE: 'ae', URU: 'uy', USA: 'us', ZAF: 'za',
+};
+function countryFlagImg(countryCode) {
+  const iso = COUNTRY_FLAG_ISO[String(countryCode || '').toUpperCase()];
+  if (!iso) return '';
+  return `<img class="country-flag" src="https://flagcdn.com/20x15/${iso}.png" srcset="https://flagcdn.com/40x30/${iso}.png 2x" width="20" height="15" alt="">`;
+}
+
 function formatDateHeading(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -1136,6 +1210,9 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.ageIssueFlagged) raceIssueLines.push(`Horse Age Issue (${race.ageIssueCount})`);
           if (race.missingRunnerCommentFlagged) raceIssueLines.push(`Missing Runner Comment (${race.missingRunnerCommentCount})`);
           if (race.missingVideo) raceIssueLines.push('Missing Video');
+          if (race.missingSpeedMap) raceIssueLines.push('Missing Speed Map');
+          if (race.missingScratching) raceIssueLines.push(`Scratching Not Updated (${race.missingScratchingNames.join(', ')})`);
+          if (race.missingResult) raceIssueLines.push('Results Missing');
           if (race.missingRaceComment) raceIssueLines.push('Missing Race Comment');
           if (race.badTime) raceIssueLines.push(`Schedule Issue (${race.badTimeReason})`);
           else if (race.highlighted) raceIssueLines.push(`Schedule Issue (${race.gapMinutes} min after the previous race)`);
@@ -1154,6 +1231,9 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingTrainerCount > 0) otherIssueFlags.push('missing-trainer');
           if (race.badTime) otherIssueFlags.push('bad-time');
           if (race.missingVideo) otherIssueFlags.push('missing-video');
+          if (race.missingSpeedMap) otherIssueFlags.push('missing-speed-map');
+          if (race.missingScratching) otherIssueFlags.push('missing-scratching');
+          if (race.missingResult) otherIssueFlags.push('missing-results');
           if (race.ageIssueFlagged) otherIssueFlags.push('horse-age-issue');
           if (race.missingRunnerCommentFlagged) otherIssueFlags.push('missing-runner-comment');
           if (race.missingRaceComment) otherIssueFlags.push('missing-race-comment');
@@ -1203,7 +1283,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         let countryHeaderRow = '';
         if (m.country !== lastCountry) {
           lastCountry = m.country;
-          countryHeaderRow = `<tr class="country-header-row" data-country="${escapeHtml(m.country)}"><td colspan="${cols.length + 2}">${escapeHtml(m.country)}</td></tr>\n`;
+          countryHeaderRow = `<tr class="country-header-row" data-country="${escapeHtml(m.country)}"><td colspan="${cols.length + 2}">${countryFlagImg(m.country)} ${escapeHtml(m.country)}</td></tr>\n`;
         }
 
         const tabMeetingValue = m.isTAB ? 'tab' : 'nontab';
@@ -1218,6 +1298,9 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasAgeIssue) issueCodes.push('ageissue');
         if (m.hasMissingRunnerComment) issueCodes.push('missingrunnercomment');
         if (m.hasMissingVideo) issueCodes.push('missingvideo');
+        if (m.hasMissingSpeedMap) issueCodes.push('missingspeedmap');
+        if (m.hasMissingScratching) issueCodes.push('missingscratching');
+        if (m.hasMissingResults) issueCodes.push('missingresults');
         if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
         // Tooltip lists exactly which category(ies) triggered the "Issue"
@@ -1235,6 +1318,9 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasAgeIssue) issueReasons.push('Horse Age Issue');
         if (m.hasMissingRunnerComment) issueReasons.push('Missing Runner Comment');
         if (m.hasMissingVideo) issueReasons.push('Missing Video');
+        if (m.hasMissingSpeedMap) issueReasons.push('Missing Speed Map');
+        if (m.hasMissingScratching) issueReasons.push('Scratching Not Updated');
+        if (m.hasMissingResults) issueReasons.push('Results Missing');
         if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
@@ -1251,7 +1337,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           ? `<details class="status-detail"><summary class="status-icon status-issue" title="${escapeHtml(issueReasons.join(', ') || 'Issue')} -- click for a race-by-race breakdown"><i class="fa-solid fa-triangle-exclamation"></i></summary>` +
             `<div class="status-detail-menu">${meetingRaceIssues.map((ri) => `<div class="status-detail-row"><strong>R${ri.rNo}:</strong> ${escapeHtml(ri.lines.join(', '))}</div>`).join('') || '<div class="status-detail-row">No per-race detail available</div>'}</div>` +
             `</details>`
-          : `<span class="status-icon status-ok" title="Healthy -- no missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing runner comment, missing video, missing race comment, or schedule issue"><i class="fa-solid fa-circle-check"></i></span>`;
+          : `<span class="status-icon status-ok" title="Healthy -- no missing/duplicate jockey, missing TAB, missing trainer, missing form lines, horse age issue, missing runner comment, missing video, missing speed map, missing race comment, or schedule issue"><i class="fa-solid fa-circle-check"></i></span>`;
 
         // Per-meeting "download this meeting's full details" widget -- added
         // 10 Aug 2026 per Dinesh ("Edwadu oru meeting full details download
@@ -1482,7 +1568,7 @@ function renderMeetingsListPage(rows, options = {}) {
     .join('\n');
 
   const rowsHtml = rows.length
-    ? rows.map((r) => `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.country)}</td><td>${escapeHtml(r.disciplineCode || r.discipline)}</td>` +
+    ? rows.map((r) => `<tr><td>${escapeHtml(r.date)}</td><td>${countryFlagImg(r.country)} ${escapeHtml(r.country)}</td><td>${escapeHtml(r.disciplineCode || r.discipline)}</td>` +
         `<td class="meeting">${escapeHtml(r.meeting)}</td><td>${escapeHtml(r.tab)}</td><td>${r.raceCount}</td>` +
         `<td>${escapeHtml(r.firstRaceTime)}</td><td>${escapeHtml(r.trial)}</td><td>${escapeHtml(r.abandoned)}</td></tr>`).join('\n')
     : `<tr><td class="empty-state" colspan="9">No meetings found for this date range/filters.</td></tr>`;
