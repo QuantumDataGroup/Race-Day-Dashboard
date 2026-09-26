@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Race Day Dashboard - {{DATE_STR}}</title>
+<link rel="icon" type="image/png" href="/logo.png">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
@@ -19,6 +20,11 @@
       </a>
     </div>
     <div class="app-header-right">
+      <div class="global-search" id="globalSearch">
+        <i class="fa-solid fa-magnifying-glass global-search-icon"></i>
+        <input type="text" id="globalSearchInput" placeholder="Search horse, jockey, trainer, meeting..." autocomplete="off" oninput="handleGlobalSearchInput()" onfocus="handleGlobalSearchInput()">
+        <div class="global-search-results" id="globalSearchResults" hidden></div>
+      </div>
       <details class="meeting-download export-data-menu">
         <summary><i class="fa-solid fa-download"></i> Export Data <i class="fa-solid fa-chevron-down export-caret"></i></summary>
         <div class="meeting-download-menu export-data-panel" id="exportDataPanel">
@@ -83,6 +89,9 @@
             <option value="ageissue">Horse Age Issue</option>
             <option value="missingrunnercomment">Missing Runner Comment</option>
             <option value="missingvideo">Missing Video</option>
+            <option value="missingspeedmap">Missing Speed Map</option>
+            <option value="missingscratching">Scratching Not Updated</option>
+            <option value="missingresults">Results Missing</option>
             <option value="missingracecomment">Missing Race Comment</option>
             <option value="scheduleissue">Schedule Issue</option>
             <option value="hasissues">Meetings with Issues</option>
@@ -112,7 +121,6 @@
 
   <main class="app-main">
 {{SECTIONS}}
-  <p class="meta">date param: <code>?date=YYYY-MM-DD</code> | trials param: <code>?includeTrials=true</code></p>
   </main>
 
   <div class="modal-overlay" id="detailModal" onclick="if(event.target===this) closeRaceDetail()">
@@ -137,6 +145,23 @@
       return String(str).replace(/[&<>"']/g, function (c) {
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
       });
+    }
+
+    // Country flags (22 Sep 2026, per Dinesh) -- same mapping/CDN as
+    // raceView.js's countryFlagImg (this file has no access to that
+    // server-side helper, so it's duplicated here for the client-rendered
+    // race popup/runner-detail headers).
+    var COUNTRY_FLAG_ISO = {
+      ARE: 'ae', ARG: 'ar', AUS: 'au', BRZ: 'br', CA: 'ca', CAN: 'ca', CHI: 'cl',
+      DEN: 'dk', FR: 'fr', GB: 'gb', GBR: 'gb', GER: 'de', HK: 'hk', IRE: 'ie',
+      IRL: 'ie', ITY: 'it', JPN: 'jp', KOR: 'kr', MAL: 'my', MEX: 'mx', MUS: 'mu',
+      NZ: 'nz', NZL: 'nz', PA: 'pa', PAN: 'pa', SAF: 'za', SAU: 'sa', SPA: 'es',
+      SRB: 'rs', SWE: 'se', TUR: 'tr', UAE: 'ae', URU: 'uy', USA: 'us', ZAF: 'za',
+    };
+    function countryFlagImg(countryCode) {
+      var iso = COUNTRY_FLAG_ISO[String(countryCode || '').toUpperCase()];
+      if (!iso) return '';
+      return '<img class="country-flag" src="https://flagcdn.com/20x15/' + iso + '.png" srcset="https://flagcdn.com/40x30/' + iso + '.png 2x" width="20" height="15" alt="">';
     }
 
     // Racing silk SVG, generated client-side from the DB's plain-English
@@ -218,6 +243,10 @@
       // above doesn't define at all -- kept so those fixes don't regress.
       "rose": "#e05a8a", "neon yellow": "#eaff00", "fawn": "#c8a165", "mustard": "#d9a441",
       "coral": "#ff6f5e", "primrose": "#f8e473",
+      // "Bay" (22 Sep 2026, per Dinesh -- EAGLE FARM (AUS) R6, runner 7
+      // "Dyami (AUS)") -- a horse-coat colour name, not a real pigment,
+      // but the DB uses it as a silk colour word same as any other.
+      "bay": "#67412b",
     };
     // Longest color names first, so "dark blue" matches before "blue" does.
     var SILK_COLOR_NAMES = Object.keys(SILK_COLOR_MAP).sort(function (a, b) { return b.length - a.length; });
@@ -858,7 +887,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -874,6 +903,9 @@
       'missing-trainer': { label: 'Missing Trainer', code: 'missingtrainer' },
       'bad-time': { label: 'Schedule Issue', code: 'scheduleissue' },
       'missing-video': { label: 'Missing Video', code: 'missingvideo' },
+      'missing-speed-map': { label: 'Missing Speed Map', code: 'missingspeedmap' },
+      'missing-scratching': { label: 'Scratching Not Updated', code: 'missingscratching' },
+      'missing-results': { label: 'Results Missing', code: 'missingresults' },
       'horse-age-issue': { label: 'Horse Age Issue', code: 'ageissue' },
       'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
       'missing-race-comment': { label: 'Missing Race Comment', code: 'missingracecomment' },
@@ -1221,7 +1253,7 @@
         '</div>';
       content.innerHTML =
         popupTopRowHtml +
-        '<h2>' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
+        '<h2>' + countryFlagImg(race.country) + ' ' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
         (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
         '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
           (race.timeLabel ? ' | ' + escapeHtmlClient(race.timeLabel) : '') +
@@ -1476,6 +1508,15 @@
       var fallbackEmoji = race.discipline === 'G' ? '&#128021;' : '&#127943;';
       var runnerIcon = '<img src="/speedmap-icons/' + encodeURIComponent(race.disciplineLabel) + '.gif" alt="' + fallbackEmoji + '" onerror="this.outerHTML=this.alt">';
       var iconClass = 'speedmap-icon speedmap-icon-gif';
+      // Row height auto-scales with the number of runners (22 Sep 2026, per
+      // Dinesh: "runners list kuduna sizes auto-va, increase aagi, runners
+      // korairappo decrease aaganum page size-ku tally aagura madhiri") --
+      // fewer runners means each row grows (up to a cap), more runners means
+      // each row shrinks (down to a floor), so the whole list keeps roughly
+      // the same total height instead of a fixed per-row size regardless of
+      // field size. Drives .speedmap-track/.speedmap-tab height and (scaled
+      // off the same value) the running-gait icon's size below.
+      var rowHeightPx = Math.max(26, Math.min(46, Math.round(420 / entries.length)));
       var rowsHtml = entries.map(function (p) {
         var isKnown = Boolean(p.paceCategory && p.paceCategory !== 'Not Known' && p.paceRating);
         var pct = isKnown ? Math.max(0, Math.min(100, 100 - p.paceRating)) : 0;
@@ -1487,6 +1528,14 @@
         var label = (p.runnerNumber != null ? p.runnerNumber + '. ' : '') + escapeHtmlClient(p.runnerName || '');
         var barClass = 'speedmap-bar' + (isKnown ? '' : ' speedmap-bar-unknown');
         var silkHtml = race.discipline === 'G' ? renderGreyhoundBoxIcon(p.runnerNumber) : renderSilkSvg(silkByRunnerId[p.runnerId]);
+        // Running-gait icon only shows for a runner with an actual early-pace
+        // value (22 Sep 2026, per Dinesh: "early_pace missing-na Horse GIF
+        // Icon remove pannunga, Value vanda mattu Horse running gif
+        // podunga") -- an unknown/"- " runner gets just the muted bar,
+        // no icon.
+        var iconHtml = isKnown
+          ? '<span class="' + iconClass + '" style="left:0%" data-final-left="' + pct.toFixed(1) + '">' + runnerIcon + '</span>'
+          : '';
         // Data attributes carry the FINAL width/left -- the row renders at
         // 0 first, then playSpeedMapAnimation (called once after the whole
         // tab is in the DOM) flips these to trigger the CSS transition
@@ -1498,7 +1547,7 @@
           '<div class="speedmap-track" title="' + escapeHtmlClient(tooltipParts.join(' | ')) + '">' +
             '<div class="' + barClass + '" style="width:0%" data-final-width="' + pct.toFixed(1) + '"></div>' +
             '<span class="speedmap-name">' + label + '</span>' +
-            '<span class="' + iconClass + '" style="left:0%" data-final-left="' + pct.toFixed(1) + '">' + runnerIcon + '</span>' +
+            iconHtml +
           '</div>' +
         '</div>';
       }).join('');
@@ -1508,7 +1557,7 @@
           PACE_CATEGORIES.map(function (c) { return '<span class="speedmap-legend-cell">' + escapeHtmlClient(c.toUpperCase()) + '</span>'; }).join('') +
         '</div>' +
       '</div>';
-      return rowsHtml + legendHtml;
+      return '<div class="speedmap-list" style="--sm-row-h:' + rowHeightPx + 'px">' + rowsHtml + legendHtml + '</div>';
     }
 
     // Flips each bar/icon from its initial 0 to its real value, so the CSS
@@ -1550,15 +1599,23 @@
       if (!r) return;
       _currentHorseDetailRunner = r;
 
-      var ageSexLine = [
-        r.age ? r.age + 'yo' : '',
-        r.colour || '',
-        r.sex || '',
-      ].filter(Boolean).join(' ');
-      var pedigreeLine = [
-        r.sire ? 'Sire: ' + escapeHtmlClient(r.sire) : '',
-        r.dam ? 'Dam: ' + escapeHtmlClient(r.dam) : '',
-      ].filter(Boolean).join(' | ');
+      // Runner detail grid (22 Sep 2026, per Dinesh, a reference screenshot)
+      // -- replaces the old single "5yo BAY G | Sire: ... | Dam: ..." line
+      // with a 3-column card of every detail already available on this
+      // runner (same buildRaceDetail payload the Race Field table uses),
+      // plus "Last Run" from the most recent past race (pastRaces is
+      // newest-first). A field with no data shows "-" rather than being
+      // dropped, so the 3-column grid always lines up.
+      var lastRunDate = (r.pastRaces && r.pastRaces[0] && r.pastRaces[0].Date) || null;
+      var DETAIL_FIELDS = [
+        ['Trainer', r.trainer], ['Jockey', r.jockey], ['Colour', r.colour],
+        ['Sex', r.sex], ['Age', r.age != null ? r.age + ' yo' : null], ['Last Run', lastRunDate],
+        ['Sire', r.sire], ['Dam', r.dam], ['Weight', r.weightKg != null ? r.weightKg + 'kg' : null],
+      ];
+      var detailGridHtml = '<div class="horse-detail-grid">' + DETAIL_FIELDS.map(function (f) {
+        return '<div class="horse-detail-cell"><span class="horse-detail-label">' + f[0] + ':</span> ' +
+          '<span class="horse-detail-value">' + escapeHtmlClient(f[1] || '-') + '</span></div>';
+      }).join('') + '</div>';
 
       // Per-runner narrative comment (18 Sep 2026, per Dinesh: "runner
       // click panna runner profile a runner comment kaattunga... missing'na
@@ -1568,11 +1625,17 @@
         ? '<p class="modal-race-comment">' + escapeHtmlClient(r.runnerComment) + '</p>'
         : '<p class="modal-sub"><span class="nocomment-tag">Runner comment not available</span></p>';
 
+      var HORSE_STAT_PERCENT_KEYS = ['winPer', 'placePer', 'showPer'];
       var statTiles = HORSE_STAT_LABELS
         .filter(function (pair) { return r.performanceStatistics && r.performanceStatistics[pair[0]]; })
         .map(function (pair) {
+          var raw = String(r.performanceStatistics[pair[0]]);
+          var pct = parseFloat(raw);
+          var barHtml = (HORSE_STAT_PERCENT_KEYS.indexOf(pair[0]) !== -1 && !isNaN(pct))
+            ? '<div class="horse-stat-bar"><div class="horse-stat-bar-fill" style="width:' + Math.min(pct, 100) + '%"></div></div>'
+            : '';
           return '<div class="horse-stat-tile"><div class="horse-stat-label">' + pair[1] + '</div><div class="horse-stat-value">' +
-            escapeHtmlClient(String(r.performanceStatistics[pair[0]])) + '</div></div>';
+            escapeHtmlClient(raw) + '</div>' + barHtml + '</div>';
         }).join('');
       var statsHtml = statTiles ? '<div class="horse-stats-grid">' + statTiles + '</div>' : '';
 
@@ -1599,16 +1662,111 @@
             '</tbody></table>'
         : '<p class="modal-sub">No past race history available.</p>';
 
+      // Runner profile: comment shown inline (always visible, like before),
+      // with Past Form / Statistics / Chart split into their own tab strip
+      // below it (21 Sep 2026, per Dinesh, a reference site screenshot).
+      // Reuses the exact same .popup-tabs/.popup-tab-panel machinery as the
+      // race popup's own Race Field/Speed Map/Race Card/Data Dump tabs
+      // (switchRunnerTab below mirrors switchPopupTab).
       content.innerHTML =
         '<button type="button" class="back-to-race-btn" onclick="renderRacePopup(_currentRaceData)">&larr; Back to race</button>' +
         '<h2 class="horse-detail-name">' + escapeHtmlClient(r.horseName) + (r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '') + '</h2>' +
-        '<p class="modal-sub">' + [escapeHtmlClient(ageSexLine), pedigreeLine].filter(Boolean).join(' | ') + '</p>' +
+        detailGridHtml +
         runnerCommentHtml +
-        statsHtml +
-        '<h3 class="horse-past-races-heading">Past Races</h3>' +
-        pastRacesHtml;
+        '<div class="popup-tabs">' +
+          '<button type="button" class="popup-tab-btn active" id="runnerPastFormTabBtn" onclick="switchRunnerTab(\'pastform\')">Past Form</button>' +
+          '<button type="button" class="popup-tab-btn" id="runnerStatsTabBtn" onclick="switchRunnerTab(\'stats\')">Statistics</button>' +
+          '<button type="button" class="popup-tab-btn" id="runnerChartTabBtn" onclick="switchRunnerTab(\'chart\')">Chart</button>' +
+        '</div>' +
+        '<div id="runnerPastFormView" class="popup-tab-panel">' +
+          '<h3 class="horse-past-races-heading">Past Races</h3>' +
+          pastRacesHtml +
+        '</div>' +
+        '<div id="runnerStatsView" class="popup-tab-panel" hidden>' +
+          (statsHtml || '<p class="modal-sub">No statistics available.</p>') +
+        '</div>' +
+        '<div id="runnerChartView" class="popup-tab-panel" hidden>' +
+          buildRunnerChartSvg(pastRaces) +
+        '</div>';
 
       if (pastRaces.length) checkPastRaceVideos(pastRaces);
+    }
+
+    var RUNNER_POPUP_TABS = [
+      { key: 'pastform', viewId: 'runnerPastFormView', btnId: 'runnerPastFormTabBtn' },
+      { key: 'stats', viewId: 'runnerStatsView', btnId: 'runnerStatsTabBtn' },
+      { key: 'chart', viewId: 'runnerChartView', btnId: 'runnerChartTabBtn' },
+    ];
+    function switchRunnerTab(tab) {
+      RUNNER_POPUP_TABS.forEach(function (t) {
+        var view = document.getElementById(t.viewId);
+        var btn = document.getElementById(t.btnId);
+        if (!view || !btn) return;
+        var active = t.key === tab;
+        view.hidden = !active;
+        btn.classList.toggle('active', active);
+      });
+    }
+
+    // Line chart of finishing position over time (21 Sep 2026, per Dinesh,
+    // a reference site's "Chart" tab) -- plain inline SVG, same
+    // zero-dependency approach as the silks/speed map elsewhere in this
+    // file, rather than pulling in a charting library for one small chart.
+    // Y-axis is POSITION, not performance -- 1st place plots at the TOP
+    // (finishing position 1 is the best result), matching the reference.
+    // pastRaces is newest-first (same order the Past Races table uses), so
+    // this takes the most recent races and reverses them for a left-to-
+    // right oldest-to-newest reading; races with no recorded finishing
+    // position (in-progress FormLines entries, mostly) are skipped rather
+    // than plotted as a break, since there's nothing meaningful to draw.
+    function buildRunnerChartSvg(pastRaces) {
+      var points = (pastRaces || [])
+        .filter(function (fl) { return fl.FinishPosition != null && fl.Date; })
+        .slice(0, 15)
+        .slice()
+        .reverse();
+      if (!points.length) return '<p class="modal-sub">No finishing-position history available to chart.</p>';
+
+      var maxPos = points.reduce(function (max, p) { return Math.max(max, p.FinishPosition); }, 1);
+      var yMax = maxPos < 7 ? 7 : (maxPos % 2 === 0 ? maxPos + 1 : maxPos);
+
+      var W = 760, H = 260, padL = 34, padR = 16, padT = 16, padB = 56;
+      var plotW = W - padL - padR, plotH = H - padT - padB;
+      var n = points.length;
+      var stepX = n > 1 ? plotW / (n - 1) : 0;
+      function xFor(i) { return padL + (n > 1 ? i * stepX : plotW / 2); }
+      function yFor(pos) { return padT + ((pos - 1) / (yMax - 1)) * plotH; }
+
+      var yLabels = [];
+      for (var v = 1; v <= yMax; v += 2) yLabels.push(v);
+      var gridLines = yLabels.map(function (v) {
+        var y = yFor(v);
+        return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--border)" stroke-width="1"/>' +
+          '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) + '" font-size="11" text-anchor="end" fill="var(--muted)">' + v + '</text>';
+      }).join('');
+
+      var pathD = points.map(function (p, i) {
+        return (i === 0 ? 'M' : 'L') + xFor(i).toFixed(1) + ',' + yFor(p.FinishPosition).toFixed(1);
+      }).join(' ');
+
+      var dots = points.map(function (p, i) {
+        var x = xFor(i).toFixed(1), y = yFor(p.FinishPosition).toFixed(1);
+        var tip = (p.Course || '') + ' - ' + (p.Date || '') + ' - Finished ' + p.FinishPosition + (p.Starters ? '/' + p.Starters : '');
+        return '<circle cx="' + x + '" cy="' + y + '" r="4" fill="#2ecc71" stroke="#1a1a1a" stroke-width="0.5"><title>' + escapeHtmlClient(tip) + '</title></circle>';
+      }).join('');
+
+      var xLabels = points.map(function (p, i) {
+        var x = xFor(i).toFixed(1);
+        return '<text x="' + x + '" y="' + (H - padB + 16) + '" font-size="10" text-anchor="middle" fill="var(--muted)">' + escapeHtmlClient(p.Date || '') + '</text>' +
+          '<text x="' + x + '" y="' + (H - padB + 30) + '" font-size="10" text-anchor="middle" fill="var(--muted)">' + escapeHtmlClient(p.Course || '') + '</text>';
+      }).join('');
+
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="260" class="runner-chart-svg">' +
+        gridLines +
+        '<path d="' + pathD + '" fill="none" stroke="#2ecc71" stroke-width="2"/>' +
+        dots +
+        xLabels +
+        '</svg>';
     }
 
     // Best-effort: asks the server whether a video exists for each past
@@ -1653,6 +1811,7 @@
       var title = escapeHtmlClient(fl.Course || 'Race') + ' - ' + escapeHtmlClient(fl.Date || '');
       win.document.write(
         '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
+        '<link rel="icon" type="image/png" href="/logo.png">' +
         '<link rel="stylesheet" href="/styles.css"></head><body class="past-race-page">' +
         // Same RacingHub header as every other page (18 Sep 2026, per
         // Dinesh: "Anda open agura pagela Racing Hub Name and Logo... home
@@ -2212,6 +2371,75 @@
       });
     })();
 
+    // ---- Global search (22 Sep 2026, per Dinesh: "Search panel onnu
+    // podunga, Ella search aaganum -- Runners, Jockeys, Trainers, Meetings,
+    // Races") -- header search box, debounced, hitting /api/search for the
+    // CURRENTLY selected date. Every result carries a raceId; clicking one
+    // just navigates to that race's existing ?date=...&race=... deep link
+    // (same URL every race-time cell on the grid already uses), rather than
+    // reimplementing in-place popup rendering here.
+    var GLOBAL_SEARCH_GROUPS = [
+      ['meetings', 'Meetings', 'fa-flag-checkered'],
+      ['races', 'Races', 'fa-trophy'],
+      ['runners', 'Runners', 'fa-horse'],
+      ['jockeys', 'Jockeys', 'fa-user'],
+      ['trainers', 'Trainers', 'fa-user-tie'],
+    ];
+    var _globalSearchTimer = null;
+    var _globalSearchSeq = 0;
+    function handleGlobalSearchInput() {
+      var input = document.getElementById('globalSearchInput');
+      var panel = document.getElementById('globalSearchResults');
+      if (!input || !panel) return;
+      var q = input.value.trim();
+      if (_globalSearchTimer) clearTimeout(_globalSearchTimer);
+      if (!q) { panel.hidden = true; panel.innerHTML = ''; return; }
+      _globalSearchTimer = setTimeout(function () { runGlobalSearch(q); }, 250);
+    }
+    function runGlobalSearch(q) {
+      var panel = document.getElementById('globalSearchResults');
+      if (!panel) return;
+      var seq = ++_globalSearchSeq;
+      var dateStr = new URLSearchParams(location.search).get('date') || '';
+      fetch('/api/search?date=' + encodeURIComponent(dateStr) + '&q=' + encodeURIComponent(q))
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (seq !== _globalSearchSeq) return; // a newer keystroke's request already landed
+          renderGlobalSearchResults(data, dateStr);
+        })
+        .catch(function () { /* best-effort -- leave the dropdown as-is on failure */ });
+    }
+    function renderGlobalSearchResults(data, dateStr) {
+      var panel = document.getElementById('globalSearchResults');
+      if (!panel) return;
+      var groupsHtml = GLOBAL_SEARCH_GROUPS.map(function (g) {
+        var key = g[0], label = g[1], icon = g[2];
+        var items = data[key] || [];
+        if (!items.length) return '';
+        var rows = items.map(function (item) {
+          var main = item.horseName || item.name || item.course || '';
+          var sub = [item.course, item.rNo ? 'R' + item.rNo : ''].filter(Boolean).join(' ');
+          var href = '/?date=' + encodeURIComponent(dateStr || '') + '&race=' + encodeURIComponent(item.raceId);
+          return '<a class="global-search-item" href="' + href + '"><span><i class="fa-solid ' + icon + '"></i> ' +
+            escapeHtmlClient(main) + '</span><span class="gs-sub">' + escapeHtmlClient(sub) + '</span></a>';
+        }).join('');
+        return '<div class="global-search-group"><div class="global-search-group-label">' + label + '</div>' + rows + '</div>';
+      }).filter(Boolean).join('');
+      panel.innerHTML = groupsHtml || '<div class="global-search-empty">No matches</div>';
+      panel.hidden = false;
+    }
+    (function wireGlobalSearchDismiss() {
+      var box = document.getElementById('globalSearch');
+      var input = document.getElementById('globalSearchInput');
+      if (!box || !input) return;
+      input.addEventListener('blur', function () {
+        setTimeout(function () {
+          var panel = document.getElementById('globalSearchResults');
+          if (panel) panel.hidden = true;
+        }, 150);
+      });
+    })();
+
     // ---- Filter persistence (survives auto-refresh / manual reload) ----
     var FILTER_STORAGE_KEYS = {
       countryFilter: 'rdd_countryFilter', tabMeetingFilter: 'rdd_tabMeetingFilter',
@@ -2232,7 +2460,13 @@
           var saved = localStorage.getItem(FILTER_STORAGE_KEYS[id]);
           if (el && saved) el.value = saved;
         });
-        var savedDisc = localStorage.getItem('rdd_discipline');
+        // sessionStorage (not localStorage) -- stays put across a reload of
+        // THIS tab, but a fresh tab/new browser session always starts back
+        // on the default (Thoroughbred) view instead of wherever the last
+        // tab was left (19 Sep 2026, per Dinesh: "Tab full ha close panni
+        // open pannum podu, main home pagela irundu da start aganum" -- a
+        // closed-and-reopened tab was landing back on Greyhound).
+        var savedDisc = sessionStorage.getItem('rdd_discipline');
         if (savedDisc && document.getElementById('section-' + savedDisc)) switchDiscipline(savedDisc);
       } catch (e) { /* ignore */ }
     }
@@ -2252,7 +2486,7 @@
     var _origSwitchDiscipline = switchDiscipline;
     switchDiscipline = function (disc) {
       _origSwitchDiscipline(disc);
-      try { localStorage.setItem('rdd_discipline', disc); } catch (e) { /* ignore */ }
+      try { sessionStorage.setItem('rdd_discipline', disc); } catch (e) { /* ignore */ }
       // Rebuild "Search meeting" suggestions for the tab just switched to --
       // otherwise they'd keep listing the previous tab's meetings.
       applyFilters();
