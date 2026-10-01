@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Admin</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Admin</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main">
+    {{ADMIN_TABS_HTML}}
+    <div class="adm-page-head">
+      <div>
+        <h1>User Activity</h1>
+        <p>Who logged in, when, what they opened and what they downloaded. Times are in your computer's time zone. The last 8 days are kept on this page.</p>
+      </div>
+      <div class="adm-range" role="group" aria-label="Time range">
+        <button type="button" class="adm-chip on" data-range="today">Today</button>
+        <button type="button" class="adm-chip" data-range="yesterday">Yesterday</button>
+        <button type="button" class="adm-chip" data-range="7d">Last 7 days</button>
+      </div>
+    </div>
+
+    <p class="adm-error" id="loadError" hidden></p>
+
+    <div class="adm-subtabs" role="tablist" aria-label="User Activity views">
+      <button type="button" class="adm-subtab on" role="tab" id="subLog" aria-selected="true" aria-controls="paneLog" data-pane="log"><i class="fa-solid fa-list"></i> Activity log</button>
+      <button type="button" class="adm-subtab" role="tab" id="subUsers" aria-selected="false" aria-controls="paneUsers" data-pane="users"><i class="fa-solid fa-users"></i> Users</button>
+    </div>
+
+    <div class="adm-pane" id="paneUsers" role="tabpanel" aria-labelledby="subUsers" hidden>
+    <section class="adm-tiles" aria-label="Summary">
+      <div class="adm-tile"><small>Active users</small><b id="tUsers">-</b><span id="tUsersSub"></span></div>
+      <div class="adm-tile"><small>Logins</small><b id="tLogins">-</b><span>successful</span></div>
+      <div class="adm-tile"><small>Downloads</small><b id="tDownloads">-</b><span>CSV / Excel / JSON / PDF</span></div>
+      <div class="adm-tile adm-warn"><small>Failed logins</small><b id="tFailed">-</b><span>wrong username or password</span></div>
+    </section>
+
+    <section class="adm-card" aria-labelledby="usersHead">
+      <div class="adm-card-head">
+        <h2 id="usersHead">Users</h2>
+        <span class="adm-hint">Online = activity in the last 10 minutes. Click a name to open that user's activity log.</span>
+        <button type="button" class="adm-btn primary" id="addUserToggle"><i class="fa-solid fa-user-plus"></i> Add user</button>
+      </div>
+      <form class="adm-panel" id="addUserForm" hidden novalidate>
+        <label>Username<input type="text" id="newUser" autocomplete="off" placeholder="e.g. kavin"></label>
+        <label>Password<input type="password" id="newPass" autocomplete="new-password" placeholder="8+ characters"></label>
+        <label>Confirm password<input type="password" id="newPass2" autocomplete="new-password"></label>
+        <div class="adm-panel-actions"><button type="submit" class="adm-btn primary" id="addUserSubmit">Add user</button><button type="button" class="adm-btn" id="addUserCancel">Cancel</button></div>
+        <fieldset class="adm-access">
+          <legend>What this user can see besides the dashboard</legend>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="activity"> User Activity</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="health"> System Health</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="changes"> Data Changes</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="missing"> Missing Meetings</label>
+          <label class="adm-check adm-check-admin"><input type="checkbox" id="newAdmin"> Admin (all three + add / delete users)</label>
+        </fieldset>
+        <p class="adm-msg" id="addUserMsg" hidden></p>
+      </form>
+      <div class="adm-table-wrap">
+        <table class="adm-table">
+          <thead><tr><th>User</th><th>Role</th><th>Access</th><th>Status</th><th>Last login</th><th>Last activity</th><th class="adm-num">Races viewed</th><th class="adm-num">Downloads</th><th class="adm-num">Confirms</th><th class="adm-manage-col">Manage</th></tr></thead>
+          <tbody id="usersBody"><tr><td colspan="10" class="adm-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <p class="adm-foot" id="manageNote">You can't delete your own account or change your own role.</p>
+    </div>
+
+    <div class="adm-pane" id="paneLog" role="tabpanel" aria-labelledby="subLog">
+    <section class="adm-card" aria-labelledby="logHead">
+      <div class="adm-card-head">
+        <h2 id="logHead">Activity log</h2>
+        <div class="adm-filters">
+          <label for="fUser">User</label>
+          <select id="fUser"><option value="">All users</option></select>
+          <label for="fAction">Action</label>
+          <select id="fAction">
+            <option value="">All actions</option>
+            <option value="login">Logins &amp; logouts</option>
+            <option value="failed">Failed logins</option>
+            <option value="view">Views</option>
+            <option value="download">Downloads</option>
+            <option value="confirm">Confirms</option>
+            <option value="admin">Admin changes</option>
+          </select>
+          <input type="search" id="fText" placeholder="Search race, file..." aria-label="Search activity">
+          <button type="button" class="adm-btn" id="refreshBtn"><i class="fa-solid fa-rotate"></i> Refresh</button>
+        </div>
+      </div>
+      <div class="adm-table-wrap">
+        <table class="adm-table">
+          <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th><th>IP address</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+      <div class="adm-empty" id="logEmpty" hidden>No activity for these filters.</div>
+      <div class="adm-more" id="logMore" hidden><button type="button" class="adm-btn" id="showMoreBtn">Show more</button></div>
+    </section>
+    </div>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    var ACTIONS = {
+      'login': ['Logged in', 'login', 'login'],
+      'logout': ['Logged out', 'logout', 'login'],
+      'login-failed': ['Failed login', 'failed', 'failed'],
+      'view-dashboard': ['Opened dashboard', 'view', 'view'],
+      'view-race': ['Viewed race', 'view', 'view'],
+      'view-meetings-list': ['Opened meetings list', 'view', 'view'],
+      'view-admin': ['Opened admin page', 'view', 'view'],
+      'view-changes': ['Opened data changes', 'view', 'view'],
+      'view-missing-meetings': ['Opened missing meetings', 'view', 'view'],
+      'missing-countries': ['Changed missing-meeting countries', 'admin', 'admin'],
+      'download': ['Downloaded', 'download', 'download'],
+      'confirm': ['Confirmed', 'confirm', 'confirm'],
+      'undo-confirm': ['Undid a confirm', 'confirm', 'confirm'],
+      'admin-add-user': ['Added user', 'admin', 'admin'],
+      'admin-delete-user': ['Deleted user', 'admin', 'admin'],
+      'admin-reset-password': ['Reset password', 'admin', 'admin'],
+      'admin-change-role': ['Changed role', 'admin', 'admin'],
+      'admin-change-access': ['Changed access', 'admin', 'admin'],
+      'admin-bootstrap': ['First admin set up', 'admin', 'admin'],
+      'system-warning': ['System warning', 'failed', 'admin'],
+    };
+    var PAGE_SIZE = 300;
+    var data = { me: '', users: [], entries: [] };
+    var state = { range: 'today', user: '', action: '', text: '', inline: null, notice: null, limit: PAGE_SIZE };
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function t(e) { return Date.parse(e.time); }
+    function actionInfo(e) { return ACTIONS[e.action] || [e.action, 'view', 'view']; }
+    function fmtTime(ms, withDate) {
+      var d = new Date(ms);
+      var time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return withDate ? d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + time : time;
+    }
+    function rel(ms) {
+      var m = Math.round((Date.now() - ms) / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return m + ' min ago';
+      var h = Math.round(m / 60);
+      return h < 24 ? h + ' h ago' : Math.round(h / 24) + ' d ago';
+    }
+    function inRange(ms) {
+      var start = new Date(); start.setHours(0, 0, 0, 0);
+      var s = start.getTime();
+      if (state.range === 'today') return ms >= s;
+      if (state.range === 'yesterday') return ms >= s - 86400000 && ms < s;
+      return ms >= s - 6 * 86400000;
+    }
+    function sameUser(a, b) { return String(a || '').toLowerCase() === String(b || '').toLowerCase(); }
+    function detailText(e) {
+      if (e.action === 'login-failed') return e.attemptedUser ? 'tried username "' + e.attemptedUser + '"' : '';
+      var d = e.file || e.detail || '';
+      if (e.file && e.file.charAt(0) === '/') {
+        try { d = decodeURIComponent(e.file); } catch (err) { d = e.file; }
+      }
+      return d;
+    }
+
+    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Meetings']];
+    var COLS = 10;
+    function accessChips(u) {
+      if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';
+      var perms = u.permissions || [];
+      if (!perms.length) return '<span class="adm-foot">Dashboard only</span>';
+      return SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return '<span class="adm-chip-tag">' + s[1] + '</span>'; }).join(' ');
+    }
+    function manageButtons(u) {
+      var self = sameUser(u.username, data.me);
+      var n = esc(u.username);
+      return '<div class="adm-row-actions">' +
+        (self || u.role === 'admin' ? '' : '<button type="button" class="adm-btn" data-act="access" data-user="' + n + '">Access</button>') +
+        '<button type="button" class="adm-btn" data-act="reset" data-user="' + n + '">Reset password</button>' +
+        (self ? '' : '<button type="button" class="adm-btn" data-act="role" data-user="' + n + '">' + (u.role === 'admin' ? 'Remove admin' : 'Make admin') + '</button>') +
+        (self ? '' : '<button type="button" class="adm-btn danger" data-act="remove" data-user="' + n + '">Delete</button>') +
+        '</div>';
+    }
+    function inlineRow(u) {
+      var n = esc(u.username);
+      if (state.notice && sameUser(state.notice.user, u.username)) {
+        return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><span class="adm-msg ' + (state.notice.ok ? 'ok' : 'err') + '">' + esc(state.notice.text) + '</span></td></tr>';
+      }
+      if (!state.inline || !sameUser(state.inline.user, u.username)) return '';
+      if (state.inline.act === 'access') {
+        var perms = u.permissions || [];
+        return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><form class="adm-inline-form" data-form="access" data-user="' + n + '" novalidate>' +
+          '<b>' + n + ' can see:</b>' +
+          SECTIONS.map(function (s) { return '<label class="adm-check"><input type="checkbox" class="editPerm" value="' + s[0] + '"' + (perms.indexOf(s[0]) !== -1 ? ' checked' : '') + '> ' + s[1] + '</label>'; }).join('') +
+          '<button type="submit" class="adm-btn primary">Save access</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
+          '<span class="adm-msg err" id="accessMsg"></span></form></td></tr>';
+      }
+      if (state.inline.act === 'reset') {
+        return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><form class="adm-inline-form" data-form="reset" data-user="' + n + '" novalidate>' +
+          '<b>New password for ' + n + ':</b>' +
+          '<input type="password" id="resetPass" autocomplete="new-password" placeholder="8+ characters" aria-label="New password">' +
+          '<input type="password" id="resetPass2" autocomplete="new-password" placeholder="Confirm" aria-label="Confirm new password">' +
+          '<button type="submit" class="adm-btn primary">Save password</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
+          '<span class="adm-msg err" id="resetMsg"></span></form></td></tr>';
+      }
+      if (state.inline.act === 'remove') {
+        return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><div class="adm-inline-form"><b>Delete ' + n + '?</b> They are logged out on their next click and can\'t log in again.' +
+          '<button type="button" class="adm-btn danger" data-act="confirm-remove" data-user="' + n + '">Yes, delete</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
+          '<span class="adm-msg err" id="removeMsg"></span></div></td></tr>';
+      }
+      return '';
+    }
+
+    function render() {
+      var rows = data.entries.filter(function (e) { return inRange(t(e)); });
+      document.getElementById('tUsers').textContent = new Set(rows.filter(function (e) { return e.user && e.action !== 'login-failed'; }).map(function (e) { return String(e.user).toLowerCase(); })).size;
+      document.getElementById('tUsersSub').textContent = 'of ' + data.users.length + ' users';
+      document.getElementById('tLogins').textContent = rows.filter(function (e) { return e.action === 'login'; }).length;
+      document.getElementById('tDownloads').textContent = rows.filter(function (e) { return e.action === 'download'; }).length;
+      document.getElementById('tFailed').textContent = rows.filter(function (e) { return e.action === 'login-failed'; }).length;
+
+      document.getElementById('usersBody').innerHTML = data.users.map(function (u) {
+        var mine = data.entries.filter(function (e) { return sameUser(e.user, u.username) && e.action !== 'login-failed'; });
+        var lastLogin = mine.filter(function (e) { return e.action === 'login'; })[0];
+        var last = mine[0];
+        var online = last && Date.now() - t(last) < 10 * 60000 && last.action !== 'logout';
+        var inR = mine.filter(function (e) { return inRange(t(e)); });
+        function count(fn) { return inR.filter(fn).length; }
+        return '<tr><td><button type="button" class="adm-user-link" data-user="' + esc(u.username) + '">' + esc(u.username) + '</button></td>' +
+          '<td><span class="adm-role ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? 'ADMIN' : 'USER') + '</span></td>' +
+          '<td>' + accessChips(u) + '</td>' +
+          '<td><span class="adm-status ' + (online ? 'online' : 'offline') + '"><i></i>' + (online ? 'Online' : 'Offline') + '</span></td>' +
+          '<td class="adm-time">' + (lastLogin ? fmtTime(t(lastLogin), true) : '-') + '</td>' +
+          '<td>' + (last ? esc(actionInfo(last)[0]) + ' <span class="adm-foot">(' + rel(t(last)) + ')</span>' : '-') + '</td>' +
+          '<td class="adm-num">' + count(function (e) { return e.action === 'view-race'; }) + '</td>' +
+          '<td class="adm-num">' + count(function (e) { return e.action === 'download'; }) + '</td>' +
+          '<td class="adm-num">' + count(function (e) { return e.action === 'confirm'; }) + '</td>' +
+          (data.canManage ? '<td>' + manageButtons(u) + '</td>' : '') + '</tr>' + (data.canManage ? inlineRow(u) : '');
+      }).join('') || '<tr><td colspan="' + COLS + '" class="adm-empty">No users.</td></tr>';
+
+      var text = state.text.toLowerCase();
+      var shown = rows.filter(function (e) {
+        var info = actionInfo(e);
+        return (!state.user || sameUser(e.user, state.user)) && (!state.action || info[2] === state.action) &&
+          (!text || (detailText(e) + ' ' + info[0] + ' ' + (e.user || '')).toLowerCase().indexOf(text) !== -1);
+      });
+      document.getElementById('logBody').innerHTML = shown.slice(0, state.limit).map(function (e) {
+        var info = actionInfo(e);
+        return '<tr' + (info[1] === 'failed' ? ' class="adm-failed-row"' : '') + '>' +
+          '<td class="adm-time">' + fmtTime(t(e), state.range !== 'today') + '</td>' +
+          '<td>' + (e.user ? '<b>' + esc(e.user) + '</b>' : '<span class="adm-foot">not logged in</span>') + '</td>' +
+          '<td><span class="adm-act ' + info[1] + '">' + esc(info[0]) + '</span></td>' +
+          '<td class="adm-detail">' + esc(detailText(e) || '-') + '</td>' +
+          '<td class="adm-ip">' + esc(e.ip || '') + '</td></tr>';
+      }).join('');
+      document.getElementById('logEmpty').hidden = shown.length > 0;
+      document.getElementById('logMore').hidden = shown.length <= state.limit;
+    }
+
+    function syncUserFilter() {
+      var sel = document.getElementById('fUser');
+      var keep = state.user;
+      sel.innerHTML = '<option value="">All users</option>' + data.users.map(function (u) { return '<option value="' + esc(u.username) + '">' + esc(u.username) + '</option>'; }).join('');
+      sel.value = keep;
+    }
+
+    function api(method, url, body) {
+      return fetch(url, {
+        method: method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (json) {
+          if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+          return json;
+        });
+      });
+    }
+
+    function load() {
+      return api('GET', '/api/admin/overview').then(function (json) {
+        data = json;
+        // Only admins manage users; others with User Activity just read.
+        COLS = data.canManage ? 10 : 9;
+        document.querySelectorAll('.adm-manage-col, #addUserToggle, #manageNote').forEach(function (el) { el.hidden = !data.canManage; });
+        if (!data.canManage) document.getElementById('addUserForm').hidden = true;
+        document.getElementById('loadError').hidden = true;
+        syncUserFilter();
+        render();
+      }).catch(function (err) {
+        var el = document.getElementById('loadError');
+        el.textContent = 'Could not load activity: ' + err.message;
+        el.hidden = false;
+      });
+    }
+
+    function afterChange(user, text) {
+      state.inline = null;
+      state.notice = { user: user, text: text, ok: true };
+      return load();
+    }
+
+    document.querySelectorAll('.adm-chip[data-range]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.range = b.dataset.range;
+        state.limit = PAGE_SIZE;
+        document.querySelectorAll('.adm-chip[data-range]').forEach(function (x) { x.classList.toggle('on', x === b); });
+        render();
+      });
+    });
+    document.getElementById('fUser').addEventListener('change', function (e) { state.user = e.target.value; state.limit = PAGE_SIZE; render(); });
+    document.getElementById('fAction').addEventListener('change', function (e) { state.action = e.target.value; state.limit = PAGE_SIZE; render(); });
+    document.getElementById('fText').addEventListener('input', function (e) { state.text = e.target.value; state.limit = PAGE_SIZE; render(); });
+    document.getElementById('refreshBtn').addEventListener('click', function () { state.notice = null; load(); });
+    document.getElementById('showMoreBtn').addEventListener('click', function () { state.limit += PAGE_SIZE; render(); });
+
+    var usersBody = document.getElementById('usersBody');
+    usersBody.addEventListener('click', function (e) {
+      var link = e.target.closest('.adm-user-link');
+      if (link) {
+        state.user = link.dataset.user;
+        document.getElementById('fUser').value = state.user;
+        render();
+        showPane('log');
+        return;
+      }
+      var btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      var act = btn.dataset.act;
+      var name = btn.dataset.user;
+      state.notice = null;
+      if (act === 'cancel') {
+        state.inline = null;
+        render();
+      } else if (act === 'reset' || act === 'remove' || act === 'access') {
+        state.inline = { user: name, act: act };
+        render();
+        var first = usersBody.querySelector('.adm-inline-row input');
+        if (first) first.focus();
+      } else if (act === 'role') {
+        var u = data.users.filter(function (x) { return sameUser(x.username, name); })[0];
+        var nextRole = u.role === 'admin' ? 'user' : 'admin';
+        btn.disabled = true;
+        api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/role', { role: nextRole })
+          .then(function () { return afterChange(name, name + ' is now ' + (nextRole === 'admin' ? 'an ADMIN.' : 'a normal user.')); })
+          .catch(function (err) { state.notice = { user: name, text: err.message, ok: false }; render(); });
+      } else if (act === 'confirm-remove') {
+        btn.disabled = true;
+        api('DELETE', '/api/admin/users/' + encodeURIComponent(name))
+          .then(function () {
+            if (sameUser(state.user, name)) state.user = '';
+            state.inline = null;
+            return load();
+          })
+          .catch(function (err) { btn.disabled = false; document.getElementById('removeMsg').textContent = err.message; });
+      }
+    });
+    usersBody.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var form = e.target;
+      var name = form.dataset.user;
+      if (form.dataset.form === 'access') {
+        var perms = Array.prototype.filter.call(form.querySelectorAll('.editPerm'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+        form.querySelector('button[type="submit"]').disabled = true;
+        api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/permissions', { permissions: perms })
+          .then(function () { return afterChange(name, name + ' can now see: ' + (perms.length ? SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : 'the dashboard only') + '.'); })
+          .catch(function (err) { form.querySelector('button[type="submit"]').disabled = false; document.getElementById('accessMsg').textContent = err.message; });
+        return;
+      }
+      var p1 = document.getElementById('resetPass').value;
+      var p2 = document.getElementById('resetPass2').value;
+      var msg = document.getElementById('resetMsg');
+      if (p1.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; return; }
+      if (p1 !== p2) { msg.textContent = 'Passwords do not match.'; return; }
+      form.querySelector('button[type="submit"]').disabled = true;
+      api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/password', { password: p1 })
+        .then(function () { return afterChange(name, 'Password changed for ' + name + '. Give them the new password privately.'); })
+        .catch(function (err) { form.querySelector('button[type="submit"]').disabled = false; msg.textContent = err.message; });
+    });
+
+    var addForm = document.getElementById('addUserForm');
+    var addMsg = document.getElementById('addUserMsg');
+    function showAddMsg(text, ok) { addMsg.textContent = text; addMsg.className = 'adm-msg ' + (ok ? 'ok' : 'err'); addMsg.hidden = false; }
+    document.getElementById('addUserToggle').addEventListener('click', function () {
+      addForm.hidden = !addForm.hidden;
+      if (!addForm.hidden) document.getElementById('newUser').focus();
+    });
+    // Ticking Admin ticks and locks all three; unticking it puts back what
+    // was ticked before.
+    function syncAdminBox() {
+      var admin = document.getElementById('newAdmin').checked;
+      document.querySelectorAll('.newPerm').forEach(function (c) {
+        if (admin && !c.disabled) c.dataset.before = c.checked ? '1' : '';
+        if (!admin && c.disabled) c.checked = c.dataset.before === '1';
+        c.disabled = admin;
+        if (admin) c.checked = true;
+      });
+    }
+    function resetAccessBoxes() {
+      document.querySelectorAll('.newPerm').forEach(function (c) { c.disabled = false; c.checked = false; c.dataset.before = ''; });
+    }
+    document.getElementById('newAdmin').addEventListener('change', syncAdminBox);
+    document.getElementById('addUserCancel').addEventListener('click', function () { addForm.hidden = true; addForm.reset(); resetAccessBoxes(); addMsg.hidden = true; });
+    addForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = document.getElementById('newUser').value.trim();
+      var p1 = document.getElementById('newPass').value;
+      var p2 = document.getElementById('newPass2').value;
+      var admin = document.getElementById('newAdmin').checked;
+      var perms = Array.prototype.filter.call(document.querySelectorAll('.newPerm'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+      if (!/^[A-Za-z0-9._-]{2,40}$/.test(name)) return showAddMsg('Username: 2-40 characters, letters, numbers, dot, dash or underscore.', false);
+      if (p1.length < 8) return showAddMsg('Password must be at least 8 characters.', false);
+      if (p1 !== p2) return showAddMsg('Passwords do not match.', false);
+      var submit = document.getElementById('addUserSubmit');
+      submit.disabled = true;
+      api('POST', '/api/admin/users', { username: name, password: p1, role: admin ? 'admin' : 'user', permissions: admin ? [] : perms })
+        .then(function () {
+          addForm.reset();
+          resetAccessBoxes();
+          var what = admin ? ' as an ADMIN' : (perms.length ? ' with ' + SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : ' (dashboard only)');
+          showAddMsg('Added ' + name + what + '. They can log in now.', true);
+          return load();
+        })
+        .catch(function (err) { showAddMsg(err.message, false); })
+        .then(function () { submit.disabled = false; });
+    });
+
+    // Activity log | Users. Activity log is the default; #users in the
+    // address keeps Users open across a reload.
+    function showPane(name) {
+      ['log', 'users'].forEach(function (p) {
+        var on = p === name;
+        document.getElementById(p === 'log' ? 'paneLog' : 'paneUsers').hidden = !on;
+        var tab = document.querySelector('.adm-subtab[data-pane="' + p + '"]');
+        tab.classList.toggle('on', on);
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      try { history.replaceState(null, '', name === 'users' ? '#users' : location.pathname + location.search); } catch (e) { /* ignore */ }
+    }
+    document.querySelectorAll('.adm-subtab').forEach(function (tab) {
+      tab.addEventListener('click', function () { showPane(tab.dataset.pane); });
+    });
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      showPane(location.hash === '#users' ? 'users' : 'log');
+      load();
+    })();
+  </script>
+</body>
+</html>

@@ -56,13 +56,14 @@
  *   GET /health                -> DB connectivity check
  *
  * Login (added 12 Aug 2026 per Dinesh -- see raceView.js's renderLoginPage
- * comment for the full request/scoping history): a single shared
- * username/password protects ONLY the main dashboard page ("/"). Report
- * downloads, the meeting reports, /api/race/:id, and /health stay open --
- * that split was an explicit choice, not an oversight (see the Handover
- * document if it's ever revisited). Credentials are never stored in this
- * repo: run `node setup-auth.js` once on the hosting machine to set/change
- * the username and password -- it writes a securely-hashed password to a
+ * comment for the full request/scoping history): one username/password per
+ * person (29 Sep 2026) protects every page, API and report download, with
+ * logins and downloads recorded in the activity log. Only /login, /logout,
+ * /health and the static files in public/ stay open (29 Sep 2026, per
+ * Dinesh -- the APIs and downloads were previously open and returned data
+ * to anyone with the URL). Credentials are never stored in this repo: run
+ * `node setup-auth.js` on the hosting machine to add/remove users or change
+ * a password -- it writes securely-hashed passwords to a
  * local config file outside the project folder (AUTH_CONFIG_PATH below,
  * same pattern as db.json). This app never sees or logs the plaintext
  * password after setup. The session is a plain browser-session cookie (no
@@ -82,10 +83,16 @@ const session = require('express-session');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const { loadConfig, extractConnectionString } = require('./db-config');
+const { MIN_PASSWORD_LENGTH, USERNAME_RE, loadAuthFile, saveAuthFile, findUserIndex, usersFilePath, activeAuthPath } = require('./auth-store');
+const { KEEP_PREVIOUS_MONTHS, activityLogDir, monthKey, monthFilePath, migrateLegacyLog, deleteOldMonths, readEntries } = require('./activity-log');
+const { DEFAULT_COUNTRIES: MISSING_DEFAULT_COUNTRIES, pickSourceMeetings, uncheckedFeedCountries, compareMeetings } = require('./missing-meetings');
+const { KEEP_DAYS: CHANGE_KEEP_DAYS, meetingSnap, raceSnap, diffMeeting, diffRace, appendChanges, readChanges, deleteOldChangeFiles } = require('./change-tracker');
 const {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, escapeHtml, buildIssuesReport, issuesReportToCsv,
+  slugify, countrySlug, raceUrl, DISCIPLINE_SLUGS,
   buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
-  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock,
+  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
+  renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
 } = require('./raceView');
 
 // Default config-file location changed 9 Sep 2026, per Dinesh: production's
@@ -267,6 +274,62 @@ function applyMissingJockeyIgnores(docs) {
   }
 }
 
+function applyFormLineIgnores(docs) {
+  for (const doc of docs) {
+    for (const r of (doc.runners || [])) {
+      const ignored = r.hasFormLinesRaw === false && Boolean(r.runnerId && formLineIgnores[r.runnerId]);
+      r.hasFormLines = r.hasFormLinesRaw !== false || ignored;
+      r.formLineIgnored = ignored;
+    }
+  }
+}
+
+// Every manual "Confirm / Checked" override, applied fresh on each read so
+// cached race data reflects a confirm straight away.
+function applyAllIgnores(docs) {
+  applyFormLineIgnores(docs);
+  applyAgeIgnores(docs);
+  applyDupJockeyIgnores(docs);
+  applyMissingJockeyIgnores(docs);
+}
+
+// --- Response cache (1 Oct 2026, per Dinesh: "site a konjo optimize panni
+// speed aakunga") -----------------------------------------------------
+// The DB and the external feeds are remote and slow (a full dashboard load
+// measured 43 s cold). Values are fresh for ttlMs; after that, for up to
+// staleMs more, the old value is returned at once while one refresh runs
+// in the background, so nobody waits on a refresh that isn't needed yet.
+// Concurrent callers share one in-flight load.
+const memoCache = new Map();
+let memoSets = 0;
+function cached(key, ttlMs, staleMs, load) {
+  const now = Date.now();
+  const hit = memoCache.get(key);
+  const hasValue = hit && hit.at !== undefined;
+  if (hasValue && now - hit.at < ttlMs) return Promise.resolve(hit.value);
+  const usable = hasValue && now - hit.at < ttlMs + staleMs;
+  if (hit && hit.pending) return usable ? Promise.resolve(hit.value) : hit.pending;
+  const entry = hit || {};
+  entry.pending = Promise.resolve().then(load).then((value) => {
+    entry.value = value;
+    entry.at = Date.now();
+    entry.pending = null;
+    return value;
+  }, (err) => {
+    entry.pending = null;
+    throw err;
+  });
+  memoCache.set(key, entry);
+  if (++memoSets % 200 === 0) {
+    for (const [k, e] of memoCache) if (!e.pending && e.at !== undefined && now - e.at > 60 * 60 * 1000) memoCache.delete(k);
+  }
+  if (usable) {
+    entry.pending.catch((err) => console.warn(`[race-dashboard] WARNING: background refresh of ${key} failed: ${err.message}`));
+    return Promise.resolve(hit.value);
+  }
+  return entry.pending;
+}
+
 let clientPromise = null;
 
 function getClient() {
@@ -284,32 +347,424 @@ function getClient() {
 
 // --- Login config -------------------------------------------------------
 //
-// Loaded once at startup (cheap local file read, unlike the lazy MongoDB
-// connection above). Returns null if not set up yet rather than throwing --
-// the server should still come up (so /health keeps working) with the
-// login gate simply refusing everyone until an admin runs
-// `node setup-auth.js`.
+// One login per person (29 Sep 2026, per Dinesh), managed from the admin
+// page or `node setup-auth.js` (file format: auth-store.js). Returns null
+// if not set up yet rather than throwing -- the server should still come
+// up (so /health keeps working) with the login gate simply refusing
+// everyone until a user exists.
 function loadAuthConfig(configPath) {
-  if (!fs.existsSync(configPath)) return null;
-  const raw = fs.readFileSync(configPath, 'utf8');
-  const parsed = JSON.parse(raw);
-  if (!parsed.username || !parsed.passwordHash) {
-    throw new Error(`${configPath} is missing "username" or "passwordHash" -- re-run "node setup-auth.js"`);
+  const config = loadAuthFile(configPath);
+  if (config && !config.users.length) {
+    throw new Error(`${configPath} has no users -- run "node setup-auth.js" to add one`);
   }
-  return parsed;
+  return config;
 }
 
+const AUTH_USERS_PATH = usersFilePath(AUTH_CONFIG_PATH);
+
 let authConfig = null;
-let authConfigWarning = null;
-try {
-  authConfig = loadAuthConfig(AUTH_CONFIG_PATH);
-  if (!authConfig) {
-    authConfigWarning = `No dashboard login configured yet at ${AUTH_CONFIG_PATH}. Run "node setup-auth.js" once on this machine to set a username/password -- until then, nobody can log in.`;
+let authConfigStamp = '';
+function authFileStamp() {
+  const p = activeAuthPath(AUTH_CONFIG_PATH);
+  try {
+    return `${p}|${fs.statSync(p).mtimeMs}`;
+  } catch (e) {
+    return '';
   }
-} catch (err) {
-  authConfigWarning = `Could not read login config at ${AUTH_CONFIG_PATH}: ${err.message}`;
 }
-if (authConfigWarning) console.warn(`[race-dashboard] WARNING: ${authConfigWarning}`);
+function readAuthConfig() {
+  const p = activeAuthPath(AUTH_CONFIG_PATH);
+  try {
+    authConfigStamp = authFileStamp();
+    authConfig = loadAuthConfig(p);
+    if (!authConfig) {
+      console.warn(`[race-dashboard] WARNING: No dashboard login configured yet at ${p}. Run "node setup-auth.js" once on this machine to add a user -- until then, nobody can log in.`);
+    }
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: Could not read login config at ${p}: ${err.message}`);
+  }
+}
+readAuthConfig();
+
+// User changes take effect without a restart: the file in use is re-read
+// whenever it (or which file is in use) changes. On a bad edit the last
+// good list stays in use.
+function refreshAuthConfig() {
+  applyAdminBootstrap();
+  const stamp = authFileStamp();
+  if (!stamp || stamp === authConfigStamp) return;
+  const previous = authConfig;
+  readAuthConfig();
+  if (!authConfig) authConfig = previous;
+}
+
+// Every user change goes through here: saved to auth-users.json (see
+// auth-store.js for why) and applied to the running server at once.
+function saveUsers(config) {
+  saveAuthFile(AUTH_USERS_PATH, config);
+  authConfig = config;
+  authConfigStamp = authFileStamp();
+}
+
+function findUser(username) {
+  const idx = findUserIndex(authConfig, username);
+  return idx === -1 ? null : authConfig.users[idx];
+}
+
+function isAdmin(req) {
+  const user = findUser(req.session && req.session.username);
+  return Boolean(user && user.role === 'admin');
+}
+
+// Admin-area sections (30 Sep 2026, per Dinesh): admins get all of them
+// plus user management; anyone else only the ones an admin ticked for them.
+const PERMISSIONS = ['activity', 'health', 'changes', 'missing'];
+function accessOf(req) {
+  const user = findUser(req.session && req.session.username);
+  const admin = Boolean(user && user.role === 'admin');
+  const granted = new Set(user && Array.isArray(user.permissions) ? user.permissions : []);
+  const access = { admin };
+  PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
+  access.any = PERMISSIONS.some((p) => access[p]);
+  return access;
+}
+function cleanPermissions(list) {
+  return Array.isArray(list) ? PERMISSIONS.filter((p) => list.includes(p)) : [];
+}
+function requirePermission(permission) {
+  return (req, res, next) => {
+    if (accessOf(req)[permission]) return next();
+    if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'You do not have access to this' });
+    return res.status(403).send(renderAdminDeniedPage());
+  };
+}
+
+// First-admin setup without server (RDP) access: `node setup-auth.js
+// --bootstrap` on any PC writes admin-bootstrap.json (hashed password only)
+// into the project folder; after it's uploaded by FTP, the next request
+// adds/updates that user as an admin in auth.json and deletes the file.
+// FTP access already means full control of the server code, so this opens
+// no new door.
+const ADMIN_BOOTSTRAP_PATH = path.join(__dirname, 'admin-bootstrap.json');
+// The service account may not be allowed to delete a file uploaded by FTP
+// (seen on production 29 Sep 2026), so a bootstrap file is applied once per
+// distinct content rather than on every request, and any problem is written
+// to the activity log -- the one server file that can be downloaded by FTP
+// to diagnose it.
+let lastBootstrapContent = null;
+function logSystem(message) {
+  console.warn(`[race-dashboard] WARNING: ${message}`);
+  appendLog({ time: new Date().toISOString(), user: null, action: 'system-warning', detail: message, ip: null });
+}
+function applyAdminBootstrap() {
+  if (!fs.existsSync(ADMIN_BOOTSTRAP_PATH)) return;
+  let content;
+  try {
+    content = fs.readFileSync(ADMIN_BOOTSTRAP_PATH, 'utf8');
+  } catch (err) {
+    return;
+  }
+  if (content === lastBootstrapContent) return;
+  lastBootstrapContent = content;
+  let boot;
+  try {
+    boot = JSON.parse(content);
+    if (!USERNAME_RE.test(boot.username || '') || !/^\$2[aby]\$/.test(boot.passwordHash || '')) {
+      throw new Error('file must have a valid "username" and bcrypt "passwordHash"');
+    }
+    const config = loadAuthFile(activeAuthPath(AUTH_CONFIG_PATH)) || { sessionSecret: SESSION_SECRET, users: [] };
+    const idx = findUserIndex(config, boot.username);
+    if (idx === -1) {
+      config.users.push({ username: boot.username, passwordHash: boot.passwordHash, role: 'admin', createdAt: new Date().toISOString() });
+    } else {
+      config.users[idx] = { ...config.users[idx], passwordHash: boot.passwordHash, role: 'admin' };
+    }
+    saveUsers(config);
+  } catch (err) {
+    logSystem(`Admin bootstrap failed (${err.code || 'error'}): ${err.message}`);
+    return;
+  }
+  console.log(`[race-dashboard] Admin bootstrap: "${boot.username}" is now an admin.`);
+  appendLog({ time: new Date().toISOString(), user: boot.username, action: 'admin-bootstrap', ip: null });
+  try {
+    fs.unlinkSync(ADMIN_BOOTSTRAP_PATH);
+  } catch (err) {
+    logSystem('Admin bootstrap applied, but admin-bootstrap.json could not be deleted -- delete it by FTP.');
+  }
+}
+
+// --- Activity log -------------------------------------------------------
+//
+// Who logged in and who downloaded what: one file per month next to
+// auth.json, files older than about 3 months deleted automatically (see
+// activity-log.js). Writes never block or fail a request.
+const ACTIVITY_LOG_DIR = activityLogDir(AUTH_CONFIG_PATH);
+
+// Runs once per month (and at startup): folds in the old single log file
+// and deletes months past the retention window.
+let logsMaintainedMonth = null;
+function maintainLogs(now) {
+  const key = monthKey(now);
+  if (key === logsMaintainedMonth) return;
+  logsMaintainedMonth = key;
+  const problems = [migrateLegacyLog(ACTIVITY_LOG_DIR), ...deleteOldMonths(ACTIVITY_LOG_DIR, now)].filter(Boolean);
+  problems.forEach((p) => logSystem(p));
+}
+
+function appendLog(entry) {
+  const now = new Date();
+  maintainLogs(now);
+  fs.appendFile(monthFilePath(ACTIVITY_LOG_DIR, monthKey(now)), JSON.stringify(entry) + '\n', (err) => {
+    if (err) console.warn(`[race-dashboard] Could not write activity log: ${err.message}`);
+  });
+}
+
+function clientIp(req) {
+  return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+}
+
+// Views repeat a lot (the dashboard reloads itself every 3 minutes), so a
+// view with the same dedupeKey by the same user is logged at most once per
+// dedupeMs.
+const lastLoggedAt = new Map();
+function logActivity(req, action, detail, dedupe) {
+  if (dedupe) {
+    const key = `${req.session && req.session.username}|${action}|${dedupe.key}`;
+    const now = Date.now();
+    if (now - (lastLoggedAt.get(key) || 0) < dedupe.ms) return;
+    lastLoggedAt.set(key, now);
+  }
+  const entry = {
+    time: new Date().toISOString(),
+    user: (req.session && req.session.username) || null,
+    action,
+    ...detail,
+    ip: clientIp(req),
+  };
+  appendLog(entry);
+}
+
+// --- Data-change tracking (30 Sep 2026, per Dinesh) ---------------------
+//
+// Every 2 minutes: compare meetings/races for yesterday..today+2 with the
+// last snapshot and log what was added/removed/changed (change-tracker.js).
+// Only races whose updatedAt moved are re-read, plus a full re-read every
+// 30 minutes in case a scrape changes data without touching updatedAt. A
+// date entering the window for the first time is recorded silently, so
+// data that already existed isn't reported as "added".
+const CHANGE_CHECK_MS = 2 * 60 * 1000;
+const CHANGE_FULL_SWEEP_MS = 30 * 60 * 1000;
+const CHANGE_SNAPSHOT_PATH = path.join(ACTIVITY_LOG_DIR, 'data-changes-snapshot.json');
+const TRACK_MEETING_PROJ = { mDate: 1, mCourse: 1, mCourseDisplayName: 1, mCountry: 1, mDiscipline: 1, mTrack: 1, isAbandoned: 1, numberOfRaces: 1, updatedAt: 1 };
+const TRACK_RACE_PROJ = {
+  rDate: 1, rCourse: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTime: 1, rDistance: 1, rClass: 1,
+  isAbandoned: 1, resultString: 1, updatedAt: 1,
+  'runners.runnerId': 1, 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1,
+  'runners.isScratched': 1, 'runners.bp': 1, 'runners.weight': 1,
+};
+
+// lastScrapeSeenAt: when this server last saw any meeting/race updatedAt
+// move, in its own clock -- the DB's updatedAt strings carry no time zone,
+// so they can't be compared with "now" directly.
+let tracker = { dates: [], meetings: {}, races: {}, lastCheckAt: null, lastFullAt: 0, lastScrapeSeenAt: null, lastChangeCount: 0 };
+try {
+  if (fs.existsSync(CHANGE_SNAPSHOT_PATH)) tracker = { ...tracker, ...JSON.parse(fs.readFileSync(CHANGE_SNAPSHOT_PATH, 'utf8')), lastFullAt: 0 };
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: Could not read ${CHANGE_SNAPSHOT_PATH} (starting a fresh snapshot): ${err.message}`);
+}
+
+function trackedDates() {
+  const today = Date.parse(`${todayStr()}T00:00:00Z`);
+  return [-1, 0, 1, 2].map((n) => new Date(today + n * 86400000).toISOString().slice(0, 10));
+}
+
+let changeCheckRunning = false;
+let changeCleanupDate = null;
+async function checkDataChanges() {
+  if (changeCheckRunning) return;
+  changeCheckRunning = true;
+  try {
+    const db = (await getClient()).db();
+    const dates = trackedDates();
+    const silent = new Set(dates.filter((d) => !tracker.dates.includes(d)));
+    const inWindow = (d) => dates.includes(d);
+    const time = new Date().toISOString();
+    const full = Date.now() - tracker.lastFullAt >= CHANGE_FULL_SWEEP_MS;
+    const entries = [];
+    let scrapeSeen = false;
+
+    const meetingDocs = await db.collection('meetings').find({ mDate: { $in: dates }, isHidden: { $ne: true } }).project(TRACK_MEETING_PROJ).toArray();
+    const meetings = {};
+    meetingDocs.forEach((m) => { meetings[m._id] = meetingSnap(m); });
+    for (const id of new Set([...Object.keys(tracker.meetings), ...Object.keys(meetings)])) {
+      const prev = tracker.meetings[id];
+      const cur = meetings[id];
+      const date = (cur || prev).date;
+      if (!inWindow(date) || silent.has(date)) continue;
+      if (!prev || !cur || prev.updatedAt !== cur.updatedAt) scrapeSeen = true;
+      entries.push(...diffMeeting(prev, cur, time));
+    }
+
+    const light = await db.collection('races').find({ rDate: { $in: dates }, isHidden: { $ne: true } }).project({ updatedAt: 1 }).toArray();
+    const liveIds = new Set(light.map((r) => r._id));
+    const toRead = full ? [...liveIds] : light.filter((r) => !tracker.races[r._id] || tracker.races[r._id].updatedAt !== (r.updatedAt || null)).map((r) => r._id);
+    const races = { ...tracker.races };
+    for (let i = 0; i < toRead.length; i += 500) {
+      const docs = await db.collection('races').find({ _id: { $in: toRead.slice(i, i + 500) } }).project(TRACK_RACE_PROJ).toArray();
+      for (const doc of docs) {
+        const cur = raceSnap(doc);
+        const prevSnap = tracker.races[doc._id];
+        if (!silent.has(cur.date)) {
+          if (!prevSnap || prevSnap.updatedAt !== cur.updatedAt) scrapeSeen = true;
+          entries.push(...diffRace(prevSnap, cur, time, doc._id));
+        }
+        races[doc._id] = cur;
+      }
+    }
+    for (const id of Object.keys(races)) {
+      if (liveIds.has(id)) continue;
+      const prev = races[id];
+      if (inWindow(prev.date) && !silent.has(prev.date)) entries.push(...diffRace(prev, null, time, id));
+      delete races[id];
+    }
+
+    tracker = {
+      dates, meetings, races, lastCheckAt: time, lastFullAt: full ? Date.now() : tracker.lastFullAt,
+      lastScrapeSeenAt: scrapeSeen ? time : tracker.lastScrapeSeenAt, lastChangeCount: entries.length,
+    };
+    if (entries.length) appendChanges(ACTIVITY_LOG_DIR, entries);
+    if (entries.length || silent.size || full) fs.writeFileSync(CHANGE_SNAPSHOT_PATH, JSON.stringify(tracker));
+    if (changeCleanupDate !== dates[1]) {
+      changeCleanupDate = dates[1];
+      deleteOldChangeFiles(ACTIVITY_LOG_DIR, dates[1]).forEach((p) => logSystem(p));
+    }
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: data-change check failed: ${err.message}`);
+  } finally {
+    changeCheckRunning = false;
+  }
+}
+
+// --- System health (30 Sep 2026, per Dinesh; admins only) ---------------
+//
+// Everything the dashboard depends on, checked live. Results are cached for
+// HEALTH_CACHE_MS so several open pages don't re-hit the slow feeds.
+const SERVER_STARTED_AT = new Date();
+const HEALTH_CACHE_MS = 60 * 1000;
+const FEED_SLOW_MS = 20 * 1000;
+const SCRAPE_QUIET_WARN_MS = 60 * 60 * 1000;
+const CHANGE_CHECK_LATE_MS = 6 * 60 * 1000;
+// Files only read at startup: uploading a newer one needs a restart.
+const RESTART_FILES = ['server.js', 'raceView.js', 'auth-store.js', 'activity-log.js', 'change-tracker.js', 'views/dashboard.html', 'views/admin.html', 'views/changes.html', 'views/system-health.html'];
+let healthCache = null;
+
+function ageText(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h} h ${min % 60} min ago` : `${Math.floor(h / 24)} d ago`;
+}
+
+async function timed(fn) {
+  const start = Date.now();
+  try {
+    const value = await fn();
+    return { ok: true, ms: Date.now() - start, value };
+  } catch (err) {
+    return { ok: false, ms: Date.now() - start, error: err.message };
+  }
+}
+
+async function fetchFeedRows(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return Array.isArray(json.data) ? json.data.length : 0;
+}
+
+async function runHealthChecks() {
+  const now = Date.now();
+  const today = todayStr();
+  const checks = [];
+  const add = (key, name, status, main, sub) => checks.push({ key, name, status, main, sub });
+
+  const uptimeMs = now - SERVER_STARTED_AT.getTime();
+  add('server', 'Dashboard server', 'ok', `Up ${ageText(uptimeMs).replace(' ago', '')}`,
+    `Started ${SERVER_STARTED_AT.toISOString()} · memory ${Math.round(process.memoryUsage().rss / 1048576)} MB`);
+
+  const [db, speed, scratch, video] = await Promise.all([
+    timed(async () => { await (await getClient()).db().admin().ping(); }),
+    timed(() => fetchFeedRows(SPEED_MAP_GREYHOUND_STATS_URL + today)),
+    timed(() => fetchFeedRows(SCRATCHINGS_STATS_URL + today)),
+    timed(async () => {
+      const url = new URL(VIDEO_LIST_URL);
+      url.searchParams.set('list-type', '2');
+      url.searchParams.set('max-keys', '1');
+      const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }),
+  ]);
+  add('db', 'Database (MongoDB)', db.ok ? (db.ms > 1500 ? 'warn' : 'ok') : 'bad', db.ok ? `${db.ms} ms` : 'Not reachable',
+    db.ok ? (db.ms > 1500 ? 'Connected, but slow to answer' : 'Connected') : db.error);
+
+  const seen = tracker.lastScrapeSeenAt ? Date.parse(tracker.lastScrapeSeenAt) : null;
+  if (seen) {
+    const quiet = now - seen > SCRAPE_QUIET_WARN_MS;
+    add('scrape', 'Scraped data', quiet ? 'warn' : 'ok', ageText(now - seen),
+      `Last meeting/race update seen ${tracker.lastScrapeSeenAt}${quiet ? ' · nothing updated for over 60 min' : ''}`);
+  } else {
+    add('scrape', 'Scraped data', uptimeMs > SCRAPE_QUIET_WARN_MS ? 'warn' : 'ok', 'Not seen yet',
+      'No meeting/race update seen since the server started');
+  }
+
+  const feed = (key, name, r, unit) => add(key, name, r.ok ? (r.ms > FEED_SLOW_MS ? 'warn' : 'ok') : 'bad',
+    r.ok ? `${(r.ms / 1000).toFixed(1)} s` : 'Not reachable',
+    r.ok ? `${r.ms > FEED_SLOW_MS ? 'Slow (over 20 s) · ' : ''}${r.value} ${unit} today` : r.error);
+  feed('speedmap', 'Speed Map feed', speed, 'rows');
+  feed('scratchings', 'Scratchings feed', scratch, 'meetings');
+  add('video', 'Race video storage (S3)', video.ok ? 'ok' : 'bad', video.ok ? `${(video.ms / 1000).toFixed(1)} s` : 'Not reachable',
+    video.ok ? 'Video listing reachable' : video.error);
+
+  const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
+  add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
+    lastCheck ? ageText(now - lastCheck) : 'Not run yet',
+    lastCheck ? `Runs every ${CHANGE_CHECK_MS / 60000} min · last found ${tracker.lastChangeCount} change${tracker.lastChangeCount === 1 ? '' : 's'}` : 'Starts a few seconds after the server starts');
+
+  const probe = path.join(ACTIVITY_LOG_DIR, '.health-write-test');
+  const writable = await timed(async () => { fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe); });
+  const users = authConfig ? authConfig.users : [];
+  add('logins', 'Logins & logs', writable.ok && users.length ? 'ok' : 'bad', `${users.length} user${users.length === 1 ? '' : 's'}`,
+    `${users.filter((u) => u.role === 'admin').length} admin · using ${path.basename(activeAuthPath(AUTH_CONFIG_PATH))} · ` +
+    (writable.ok ? 'server can save users and logs' : `server can't write its folder: ${writable.error}`));
+
+  const stale = [];
+  let newest = 0;
+  for (const rel of RESTART_FILES) {
+    try {
+      const m = fs.statSync(path.join(__dirname, rel)).mtimeMs;
+      newest = Math.max(newest, m);
+      if (m > SERVER_STARTED_AT.getTime()) stale.push(rel);
+    } catch (e) { /* a file this build doesn't have */ }
+  }
+  let cssTime = null;
+  try { cssTime = fs.statSync(path.join(__dirname, 'public', 'styles.css')).mtime.toISOString(); } catch (e) { /* none */ }
+  add('deploy', 'Deployed code', stale.length ? 'warn' : 'ok', newest ? new Date(newest).toISOString() : '-',
+    stale.length ? `Uploaded after the server started, restart WinSW to load: ${stale.join(', ')}` : `Latest code file upload${cssTime ? ` · styles.css ${cssTime}` : ''}`);
+
+  const bad = checks.filter((c) => c.status === 'bad');
+  const warn = checks.filter((c) => c.status === 'warn');
+  const overall = bad.length ? 'bad' : warn.length ? 'warn' : 'ok';
+  const summary = overall === 'ok' ? 'All systems OK'
+    : [bad.length ? `${bad.length} down` : '', warn.length ? `${warn.length} warning${warn.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+  return { checkedAt: new Date().toISOString(), overall, summary, problems: [...bad, ...warn].map((c) => c.name), checks };
+}
+
+async function getHealth(fresh) {
+  if (!fresh && healthCache && Date.now() - Date.parse(healthCache.checkedAt) < HEALTH_CACHE_MS) return healthCache;
+  healthCache = await runHealthChecks();
+  return healthCache;
+}
 
 // Falls back to a random per-process secret if login isn't set up yet, so
 // the session middleware always has something to sign cookies with -- those
@@ -393,7 +848,16 @@ async function fetchRaceDocsForDateRange(fromDate, toDate, includeTrials) {
 const VIDEO_LIST_URL = 'https://s3.troyendata.com/rob-rp-videos/';
 const VIDEO_COUNTRIES = new Set(['AUS', 'GB', 'SAF', 'IRE']);
 
-async function listVideoKeysForDate(dateStr) {
+// The three external feeds are fetched once per date and shared by the
+// dashboard, every race popup and the health page (see cached()).
+const FEED_FRESH_MS = 2 * 60 * 1000;
+const FEED_STALE_MS = 10 * 60 * 1000;
+
+function listVideoKeysForDate(dateStr) {
+  return cached(`feed-video|${dateStr}`, FEED_FRESH_MS, FEED_STALE_MS, () => loadVideoKeysForDate(dateStr));
+}
+
+async function loadVideoKeysForDate(dateStr) {
   const keys = new Set();
   let continuationToken = null;
   do {
@@ -459,7 +923,11 @@ function buildVideoKey(dateStr, country, course, raceNo) {
 // uploaded.
 const SPEED_MAP_GREYHOUND_STATS_URL = 'http://57.181.204.168:8085/getStatsGrey/';
 
-async function fetchGreyhoundSpeedMapEventKeys(dateStr) {
+function fetchGreyhoundSpeedMapEventKeys(dateStr) {
+  return cached(`feed-speedmap|${dateStr}`, FEED_FRESH_MS, FEED_STALE_MS, () => loadGreyhoundSpeedMapEventKeys(dateStr));
+}
+
+async function loadGreyhoundSpeedMapEventKeys(dateStr) {
   // A bigger timeout than the video listing's above -- this returns every
   // runner-row for every Greyhound race that date (thousands of rows) in
   // one response, confirmed to genuinely take 8+ seconds even on a plain
@@ -521,11 +989,32 @@ async function attachSpeedMapStatus(docs, dateStr) {
 // rather than flagged.
 const SCRATCHINGS_STATS_URL = 'http://57.181.204.168:8085/getScratchingsGrey/';
 
+// The day's feed meetings, shared by the scratching check below and the
+// Missing Meetings page. Fresher than the other feeds: a scratching is
+// time-critical.
+function fetchScratchingsFeed(dateStr) {
+  return cached(`feed-scratchings|${dateStr}`, 60 * 1000, 5 * 60 * 1000, () => loadScratchingsFeed(dateStr));
+}
+
+// The feed often answers 504 "Upstream timed out after 15s" and then works
+// on the next try (seen 1 Oct 2026), so one failed request is retried.
+async function loadScratchingsFeed(dateStr) {
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(SCRATCHINGS_STATS_URL + dateStr, { signal: AbortSignal.timeout(25000) });
+      if (!res.ok) throw new Error(`Scratchings request failed (${res.status})`);
+      const json = await res.json();
+      return Array.isArray(json.data) ? json.data : [];
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchScratchingsByMeetingRace(dateStr) {
-  const res = await fetch(SCRATCHINGS_STATS_URL + dateStr, { signal: AbortSignal.timeout(25000) });
-  if (!res.ok) throw new Error(`Scratchings request failed (${res.status})`);
-  const json = await res.json();
-  const meetings = Array.isArray(json.data) ? json.data : [];
+  const meetings = await fetchScratchingsFeed(dateStr);
   const map = new Map(); // "<tabMeetingId>:<raceNo>" -> [{RunnerNo, Runner}, ...]
   for (const m of meetings) {
     if (!m || m.MeetingID == null || !m.races) continue;
@@ -621,7 +1110,11 @@ function pickBestFormLines(variants) {
 // form lines for this runner) to every runner, and derives `hasFormLines`
 // from the Default/generic feed specifically -- since that's the one with
 // no client suffix, matching what TD admin's plain racecard export shows.
-async function attachFormLineStatus(docs) {
+// options.light (the grid and reports): only whether each runner has form
+// lines, plus the comments -- the full past-race history for a whole day
+// measured 48.6 MB / 21 s, the light version 2.8 MB / 2 s (1 Oct 2026).
+// The race popup (one race) still loads everything.
+async function attachFormLineStatus(docs, options = {}) {
   // Thoroughbred only (28 Aug 2026, per Dinesh) -- Harness/Greyhound
   // racecards weren't verified against this check, so skip the join for
   // them entirely rather than querying `racecards` for races that will
@@ -631,14 +1124,24 @@ async function attachFormLineStatus(docs) {
   if (!raceIds.length) return;
 
   const client = await getClient();
-  const cards = await client.db().collection('racecards')
-    .find({ RaceId: { $in: raceIds } })
-    .project({
-      RaceId: 1, Client: 1, Style: 1, RaceComment: 1, SexRestriction: 1, 'Runners.RunnerId': 1, 'Runners.FormLines': 1,
-      'Runners.Region': 1, 'Runners.Sire': 1, 'Runners.Dam': 1, 'Runners.Colour': 1,
-      'Runners.PerformanceStatistics': 1, 'Runners.CurrentOdds': 1, 'Runners.CarryingWeight': 1, 'Runners.Comment': 1, 'Runners.Form': 1,
-    })
-    .toArray();
+  const cards = options.light
+    ? await client.db().collection('racecards').aggregate([
+      { $match: { RaceId: { $in: raceIds } } },
+      { $project: {
+        RaceId: 1, Client: 1, Style: 1, RaceComment: 1, SexRestriction: 1,
+        Runners: { $map: { input: { $ifNull: ['$Runners', []] }, as: 'r', in: {
+          RunnerId: '$$r.RunnerId', Comment: '$$r.Comment', formLineCount: { $size: { $ifNull: ['$$r.FormLines', []] } },
+        } } },
+      } },
+    ]).toArray()
+    : await client.db().collection('racecards')
+      .find({ RaceId: { $in: raceIds } })
+      .project({
+        RaceId: 1, Client: 1, Style: 1, RaceComment: 1, SexRestriction: 1, 'Runners.RunnerId': 1, 'Runners.FormLines': 1,
+        'Runners.Region': 1, 'Runners.Sire': 1, 'Runners.Dam': 1, 'Runners.Colour': 1,
+        'Runners.PerformanceStatistics': 1, 'Runners.CurrentOdds': 1, 'Runners.CarryingWeight': 1, 'Runners.Comment': 1, 'Runners.Form': 1,
+      })
+      .toArray();
 
   // Prefer the "AU" Style variant's race comment when there is one (9 Sep
   // 2026, per Dinesh -- this dashboard is Australian-racing-first, prize
@@ -680,7 +1183,7 @@ async function attachFormLineStatus(docs) {
     const enrichByRunnerId = enrichByRaceId.get(card.RaceId);
     for (const r of (card.Runners || [])) {
       if (!byRunnerId.has(r.RunnerId)) byRunnerId.set(r.RunnerId, {});
-      const hasLines = Array.isArray(r.FormLines) && r.FormLines.length > 0;
+      const hasLines = options.light ? r.formLineCount > 0 : Array.isArray(r.FormLines) && r.FormLines.length > 0;
       // Different Style/Language docs under the same Client are presentation
       // variants of the same underlying data pull, not independent sources
       // -- OR them together rather than letting whichever comes back last win.
@@ -737,11 +1240,9 @@ async function attachFormLineStatus(docs) {
     for (const r of (doc.runners || [])) {
       const perClient = byRunnerId ? byRunnerId.get(r.runnerId) : null;
       r.formLinesByClient = perClient || null; // null -- no racecard found for this runner at all
-      r.hasFormLines = perClient ? Boolean(perClient.Default) : true; // no racecard data -> can't confirm a gap, don't flag
-      if (r.hasFormLines === false && r.runnerId && formLineIgnores[r.runnerId]) {
-        r.hasFormLines = true;
-        r.formLineIgnored = true;
-      }
+      // no racecard data -> can't confirm a gap, don't flag. The manual
+      // "confirm no form" override is applied on top by applyFormLineIgnores.
+      r.hasFormLinesRaw = perClient ? Boolean(perClient.Default) : true;
 
       const enrich = enrichByRunnerId ? enrichByRunnerId.get(r.runnerId) : null;
       r.region = enrich ? enrich.region : null;
@@ -764,19 +1265,17 @@ async function attachFormLineStatus(docs) {
 // wall-clock in one real page load, purely from network flakiness to the
 // remote host, not a query-plan/index problem (that was fixed separately,
 // see the races.rDate index). No code change here can fix that network
-// path, so this caches a date+trials combo's fully-assembled race docs in
-// memory for a short window -- short enough that it's still fresher than
-// the dashboard's own 3-minute auto-refresh, but long enough that a manual
-// reload or the next auto-refresh tick within that window skips the slow
-// round trip entirely instead of repeating it.
-const RACE_DOCS_CACHE_TTL_MS = 60 * 1000;
-const raceDocsCache = new Map(); // "dateStr|includeTrials" -> { docs, expiresAt }
-
+// path, so a date+trials combo's fully-assembled race docs are cached (see
+// cached()): fresh for 60 s, then served while a background refresh runs
+// for up to 10 more minutes, so a page load never waits on the refresh.
+// The manual confirms are applied on every read, not baked into the cache.
 async function fetchRaceDocs(dateStr, includeTrials) {
-  const cacheKey = `${dateStr}|${includeTrials}`;
-  const cached = raceDocsCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.docs;
+  const docs = await cached(`docs|${dateStr}|${includeTrials}`, 60 * 1000, 10 * 60 * 1000, () => loadRaceDocs(dateStr, includeTrials));
+  applyAllIgnores(docs);
+  return docs;
+}
 
+async function loadRaceDocs(dateStr, includeTrials) {
   const client = await getClient();
   // NOTE: no longer filtering out isAbandoned here -- the dashboard now has
   // a "Race status" filter (Upcoming/Running/Completed/Abandoned/Resulted)
@@ -816,15 +1315,19 @@ async function fetchRaceDocs(dateStr, includeTrials) {
     doc.rsMeetingId = extras ? extras.rsMeetingId : null;
     doc.tabMeetingId = extras ? extras.tabMeetingId : null;
   }
-  await Promise.all([attachFormLineStatus(docs), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr)]);
-  applyAgeIgnores(docs);
-  applyDupJockeyIgnores(docs);
-  applyMissingJockeyIgnores(docs);
-  raceDocsCache.set(cacheKey, { docs, expiresAt: Date.now() + RACE_DOCS_CACHE_TTL_MS });
+  await Promise.all([attachFormLineStatus(docs, { light: true }), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr)]);
   return docs;
 }
 
+// One race's full detail for the popup: fresh 30 s, then up to 60 s more
+// served while a refresh runs.
 async function fetchRaceById(id) {
+  const doc = await cached(`race|${id}`, 30 * 1000, 60 * 1000, () => loadRaceById(id));
+  if (doc) applyAllIgnores([doc]);
+  return doc;
+}
+
+async function loadRaceById(id) {
   const client = await getClient();
   const doc = await client.db().collection('races').findOne(
     { _id: id },
@@ -843,19 +1346,23 @@ async function fetchRaceById(id) {
     // one doc per race keyed by `rId` (== races._id), with a `predictions[]`
     // array of per-runner barrier/settling/closing speed measures (0-1) and
     // ratings. Only fetched for the single race a popup is open on (not the
-    // whole grid), same as the racecards/video joins above.
-    const speedMapDoc = await client.db().collection('speedMaps').findOne({ rId: doc._id }, { projection: { predictions: 1 } });
-    doc.speedMapPredictions = speedMapDoc && Array.isArray(speedMapDoc.predictions) ? speedMapDoc.predictions : null;
-    // tabMeetingId (22 Sep 2026) -- needed by attachScratchingStatus below,
-    // same join as the schedule grid's own Scratching Not Updated check
-    // (fetchRaceDocs), just scoped to this one race's meeting instead of
-    // every meeting that date.
-    const extras = await fetchMeetingExtrasByMeetingId([doc.meetingId]);
-    doc.tabMeetingId = (extras.get(doc.meetingId) || {}).tabMeetingId || null;
-    await Promise.all([attachFormLineStatus([doc]), attachVideoStatus([doc], doc.rDate), attachScratchingStatus([doc], doc.rDate)]);
-    applyAgeIgnores([doc]);
-    applyDupJockeyIgnores([doc]);
-    applyMissingJockeyIgnores([doc]);
+    // whole grid), same as the racecards/video joins above. Everything
+    // below runs in parallel -- each is a separate round trip to the remote
+    // DB or a (cached) feed.
+    await Promise.all([
+      client.db().collection('speedMaps').findOne({ rId: doc._id }, { projection: { predictions: 1 } }).then((speedMapDoc) => {
+        doc.speedMapPredictions = speedMapDoc && Array.isArray(speedMapDoc.predictions) ? speedMapDoc.predictions : null;
+      }),
+      // tabMeetingId (22 Sep 2026) -- needed by attachScratchingStatus, same
+      // join as the schedule grid's own Scratching Not Updated check, just
+      // scoped to this one race's meeting.
+      fetchMeetingExtrasByMeetingId([doc.meetingId]).then((extras) => {
+        doc.tabMeetingId = (extras.get(doc.meetingId) || {}).tabMeetingId || null;
+        return attachScratchingStatus([doc], doc.rDate);
+      }),
+      attachFormLineStatus([doc]),
+      attachVideoStatus([doc], doc.rDate),
+    ]);
   }
   return doc;
 }
@@ -878,15 +1385,16 @@ async function fetchSearchResults(dateStr, query) {
   const raceNoMatch = /^r?\s*(\d{1,2})$/i.exec(q);
   const raceNoWanted = raceNoMatch ? parseInt(raceNoMatch[1], 10) : null;
 
-  const client = await getClient();
-  const docs = await client.db().collection('races')
+  // The day's names are cached, so typing a search doesn't re-read the
+  // whole day from the DB on every keystroke.
+  const docs = await cached(`search|${dateStr}`, 60 * 1000, 5 * 60 * 1000, async () => (await getClient()).db().collection('races')
     .find({ rDate: dateStr, isHidden: { $ne: true } })
     .project({
-      _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTime: 1, meetingId: 1,
+      _id: 1, rDate: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTime: 1, meetingId: 1,
       'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1,
     })
     .sort({ rCourseDisplayName: 1, rNo: 1 })
-    .toArray();
+    .toArray());
 
   const meetingsMap = new Map();
   const races = [];
@@ -896,25 +1404,26 @@ async function fetchSearchResults(dateStr, query) {
 
   for (const doc of docs) {
     const course = doc.rCourseDisplayName || '';
+    const url = docRaceUrl(doc);
     const courseMatches = course.toLowerCase().includes(qLower);
     const raceNoMatches = raceNoWanted != null && doc.rNo === raceNoWanted;
     const clock = parseClock(doc.rScheduleTime);
 
     if (courseMatches && !meetingsMap.has(doc.meetingId)) {
-      meetingsMap.set(doc.meetingId, { meetingId: doc.meetingId, raceId: doc._id, course, country: doc.rCountry, discipline: doc.rDiscipline });
+      meetingsMap.set(doc.meetingId, { meetingId: doc.meetingId, raceId: doc._id, url, course, country: doc.rCountry, discipline: doc.rDiscipline });
     }
     if (courseMatches || raceNoMatches) {
-      races.push({ raceId: doc._id, course, rNo: doc.rNo, time: clock ? clock.label : null, discipline: doc.rDiscipline });
+      races.push({ raceId: doc._id, url, course, rNo: doc.rNo, time: clock ? clock.label : null, discipline: doc.rDiscipline });
     }
     for (const r of (doc.runners || [])) {
       if (r.horseName && r.horseName.toLowerCase().includes(qLower)) {
-        runners.push({ raceId: doc._id, horseName: r.horseName, course, rNo: doc.rNo });
+        runners.push({ raceId: doc._id, url, horseName: r.horseName, course, rNo: doc.rNo });
       }
       if (r.jockey && r.jockey.toLowerCase().includes(qLower) && !jockeysMap.has(r.jockey)) {
-        jockeysMap.set(r.jockey, { raceId: doc._id, name: r.jockey, course, rNo: doc.rNo });
+        jockeysMap.set(r.jockey, { raceId: doc._id, url, name: r.jockey, course, rNo: doc.rNo });
       }
       if (r.trainer && r.trainer.toLowerCase().includes(qLower) && !trainersMap.has(r.trainer)) {
-        trainersMap.set(r.trainer, { raceId: doc._id, name: r.trainer, course, rNo: doc.rNo });
+        trainersMap.set(r.trainer, { raceId: doc._id, url, name: r.trainer, course, rNo: doc.rNo });
       }
     }
   }
@@ -927,6 +1436,47 @@ async function fetchSearchResults(dateStr, query) {
     jockeys: [...jockeysMap.values()].slice(0, LIMIT),
     trainers: [...trainersMap.values()].slice(0, LIMIT),
   };
+}
+
+// "Upcoming Races" ticker (26 Sep 2026, per Dinesh, an approved draft
+// mockup) -- the soonest-starting races across EVERY meeting/discipline on
+// one date, for a scrolling countdown strip above the filters. Sorting/
+// counting down needs a genuine cross-timezone-comparable timestamp, which
+// `rScheduleTime` alone is NOT (it's venue-LOCAL, deliberately never parsed
+// as an absolute Date elsewhere in this file -- see the removed
+// timezone-mismatch check's comment in raceView.js for why). `rScheduleTimeUTC`
+// is the only field that serves that purpose here; it has one known
+// historical bad-value case (a single course, confirmed 22 Sep 2026) but
+// no substitute exists, so a race with no parseable UTC time is simply
+// left out rather than risk a wrong countdown.
+function docRaceUrl(doc) {
+  return raceUrl({ discipline: doc.rDiscipline, country: doc.rCountry, meeting: doc.rCourseDisplayName, date: doc.rDate, rNo: doc.rNo });
+}
+
+async function fetchUpcomingRaces(dateStr) {
+  // Every open dashboard polls this each minute; one cached read serves them all.
+  const docs = await cached(`upcoming|${dateStr}`, 30 * 1000, 2 * 60 * 1000, async () => (await getClient()).db().collection('races')
+    .find({ rDate: dateStr, isHidden: { $ne: true } })
+    .project({
+      _id: 1, rDate: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1,
+      rScheduleTimeUTC: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1,
+    })
+    .toArray());
+
+  const now = Date.now();
+  const upcoming = [];
+  for (const doc of docs) {
+    if (doc.isTrail) continue;
+    if (deriveRaceStatus(doc) !== 'upcoming') continue;
+    const targetMs = doc.rScheduleTimeUTC ? Date.parse(doc.rScheduleTimeUTC) : NaN;
+    if (!Number.isFinite(targetMs) || targetMs < now) continue;
+    upcoming.push({
+      raceId: doc._id, url: docRaceUrl(doc), course: doc.rCourseDisplayName, country: doc.rCountry,
+      discipline: doc.rDiscipline, rNo: doc.rNo, targetTime: new Date(targetMs).toISOString(),
+    });
+  }
+  upcoming.sort((a, b) => Date.parse(a.targetTime) - Date.parse(b.targetTime));
+  return upcoming.slice(0, 20);
 }
 
 // Fetches every race (all runners, full detail) for ONE specific meeting on
@@ -1256,58 +1806,487 @@ app.use(session({
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
-// Guards ONLY the "/" route below -- report downloads, /api/race/:id, and
-// /health are intentionally left open (Dinesh's explicit choice, 12 Aug 2026).
-function requireLogin(req, res, next) {
-  if (req.session && req.session.loggedIn) return next();
+// Login gate for everything registered below. /health stays open for the
+// uptime monitor. API calls get a 401 instead of a redirect so fetch()
+// callers see a clear failure rather than the login page's HTML.
+// A session whose user has since been removed with setup-auth.js is
+// treated as logged out on its next request.
+const PUBLIC_PATHS = new Set(['/login', '/logout', '/health']);
+app.use((req, res, next) => {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+  refreshAuthConfig();
+  if (req.session && req.session.loggedIn) {
+    // A password reset bumps the user's sessionVersion, logging out every
+    // session that logged in with the old password.
+    const user = findUser(req.session.username);
+    if (user && (user.sessionVersion || 0) === (req.session.sessionVersion || 0)) return next();
+    req.session.loggedIn = false;
+  }
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Not logged in' });
+  // Remember a shared race link so login lands back on it.
+  if (req.method === 'GET' && req.session && req.path.startsWith('/race/')) req.session.returnTo = req.originalUrl;
   return res.redirect('/login');
+});
+
+// Every server-built report file (CSV/Excel/JSON/PDF) goes in the
+// activity log; client-built race/meeting PDFs report in via /api/activity.
+app.use((req, res, next) => {
+  if (req.method === 'GET' && /\.(csv|xlsx|json|pdf)$/.test(req.path)) logActivity(req, 'download', { file: req.originalUrl });
+  next();
+});
+
+app.post('/api/activity', (req, res) => {
+  const file = req.body && typeof req.body.file === 'string' ? req.body.file.slice(0, 200) : null;
+  if (!file) return res.status(400).json({ error: 'file is required' });
+  logActivity(req, 'download', { file });
+  res.json({ ok: true });
+});
+
+// --- Data Changes page (every logged-in user) ---------------------------
+app.get('/changes', requirePermission('changes'), (req, res) => {
+  logActivity(req, 'view-changes', {}, { key: 'changes', ms: 30 * 60 * 1000 });
+  res.send(renderChangesPage({ username: req.session.username, access: accessOf(req) }));
+});
+
+app.get('/api/changes', requirePermission('changes'), (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+  try {
+    res.json({
+      date,
+      lastCheckAt: tracker.lastCheckAt,
+      checkEveryMinutes: CHANGE_CHECK_MS / 60000,
+      trackedDates: tracker.dates,
+      keepDays: CHANGE_KEEP_DAYS,
+      entries: readChanges(ACTIVITY_LOG_DIR, date),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Missing Meetings (1 Oct 2026, per Dinesh) ---------------------------
+// Thoroughbred meetings the Scratchings feed lists for today, tomorrow and
+// the day after that the dashboard doesn't show (see missing-meetings.js).
+// Only for users with the 'missing' section.
+
+// Ignore button (1 Oct 2026, per Dinesh: "Meetings edawadu thewa illa, or
+// edukka mudiyallanna Ignore panna"): keyed by the feed's MeetingID, which
+// is one meeting on one date. Entries for dates over a week old are dropped
+// on the next save.
+const MISSING_MEETING_IGNORE_PATH = process.env.MISSING_MEETING_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\missing-meeting-ignores.json';
+let missingMeetingIgnores = {};
+try {
+  if (fs.existsSync(MISSING_MEETING_IGNORE_PATH)) missingMeetingIgnores = JSON.parse(fs.readFileSync(MISSING_MEETING_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${MISSING_MEETING_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function saveMissingMeetingIgnores() {
+  const cutoff = new Date(Date.parse(`${todayStr()}T00:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
+  for (const [id, e] of Object.entries(missingMeetingIgnores)) if (!e.date || e.date < cutoff) delete missingMeetingIgnores[id];
+  const dir = path.dirname(MISSING_MEETING_IGNORE_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(MISSING_MEETING_IGNORE_PATH, JSON.stringify(missingMeetingIgnores, null, 2), 'utf8');
 }
 
+// Which countries are checked (1 Oct 2026, per Dinesh: "Additional country
+// add panna option wenu"): added/removed on the page, saved here. Until the
+// first change, the default list in missing-meetings.js is used.
+const MISSING_MEETING_COUNTRIES_PATH = process.env.MISSING_MEETING_COUNTRIES_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\missing-meeting-countries.json';
+const MISSING_DEFAULT_COUNTRY_NAMES = new Map(MISSING_DEFAULT_COUNTRIES);
+let missingMeetingCountries = MISSING_DEFAULT_COUNTRIES.map(([code]) => code);
+try {
+  if (fs.existsSync(MISSING_MEETING_COUNTRIES_PATH)) {
+    const saved = JSON.parse(fs.readFileSync(MISSING_MEETING_COUNTRIES_PATH, 'utf8'));
+    if (Array.isArray(saved.countries)) missingMeetingCountries = saved.countries.filter((c) => typeof c === 'string');
+  }
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${MISSING_MEETING_COUNTRIES_PATH}: ${err.message} -- using the default countries`);
+}
+function saveMissingMeetingCountries(username) {
+  const dir = path.dirname(MISSING_MEETING_COUNTRIES_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(MISSING_MEETING_COUNTRIES_PATH, JSON.stringify({
+    countries: missingMeetingCountries, updatedBy: username, updatedAt: new Date().toISOString(),
+  }, null, 2), 'utf8');
+}
+
+async function getMissingMeetings(fresh) {
+  const dates = trackedDates().slice(1); // today, tomorrow, day after
+  if (fresh) dates.forEach((d) => memoCache.delete(`feed-scratchings|${d}`));
+  const feeds = await Promise.allSettled(dates.map((d) => fetchScratchingsFeed(d)));
+  const countryCodes = new Set(missingMeetingCountries);
+  const errors = [];
+  const source = [];
+  const allFeedMeetings = [];
+  feeds.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      source.push(...pickSourceMeetings(r.value, countryCodes));
+      allFeedMeetings.push(...r.value);
+    } else {
+      errors.push({ date: dates[i], error: r.reason && r.reason.message ? r.reason.message : String(r.reason) });
+    }
+  });
+  const db = (await getClient()).db();
+  const [dbMeetings, raceCounts] = await Promise.all([
+    db.collection('meetings')
+      .find({ mDate: { $in: dates }, mDiscipline: 'T' })
+      .project({ _id: 1, tabMeetingId: 1, mDate: 1, mCountry: 1, mCourseDisplayName: 1, isHidden: 1, hiddenReason: 1 })
+      .toArray(),
+    db.collection('races').aggregate([
+      { $match: { rDate: { $in: dates }, rDiscipline: 'T', isHidden: { $ne: true } } },
+      { $group: { _id: '$meetingId', n: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+  const rows = compareMeetings(source, dbMeetings, new Map(raceCounts.map((r) => [r._id, r.n])));
+  for (const row of rows) {
+    const ignore = row.status === 'missing' && missingMeetingIgnores[String(row.sourceMeetingId)];
+    if (ignore) Object.assign(row, { status: 'ignored', ignoredBy: ignore.ignoredBy, ignoredAt: ignore.ignoredAt });
+  }
+  return {
+    dates,
+    checkedAt: new Date().toISOString(),
+    countries: missingMeetingCountries.map((code) => ({ code, name: MISSING_DEFAULT_COUNTRY_NAMES.get(code) || null })),
+    uncheckedCountries: uncheckedFeedCountries(allFeedMeetings, countryCodes),
+    errors,
+    total: rows.length,
+    missing: rows.filter((r) => r.status === 'missing').length,
+    ignored: rows.filter((r) => r.status === 'ignored').length,
+    meetings: rows,
+  };
+}
+
+app.get('/missing-meetings', requirePermission('missing'), (req, res) => {
+  logActivity(req, 'view-missing-meetings', {}, { key: 'missing', ms: 30 * 60 * 1000 });
+  res.send(renderMissingMeetingsPage({ username: req.session.username, access: accessOf(req) }));
+});
+
+// Admins only (1 Oct 2026, per Dinesh: "adminku mattu da country add
+// pandra option wenu").
+app.post('/api/missing-meetings/countries', requireAdmin, (req, res) => {
+  const { action } = req.body || {};
+  const code = String((req.body && req.body.code) || '').trim().toUpperCase();
+  if (!/^[A-Z]{2,4}$/.test(code)) return res.status(400).json({ error: 'Country code must be 2-4 letters, e.g. JPN' });
+  if (action === 'add') {
+    if (!missingMeetingCountries.includes(code)) missingMeetingCountries = [...missingMeetingCountries, code];
+  } else if (action === 'remove') {
+    missingMeetingCountries = missingMeetingCountries.filter((c) => c !== code);
+  } else {
+    return res.status(400).json({ error: 'action must be add or remove' });
+  }
+  try {
+    saveMissingMeetingCountries(req.session.username);
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  logActivity(req, 'missing-countries', { detail: `${action === 'add' ? 'Added' : 'Removed'} country ${code} (Missing Meetings)` });
+  res.json({ ok: true, countries: missingMeetingCountries });
+});
+
+app.post('/api/missing-meetings/:meetingId/ignore', requirePermission('missing'), (req, res) => {
+  const { meetingId } = req.params;
+  if (!/^\d{1,12}$/.test(meetingId)) return res.status(400).json({ error: 'Bad meeting id' });
+  const saved = missingMeetingIgnores[meetingId] || {};
+  const { ignored, date = saved.date, country = saved.country, course = saved.course } = req.body || {};
+  const label = `${String(course || meetingId).slice(0, 80)}${country ? ` (${String(country).slice(0, 5)})` : ''}${date ? ` ${String(date).slice(0, 10)}` : ''}`;
+  if (ignored) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return res.status(400).json({ error: 'date is required' });
+    missingMeetingIgnores[meetingId] = {
+      date, country: String(country || '').slice(0, 5), course: String(course || '').slice(0, 80),
+      ignoredAt: new Date().toISOString(), ignoredBy: req.session.username,
+    };
+  } else {
+    delete missingMeetingIgnores[meetingId];
+  }
+  try {
+    saveMissingMeetingIgnores();
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Missing meeting ${ignored ? 'ignored' : 'un-ignored'}: ${label}` });
+  res.json({ ok: true, ignored: Boolean(ignored), ignoredBy: req.session.username, ignoredAt: ignored ? missingMeetingIgnores[meetingId].ignoredAt : null });
+});
+
+app.get('/api/missing-meetings', requirePermission('missing'), async (req, res) => {
+  try {
+    res.json({ ...(await getMissingMeetings(req.query.fresh === '1')), canManageCountries: accessOf(req).admin });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Admin page (29 Sep 2026, per Dinesh) --------------------------------
+// Admins manage users and see everyone's activity; normal users never see
+// the page or its link.
+function requireAdmin(req, res, next) {
+  if (isAdmin(req)) return next();
+  if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'Admins only' });
+  return res.status(403).send(renderAdminDeniedPage());
+}
+
+// The admin page shows the last 8 days: the current and previous month's
+// files cover that, reading at most the end of each.
+const ADMIN_LOG_TAIL_BYTES = 6 * 1024 * 1024;
+const ADMIN_LOG_DAYS = 8;
+function readRecentActivity() {
+  const now = new Date();
+  const since = now.getTime() - ADMIN_LOG_DAYS * 24 * 60 * 60 * 1000;
+  const keys = new Set([monthKey(new Date(since)), monthKey(now)]);
+  const entries = [];
+  for (const key of keys) {
+    for (const e of readEntries(monthFilePath(ACTIVITY_LOG_DIR, key), ADMIN_LOG_TAIL_BYTES)) {
+      if (Date.parse(e.time) >= since) entries.push(e);
+    }
+  }
+  return entries.sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
+}
+
+function adminUserList() {
+  return authConfig.users.map((u) => ({
+    username: u.username, role: u.role, createdAt: u.createdAt || null,
+    permissions: u.role === 'admin' ? PERMISSIONS.slice() : cleanPermissions(u.permissions),
+  }));
+}
+
+// The Admin link opens User Activity; someone given only System Health or
+// Data Changes lands on that section instead.
+app.get('/admin', (req, res) => {
+  const access = accessOf(req);
+  if (!access.activity) {
+    if (access.health) return res.redirect('/system-health');
+    if (access.changes) return res.redirect('/changes');
+    if (access.missing) return res.redirect('/missing-meetings');
+    return res.status(403).send(renderAdminDeniedPage());
+  }
+  logActivity(req, 'view-admin', {}, { key: 'admin', ms: 30 * 60 * 1000 });
+  res.send(renderAdminPage({ username: req.session.username, access }));
+});
+
+app.get('/system-health', requirePermission('health'), (req, res) => {
+  res.send(renderSystemHealthPage({ username: req.session.username, access: accessOf(req) }));
+});
+
+app.get('/api/admin/health', requirePermission('health'), async (req, res) => {
+  try {
+    res.json(await getHealth(req.query.fresh === '1'));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/overview', requirePermission('activity'), (req, res) => {
+  try {
+    res.json({ me: findUser(req.session.username).username, canManage: isAdmin(req), users: adminUserList(), entries: readRecentActivity() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function validPassword(p) {
+  return typeof p === 'string' && p.length >= MIN_PASSWORD_LENGTH && p.length <= 200;
+}
+
+// Every change starts from the list as it is right now and is saved before
+// replying, so the admin page never shows a change that didn't stick.
+function changeUsers(req, res, action, detail, mutate) {
+  refreshAuthConfig();
+  const config = { sessionSecret: authConfig.sessionSecret, users: authConfig.users.map((u) => ({ ...u })) };
+  const problem = mutate(config);
+  if (problem) return res.status(400).json({ error: problem });
+  try {
+    saveUsers(config);
+  } catch (err) {
+    logSystem(`Could not save users to ${AUTH_USERS_PATH} (${err.code || 'error'}): ${err.message}`);
+    return res.status(500).json({ error: `The server could not save the change (${err.code || err.message}).` });
+  }
+  logActivity(req, action, { detail });
+  res.json({ ok: true, users: adminUserList() });
+}
+
+app.post('/api/admin/users', requireAdmin, (req, res) => {
+  const username = String((req.body && req.body.username) || '').trim();
+  const { password, role } = req.body || {};
+  const permissions = cleanPermissions(req.body && req.body.permissions);
+  const accessText = role === 'admin' ? 'admin' : (permissions.join(', ') || 'dashboard only');
+  changeUsers(req, res, 'admin-add-user', `${username} (${accessText})`, (config) => {
+    if (!USERNAME_RE.test(username)) return 'Username must be 2-40 characters: letters, numbers, dot, dash or underscore.';
+    if (findUserIndex(config, username) !== -1) return `"${username}" already exists.`;
+    if (!validPassword(password)) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    config.users.push({
+      username, passwordHash: bcrypt.hashSync(password, 10), role: role === 'admin' ? 'admin' : 'user', permissions, createdAt: new Date().toISOString(),
+    });
+    return null;
+  });
+});
+
+app.post('/api/admin/users/:username/permissions', requireAdmin, (req, res) => {
+  const permissions = cleanPermissions(req.body && req.body.permissions);
+  changeUsers(req, res, 'admin-change-access', `${req.params.username}: ${permissions.join(', ') || 'dashboard only'}`, (config) => {
+    const idx = findUserIndex(config, req.params.username);
+    if (idx === -1) return 'No such user.';
+    if (config.users[idx].role === 'admin') return 'Admins already have every section.';
+    config.users[idx].permissions = permissions;
+    return null;
+  });
+});
+
+app.post('/api/admin/users/:username/password', requireAdmin, (req, res) => {
+  const { password } = req.body || {};
+  changeUsers(req, res, 'admin-reset-password', req.params.username, (config) => {
+    const idx = findUserIndex(config, req.params.username);
+    if (idx === -1) return 'No such user.';
+    if (!validPassword(password)) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    const user = config.users[idx];
+    user.passwordHash = bcrypt.hashSync(password, 10);
+    user.sessionVersion = (user.sessionVersion || 0) + 1;
+    // An admin resetting their own password stays logged in here.
+    if (findUserIndex(config, req.session.username) === idx) req.session.sessionVersion = user.sessionVersion;
+    return null;
+  });
+});
+
+app.post('/api/admin/users/:username/role', requireAdmin, (req, res) => {
+  const role = req.body && req.body.role === 'admin' ? 'admin' : 'user';
+  changeUsers(req, res, 'admin-change-role', `${req.params.username} -> ${role}`, (config) => {
+    const idx = findUserIndex(config, req.params.username);
+    if (idx === -1) return 'No such user.';
+    if (findUserIndex(config, req.session.username) === idx) return 'You cannot change your own role.';
+    config.users[idx].role = role;
+    return null;
+  });
+});
+
+app.delete('/api/admin/users/:username', requireAdmin, (req, res) => {
+  changeUsers(req, res, 'admin-delete-user', req.params.username, (config) => {
+    const idx = findUserIndex(config, req.params.username);
+    if (idx === -1) return 'No such user.';
+    if (findUserIndex(config, req.session.username) === idx) return 'You cannot delete your own account.';
+    config.users.splice(idx, 1);
+    return null;
+  });
+});
+
 app.get('/login', (req, res) => {
-  if (req.session && req.session.loggedIn) return res.redirect('/');
+  if (req.session && req.session.loggedIn && findUser(req.session.username)) return res.redirect('/');
   let error = null;
   if (req.query.error === '1') error = 'Incorrect username or password.';
   else if (req.query.error === 'noconfig') error = 'Login is not set up on this server yet. Ask the admin to run "node setup-auth.js".';
   res.send(renderLoginPage({ error }));
 });
 
+// Compared against when the username doesn't exist, so a wrong username
+// takes as long as a wrong password and doesn't reveal which users exist.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10);
+
 app.post('/login', (req, res) => {
+  refreshAuthConfig();
   if (!authConfig) return res.redirect('/login?error=noconfig');
   const { username, password } = req.body || {};
-  const ok = typeof username === 'string' && typeof password === 'string'
-    && username === authConfig.username
-    && bcrypt.compareSync(password, authConfig.passwordHash);
-  if (!ok) return res.redirect('/login?error=1');
-  req.session.loggedIn = true;
-  req.session.username = username;
-  res.redirect('/');
+  const user = findUser(username);
+  const passwordOk = typeof password === 'string'
+    && bcrypt.compareSync(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH);
+  if (!user || !passwordOk) {
+    logActivity(req, 'login-failed', { attemptedUser: typeof username === 'string' ? username.slice(0, 100) : null });
+    return res.redirect('/login?error=1');
+  }
+  // New session id on login, so a session id handed out before login can't
+  // be reused to ride on this user's login.
+  const returnTo = typeof req.session.returnTo === 'string' && /^\/race\/[A-Za-z0-9/_-]+$/.test(req.session.returnTo) ? req.session.returnTo : '/';
+  req.session.regenerate((err) => {
+    if (err) return res.redirect('/login?error=1');
+    req.session.loggedIn = true;
+    req.session.username = user.username;
+    req.session.sessionVersion = user.sessionVersion || 0;
+    logActivity(req, 'login', {});
+    res.redirect(returnTo);
+  });
 });
 
 app.get('/logout', (req, res) => {
-  if (req.session) return req.session.destroy(() => res.redirect('/login'));
-  res.redirect('/login');
+  if (!req.session) return res.redirect('/login');
+  if (req.session.loggedIn) logActivity(req, 'logout', {});
+  req.session.destroy(() => res.redirect('/login'));
 });
 
-app.get('/', requireLogin, async (req, res) => {
-  const { dateStr, includeTrials, discipline } = parseRequestOptions(req);
+// Keeps today's dashboard data warm while anyone has used the dashboard in
+// the last 30 minutes, so a visitor never waits on a cold load.
+let lastDashboardUseAt = 0;
+function keepTodayWarm() {
+  if (Date.now() - lastDashboardUseAt > 30 * 60 * 1000) return;
+  fetchRaceDocs(todayStr(), false).catch((err) => console.warn(`[race-dashboard] WARNING: warm-up failed: ${err.message}`));
+}
+
+async function sendDashboard(req, res, { dateStr, includeTrials, discipline, initialRaceId }) {
+  lastDashboardUseAt = Date.now();
   try {
     const docs = await fetchRaceDocs(dateStr, includeTrials);
     const schedule = buildSchedule(docs, dateStr);
-    res.send(renderHtml(dateStr, schedule, { includeTrials, discipline, username: req.session.username }));
+    logActivity(req, 'view-dashboard', { detail: dateStr }, { key: dateStr, ms: 30 * 60 * 1000 });
+    res.send(renderHtml(dateStr, schedule, {
+      includeTrials, discipline, initialRaceId, username: req.session.username, access: accessOf(req),
+      lastScrapeSeenAt: tracker.lastScrapeSeenAt, lastChangeCheckAt: tracker.lastCheckAt, serverStartedAt: SERVER_STARTED_AT.toISOString(),
+    }));
   } catch (err) {
     res.status(500).send(`<h1>Error loading dashboard</h1><pre>${escapeHtml(err.message)}</pre>`);
   }
+}
+
+app.get('/', (req, res) => sendDashboard(req, res, parseRequestOptions(req)));
+
+// Readable race links: /race/thoroughbred/australia/kalgoorlie/2026-10-01/R1
+// (1 Oct 2026, per Dinesh). Matched against that date's races by race
+// number + discipline, then by the same slug rules raceView.js uses to
+// build the link, and shown as the full-screen race view.
+const DISCIPLINE_BY_SLUG = Object.fromEntries(Object.entries(DISCIPLINE_SLUGS).map(([code, slug]) => [slug, code]));
+app.get('/race/:discipline/:country/:meeting/:date/:raceNo', async (req, res) => {
+  const { country, meeting, date } = req.params;
+  const discipline = DISCIPLINE_BY_SLUG[String(req.params.discipline).toLowerCase()];
+  const raceNoMatch = /^r?(\d{1,2})$/i.exec(req.params.raceNo);
+  if (!discipline || !raceNoMatch || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(404).send(renderRaceNotFound(req.originalUrl));
+  try {
+    const candidates = await (await getClient()).db().collection('races')
+      .find({ rDate: date, rNo: Number(raceNoMatch[1]), rDiscipline: discipline, isHidden: { $ne: true } })
+      .project({ _id: 1, rCourseDisplayName: 1, rCountry: 1, isTrail: 1 })
+      .toArray();
+    const race = candidates.find((r) => slugify(r.rCourseDisplayName) === String(meeting).toLowerCase() && countrySlug(r.rCountry) === String(country).toLowerCase());
+    if (!race) return res.status(404).send(renderRaceNotFound(req.originalUrl));
+    return sendDashboard(req, res, { dateStr: date, includeTrials: Boolean(race.isTrail), discipline, initialRaceId: race._id });
+  } catch (err) {
+    return res.status(500).send(`<h1>Error loading race</h1><pre>${escapeHtml(err.message)}</pre>`);
+  }
 });
+
+function renderRaceNotFound(url) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Race not found</title>` +
+    `<link rel="stylesheet" href="/styles.css"></head><body><main class="adm-denied"><h1>Race not found</h1>` +
+    `<p>No race matches <code>${escapeHtml(url)}</code>. The meeting name, country, date or race number may be different.</p>` +
+    `<p><a class="logout-link" href="/">Back to the dashboard</a></p></main></body></html>`;
+}
 
 app.get('/api/race/:id', async (req, res) => {
   try {
     const doc = await fetchRaceById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Race not found' });
+    logActivity(req, 'view-race', { detail: `${doc.rCourseDisplayName || doc.rCourse} R${doc.rNo} (${doc.rCountry}) ${doc.rDate}` }, { key: req.params.id, ms: 10 * 60 * 1000 });
     res.json(buildRaceDetail(doc));
+    prefetchMeetingRaces(doc);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// After one race is opened, the other races at the same meeting are loaded
+// in the background, so moving R1 -> R2 -> R3 in the popup doesn't wait.
+// Uses the day's race list already in memory; does nothing if it isn't.
+function prefetchMeetingRaces(doc) {
+  for (const trials of [false, true]) {
+    const entry = memoCache.get(`docs|${doc.rDate}|${trials}`);
+    if (!entry || entry.at === undefined) continue;
+    entry.value
+      .filter((d) => d.meetingId === doc.meetingId && d._id !== doc._id)
+      .forEach((d) => { fetchRaceById(d._id).catch(() => {}); });
+    return;
+  }
+}
 
 // Global search across Meetings/Races/Runners/Jockeys/Trainers, scoped to
 // one date -- see fetchSearchResults above for the matching rules.
@@ -1321,6 +2300,17 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+// "Upcoming Races" ticker data -- see fetchUpcomingRaces above.
+app.get('/api/upcoming', async (req, res) => {
+  try {
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+    const races = await fetchUpcomingRaces(dateStr);
+    res.json({ races });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Raw source documents for a race -- "Race Card" (the `racecards` documents,
 // one per Style/Client variant) and "Data Dump" (the `datadumps` collection,
 // a separate, richer per-runner feed with narrative last-run comments) --
@@ -1328,7 +2318,7 @@ app.get('/api/search', async (req, res) => {
 // upstream, unprocessed, for the race a popup is open on. Requires login,
 // unlike the read-only /api/race/:id above, since this exposes the full raw
 // documents (not just the fields the dashboard already surfaces).
-app.get('/api/race/:id/raw/:kind', requireLogin, async (req, res) => {
+app.get('/api/race/:id/raw/:kind', async (req, res) => {
   const { id, kind } = req.params;
   const collectionByKind = { racecards: 'racecards', datadump: 'datadumps' };
   const collectionName = collectionByKind[kind];
@@ -1349,9 +2339,10 @@ app.get('/api/race/:id/raw/:kind', requireLogin, async (req, res) => {
 // open reads above) since it's a write, not a read. Keyed by runnerId, not
 // per-race, since a horse's "no form yet" status doesn't depend on which
 // race it's currently entered in.
-app.post('/api/runner/:runnerId/form-ignore', requireLogin, (req, res) => {
+app.post('/api/runner/:runnerId/form-ignore', (req, res) => {
   const { runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `No form lines: ${horseName || runnerId}` });
   if (ignored) {
     formLineIgnores[runnerId] = {
       horseName: horseName || null,
@@ -1366,7 +2357,6 @@ app.post('/api/runner/:runnerId/form-ignore', requireLogin, (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }
-  raceDocsCache.clear(); // so the grid reflects this without waiting out the cache TTL
   res.json({ ok: true, ignored: Boolean(ignored) });
 });
 
@@ -1374,9 +2364,10 @@ app.post('/api/runner/:runnerId/form-ignore', requireLogin, (req, res) => {
 // above, added 7 Sep 2026 per Dinesh: "Age checked no issue anda madhiri
 // check mark poda podunga". Keyed by runnerId (a horse's age doesn't
 // depend on which race it's entered in).
-app.post('/api/runner/:runnerId/age-ignore', requireLogin, (req, res) => {
+app.post('/api/runner/:runnerId/age-ignore', (req, res) => {
   const { runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Age checked: ${horseName || runnerId}` });
   if (ignored) {
     ageIgnores[runnerId] = {
       horseName: horseName || null,
@@ -1391,7 +2382,6 @@ app.post('/api/runner/:runnerId/age-ignore', requireLogin, (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }
-  raceDocsCache.clear();
   res.json({ ok: true, ignored: Boolean(ignored) });
 });
 
@@ -1400,10 +2390,11 @@ app.post('/api/runner/:runnerId/age-ignore', requireLogin, (req, res) => {
 // podunga adau click panna checked podunga". Keyed by raceId + jockey name
 // (not runnerId -- see dupJockeyIgnoreKey/applyDupJockeyIgnores), so one
 // confirm clears every runner sharing that jockey in that race.
-app.post('/api/race/:raceId/jockey-ignore', requireLogin, (req, res) => {
+app.post('/api/race/:raceId/jockey-ignore', (req, res) => {
   const { raceId } = req.params;
   const { ignored, jockey } = req.body || {};
   if (!jockey) return res.status(400).json({ error: 'Missing "jockey" in request body' });
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Duplicate jockey checked: ${jockey}` });
   const key = dupJockeyIgnoreKey(raceId, jockey);
   if (ignored) {
     dupJockeyIgnores[key] = {
@@ -1419,7 +2410,6 @@ app.post('/api/race/:raceId/jockey-ignore', requireLogin, (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }
-  raceDocsCache.clear();
   res.json({ ok: true, ignored: Boolean(ignored) });
 });
 
@@ -1429,9 +2419,10 @@ app.post('/api/race/:raceId/jockey-ignore', requireLogin, (req, res) => {
 // aaganu". Keyed by raceId + runnerId (see missingJockeyIgnoreKey/
 // applyMissingJockeyIgnores) -- unlike duplicate jockey, this is per
 // RUNNER since it's not a shared-name group.
-app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', requireLogin, (req, res) => {
+app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', (req, res) => {
   const { raceId, runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Missing jockey checked: ${horseName || runnerId}` });
   const key = missingJockeyIgnoreKey(raceId, runnerId);
   if (ignored) {
     missingJockeyIgnores[key] = {
@@ -1447,13 +2438,11 @@ app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', requireLogi
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }
-  raceDocsCache.clear();
   res.json({ ok: true, ignored: Boolean(ignored) });
 });
 
 // Best-effort video lookup for a horse's PAST races (shown in the pedigree/
-// form-history popup). A read, like /api/race/:id above, so left open (same
-// "guards only /" choice noted on requireLogin). Unlike attachVideoStatus,
+// form-history popup). Unlike attachVideoStatus,
 // these races come from racecards.Runners[].FormLines, which mostly lacks
 // a real race number (~87% of entries, confirmed against prod data 4 Sep
 // 2026) and has no country code at all -- the client sends the horse's own
@@ -1789,14 +2778,15 @@ function parseMeetingsListViewOptions(req) {
   return { fromDate, toDate, includeTrials, discipline, country, tab };
 }
 
-app.get('/meetings-list-view', requireLogin, async (req, res) => {
+app.get('/meetings-list-view', async (req, res) => {
   const { fromDate, toDate, includeTrials, discipline, country, tab } = parseMeetingsListViewOptions(req);
   try {
     const docs = await fetchRaceDocsForDateRange(fromDate, toDate, includeTrials);
     const rows = buildMeetingsListRowsForRange(groupDocsByDate(docs), discipline, country, tab);
     const countries = [...new Set(docs.map((d) => d.rCountry).filter(Boolean))].sort();
+    logActivity(req, 'view-meetings-list', { detail: `${fromDate} to ${toDate}` }, { key: `${fromDate}|${toDate}`, ms: 30 * 60 * 1000 });
     res.send(renderMeetingsListPage(rows, {
-      fromDate, toDate, discipline, country, tab, includeTrials, countries, username: req.session.username,
+      fromDate, toDate, discipline, country, tab, includeTrials, countries, username: req.session.username, access: accessOf(req),
     }));
   } catch (err) {
     res.status(500).send(`<h1>Error loading meetings list</h1><pre>${escapeHtml(err.message)}</pre>`);
@@ -1873,5 +2863,13 @@ app.listen(PORT, () => {
   console.log(`[race-dashboard] Listening on http://localhost:${PORT}`);
   console.log(`[race-dashboard] View dashboard: http://localhost:${PORT}/`);
   console.log(`[race-dashboard] Config file: ${DB_CONFIG_PATH}`);
-  console.log(`[race-dashboard] Login config: ${AUTH_CONFIG_PATH}${authConfig ? ` (username: ${authConfig.username})` : ' (NOT SET UP -- run "node setup-auth.js")'}`);
+  console.log(`[race-dashboard] Login config: ${activeAuthPath(AUTH_CONFIG_PATH)}${authConfig ? ` (${authConfig.users.length} user${authConfig.users.length === 1 ? '' : 's'}: ${authConfig.users.map((u) => u.username).join(', ')})` : ' (NOT SET UP -- run "node setup-auth.js")'}`);
+  console.log(`[race-dashboard] Activity logs: ${ACTIVITY_LOG_DIR} (activity-log-YYYY-MM.jsonl, older than ${KEEP_PREVIOUS_MONTHS} months deleted)`);
+  maintainLogs(new Date());
+  console.log(`[race-dashboard] Data changes: checked every ${CHANGE_CHECK_MS / 60000} min, kept ${CHANGE_KEEP_DAYS} days`);
+  setTimeout(checkDataChanges, 5000);
+  setInterval(checkDataChanges, CHANGE_CHECK_MS);
+  lastDashboardUseAt = Date.now();
+  keepTodayWarm();
+  setInterval(keepTodayWarm, 60 * 1000);
 });

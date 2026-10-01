@@ -10,7 +10,18 @@ db.json
 # AUTH_CONFIG_PATH in server.js) -- this is a defence-in-depth backstop in
 # case that path is ever pointed inside the project.
 auth.json
+admin-bootstrap.json
+admin-bootstrap.json.failed
+activity-log.jsonl
+activity-log-*.jsonl
+data-changes-*.jsonl
+data-changes-snapshot.json
+auth-users.json
 
 # Logs
 *.log
 npm-debug.log*
+
+# Ignore / settings data the server writes (live data, not code)
+*-ignores.json
+missing-meeting-countries.json

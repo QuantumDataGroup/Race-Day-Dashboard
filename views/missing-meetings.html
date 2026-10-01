@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Missing Meetings</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Admin</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main">
+    {{ADMIN_TABS_HTML}}
+    <div class="adm-page-head">
+      <div>
+        <h1>Missing Meetings</h1>
+      </div>
+      <div class="chg-last-check"><span class="chg-dot" id="checkDot"></span>Last check: <b id="lastCheck">-</b></div>
+    </div>
+
+    <p class="adm-error" id="loadError" hidden></p>
+    <p class="adm-error" id="sourceErrors" hidden></p>
+
+    <section class="adm-tiles mm-tiles" aria-label="Summary">
+      <div class="adm-tile"><small>In the feed</small><b id="tSource">-</b><span>thoroughbred meetings</span></div>
+      <div class="adm-tile chg-good"><small>On the dashboard</small><b id="tOk">-</b><span>OK</span></div>
+      <div class="adm-tile adm-warn"><small>Missing</small><b id="tMissing">-</b><span id="tMissingSub">not on the dashboard</span></div>
+      <div class="adm-tile"><small>Countries</small><b id="tCountries">-</b><span>checked</span></div>
+    </section>
+
+    <div class="adm-filters chg-filters" role="group" aria-label="Filters">
+      <label for="fDate">Date</label>
+      <select id="fDate"><option value="">Today to 2 days ahead</option></select>
+      <label for="fCountry">Country</label>
+      <select id="fCountry"><option value="">All</option></select>
+      <label class="chg-check"><input type="checkbox" id="fMissing"> Only missing</label>
+      <button type="button" class="adm-btn" id="refreshBtn"><i class="fa-solid fa-rotate"></i> Check now</button>
+      <button type="button" class="adm-btn" id="countriesBtn" aria-expanded="false" aria-controls="countryPanel" hidden><i class="fa-solid fa-globe"></i> Countries</button>
+    </div>
+
+    <!-- Admins only: which countries are checked. -->
+    <section class="adm-card mm-countries" id="countryPanel" aria-label="Countries checked" hidden>
+      <div class="mm-countries-head"><b>Countries checked</b></div>
+      <div class="mm-chips" id="countryChips"></div>
+      <form class="mm-add" id="countryAddForm">
+        <input type="text" id="countryInput" maxlength="4" placeholder="Country code, e.g. JPN" autocomplete="off" aria-label="Country code">
+        <button type="submit" class="adm-btn primary"><i class="fa-solid fa-plus"></i> Add country</button>
+      </form>
+      <div class="mm-suggest" id="countrySuggest" hidden></div>
+      <p class="adm-error" id="countryError" hidden></p>
+    </section>
+
+    <section class="adm-card">
+      <div class="adm-table-wrap">
+        <table class="adm-table">
+          <thead><tr><th>Date</th><th>Meeting</th><th>Status</th><th>Feed meeting ID</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="4" class="adm-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    var data = { meetings: [], countries: [], errors: [], dates: [] };
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function hhmm(iso) { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    function dayLabel(d) {
+      var p = d.split('-').map(Number);
+      return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
+    }
+    function uniq(list) { return Array.from(new Set(list)).sort(); }
+    function fillSelect(id, values, allLabel, labelOf) {
+      var sel = document.getElementById(id);
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">' + allLabel + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(labelOf ? labelOf(v) : v) + '</option>'; }).join('');
+      sel.value = values.indexOf(keep) !== -1 ? keep : '';
+    }
+
+    function render() {
+      fillSelect('fDate', data.dates, 'Today to 2 days ahead', dayLabel);
+      fillSelect('fCountry', uniq(data.meetings.map(function (m) { return m.country; })), 'All');
+      var date = document.getElementById('fDate').value;
+      var country = document.getElementById('fCountry').value;
+      var onlyMissing = document.getElementById('fMissing').checked;
+      var inScope = data.meetings.filter(function (m) { return (!date || m.date === date) && (!country || m.country === country); });
+      var shown = inScope.filter(function (m) { return !onlyMissing || m.status === 'missing'; });
+      document.getElementById('tSource').textContent = inScope.length;
+      document.getElementById('tOk').textContent = inScope.filter(function (m) { return m.status === 'ok'; }).length;
+      document.getElementById('tMissing').textContent = inScope.filter(function (m) { return m.status === 'missing'; }).length;
+      var ignoredCount = inScope.filter(function (m) { return m.status === 'ignored'; }).length;
+      document.getElementById('tMissingSub').textContent = 'not on the dashboard' + (ignoredCount ? ' · ' + ignoredCount + ' ignored' : '');
+
+      document.getElementById('rows').innerHTML = shown.length ? shown.map(function (m) {
+        var missing = m.status === 'missing';
+        // Found: the dashboard's meeting name + OK. Not found: Missing, with
+        // an Ignore button for a meeting nobody needs or can't be added.
+        var status;
+        if (m.status === 'ok') {
+          status = '<span class="mm-found"><b>' + esc(m.dashboardMeeting) + '</b><span class="chg-tag fixed">OK</span></span>';
+        } else if (m.status === 'ignored') {
+          status = '<span class="mm-found"><span class="chg-tag ignored">Ignored</span>' +
+            '<button type="button" class="adm-btn mm-act" data-act="undo" data-id="' + esc(m.sourceMeetingId) + '">Undo</button></span>' +
+            '<small class="mm-note">by ' + esc(m.ignoredBy || '?') + (m.ignoredAt ? ', ' + esc(dayLabel(m.ignoredAt.slice(0, 10))) + ' ' + esc(hhmm(m.ignoredAt)) : '') + '</small>';
+        } else {
+          status = '<span class="mm-found"><span class="chg-tag missing">Missing</span>' +
+            '<button type="button" class="adm-btn mm-act" data-act="ignore" data-id="' + esc(m.sourceMeetingId) + '"><i class="fa-solid fa-eye-slash"></i> Ignore</button></span>' +
+            (m.note ? '<small class="mm-note">' + esc(m.note) + '</small>' : '');
+        }
+        return '<tr' + (missing ? ' class="mm-row-missing"' : '') + '>' +
+          '<td class="mm-nowrap">' + esc(dayLabel(m.date)) + '</td>' +
+          '<td class="chg-where"><b>' + esc(m.course) + '</b><small>' + esc(m.country) + (m.races ? ' &middot; ' + m.races + ' races' : '') + '</small></td>' +
+          '<td>' + status + '</td>' +
+          '<td class="mm-mono">' + esc(m.sourceMeetingId) + '</td></tr>';
+      }).join('') : '<tr><td colspan="4" class="adm-empty">' + (data.meetings.length ? 'Nothing for these filters.' : 'No thoroughbred meetings in the feed for these countries.') + '</td></tr>';
+    }
+
+    function load(fresh) {
+      var btn = document.getElementById('refreshBtn');
+      btn.disabled = true;
+      return fetch('/api/missing-meetings' + (fresh ? '?fresh=1' : '')).then(function (res) {
+        return res.json().then(function (json) {
+          if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+          return json;
+        });
+      }).then(function (json) {
+        data = json;
+        document.getElementById('lastCheck').textContent = hhmm(json.checkedAt);
+        document.getElementById('checkDot').className = 'chg-dot' + (json.missing ? ' mm-dot-warn' : '');
+        document.getElementById('tCountries').textContent = json.countries.length;
+        renderCountries();
+        var errEl = document.getElementById('sourceErrors');
+        errEl.hidden = !json.errors.length;
+        errEl.textContent = json.errors.length
+          ? 'The Scratchings feed did not answer for ' + json.errors.map(function (e) { return dayLabel(e.date) + ' (' + e.error + ')'; }).join(', ') + '. Try "Check now" again in a minute.'
+          : '';
+        document.getElementById('loadError').hidden = true;
+        render();
+      }).catch(function (err) {
+        var el = document.getElementById('loadError');
+        el.textContent = 'Could not load missing meetings: ' + err.message;
+        el.hidden = false;
+      }).then(function () { btn.disabled = false; });
+    }
+
+    // Ignore / Undo: saved on the server (shared by every user), then the
+    // row is updated in place.
+    function setIgnored(id, ignored, btn) {
+      var m = data.meetings.filter(function (x) { return String(x.sourceMeetingId) === String(id); })[0];
+      if (!m) return;
+      btn.disabled = true;
+      fetch('/api/missing-meetings/' + encodeURIComponent(id) + '/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: ignored, date: m.date, country: m.country, course: m.course }),
+      }).then(function (res) {
+        return res.json().then(function (json) {
+          if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+          return json;
+        });
+      }).then(function (json) {
+        m.status = ignored ? 'ignored' : 'missing';
+        m.ignoredBy = json.ignoredBy;
+        m.ignoredAt = json.ignoredAt;
+        data.missing = data.meetings.filter(function (x) { return x.status === 'missing'; }).length;
+        document.getElementById('checkDot').className = 'chg-dot' + (data.missing ? ' mm-dot-warn' : '');
+        render();
+      }).catch(function (err) {
+        btn.disabled = false;
+        var el = document.getElementById('loadError');
+        el.textContent = 'Could not save: ' + err.message;
+        el.hidden = false;
+      });
+    }
+    // Country list (admins only; the server refuses anyone else).
+    function renderCountries() {
+      var btn = document.getElementById('countriesBtn');
+      btn.hidden = !data.canManageCountries;
+      if (!data.canManageCountries) { document.getElementById('countryPanel').hidden = true; return; }
+      document.getElementById('countryChips').innerHTML = data.countries.length ? data.countries.map(function (c) {
+        return '<span class="mm-chip" title="' + esc(c.name || c.code) + '">' + esc(c.code) +
+          '<button type="button" class="mm-chip-x" data-remove="' + esc(c.code) + '" aria-label="Remove ' + esc(c.code) + '">&times;</button></span>';
+      }).join('') : '<span class="adm-foot">No countries yet. Add one below.</span>';
+      var unchecked = data.uncheckedCountries || [];
+      var sug = document.getElementById('countrySuggest');
+      sug.hidden = !unchecked.length;
+      sug.innerHTML = unchecked.length
+        ? '<span class="adm-foot">In the feed, not checked yet:</span> ' + unchecked.map(function (c) {
+            return '<button type="button" class="mm-chip mm-chip-add" data-add="' + esc(c.code) + '" title="Add ' + esc(c.code) + '"><i class="fa-solid fa-plus"></i> ' + esc(c.code) + ' <small>' + c.meetings + '</small></button>';
+          }).join('')
+        : '';
+    }
+    function changeCountry(action, code) {
+      var err = document.getElementById('countryError');
+      err.hidden = true;
+      if (action === 'remove' && !confirm('Stop checking ' + code + ' for missing meetings?')) return Promise.resolve();
+      return fetch('/api/missing-meetings/countries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, code: code }),
+      }).then(function (res) {
+        return res.json().then(function (json) {
+          if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+          return json;
+        });
+      }).then(function () { return load(false); }).catch(function (e) {
+        err.textContent = 'Could not save: ' + e.message;
+        err.hidden = false;
+      });
+    }
+    document.getElementById('countriesBtn').addEventListener('click', function () {
+      var panel = document.getElementById('countryPanel');
+      panel.hidden = !panel.hidden;
+      this.setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) document.getElementById('countryInput').focus();
+    });
+    document.getElementById('countryPanel').addEventListener('click', function (e) {
+      var rm = e.target.closest('[data-remove]');
+      var add = e.target.closest('[data-add]');
+      if (rm) changeCountry('remove', rm.getAttribute('data-remove'));
+      else if (add) changeCountry('add', add.getAttribute('data-add'));
+    });
+    document.getElementById('countryAddForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var input = document.getElementById('countryInput');
+      var code = input.value.trim().toUpperCase();
+      if (!code) return;
+      changeCountry('add', code).then(function () { if (document.getElementById('countryError').hidden) input.value = ''; });
+    });
+
+    document.getElementById('rows').addEventListener('click', function (e) {
+      var btn = e.target.closest('.mm-act');
+      if (btn) setIgnored(btn.getAttribute('data-id'), btn.getAttribute('data-act') === 'ignore', btn);
+    });
+
+    ['fDate', 'fCountry', 'fMissing'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+    document.getElementById('refreshBtn').addEventListener('click', function () { load(true); });
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load(false);
+      setInterval(function () { load(false); }, 5 * 60 * 1000);
+    })();
+  </script>
+</body>
+</html>

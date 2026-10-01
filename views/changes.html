@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Data Changes</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Admin</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main">
+    {{ADMIN_TABS_HTML}}
+    <div class="adm-page-head">
+      <div>
+        <h1>Data Changes</h1>
+        <p>Every <span id="everyMin">2</span> minutes the dashboard compares meetings and races with its previous check and records what was added, removed or changed, and when it saw it. Covers yesterday to 2 days ahead; kept for <span id="keepDays">30</span> days.</p>
+      </div>
+      <div class="chg-last-check"><span class="chg-dot"></span>Last check: <b id="lastCheck">-</b></div>
+    </div>
+
+    <p class="adm-error" id="loadError" hidden></p>
+
+    <section class="adm-tiles chg-tiles" aria-label="Summary">
+      <div class="adm-tile"><small>Changes</small><b id="tAll">-</b><span>matching the filters</span></div>
+      <div class="adm-tile chg-good"><small>Fixed</small><b id="tFixed">-</b><span>missing value now filled</span></div>
+      <div class="adm-tile adm-warn"><small>Now missing</small><b id="tMissing">-</b><span>value was removed</span></div>
+      <div class="adm-tile"><small>Scratchings</small><b id="tScr">-</b><span>runners scratched</span></div>
+      <div class="adm-tile"><small>Added</small><b id="tAdded">-</b><span>meetings / races / runners</span></div>
+    </section>
+
+    <div class="adm-filters chg-filters" role="group" aria-label="Filters">
+      <label for="fDate">Race date</label><input type="date" id="fDate">
+      <label for="fCountry">Country</label>
+      <select id="fCountry"><option value="">All</option></select>
+      <label for="fMeeting">Meeting</label>
+      <select id="fMeeting"><option value="">All meetings</option></select>
+      <label for="fField">What changed</label>
+      <select id="fField"><option value="">Everything</option></select>
+      <input type="search" id="fText" placeholder="Search horse, jockey..." aria-label="Search changes">
+      <label class="chg-check"><input type="checkbox" id="fFixed"> Only fixes</label>
+      <button type="button" class="adm-btn" id="refreshBtn"><i class="fa-solid fa-rotate"></i> Refresh</button>
+    </div>
+
+    <div id="batches" class="chg-batches"></div>
+    <p class="adm-foot">"Fixed" = it was blank before and has a value now (e.g. a missing jockey filled in). "Now missing" = it had a value and is blank now. Odds changes are not recorded.</p>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    var DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+    var KIND_LABEL = { fixed: 'Fixed', missing: 'Now missing', changed: 'Changed', added: 'Added', removed: 'Removed', scratched: 'Scratched', abandoned: 'Abandoned' };
+    var ADD_REMOVE = 'Added / removed';
+    var data = { entries: [], trackedDates: [] };
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function hhmm(iso) { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    function isAddRemove(field) { return / (added|removed)$/.test(field); }
+    function val(v) { return v === '' ? '<span class="chg-blank">blank</span>' : esc(v); }
+
+    function fillSelect(id, values, allLabel) {
+      var sel = document.getElementById(id);
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">' + allLabel + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
+      sel.value = values.indexOf(keep) !== -1 ? keep : '';
+    }
+    function uniq(list) { return Array.from(new Set(list)).sort(); }
+
+    function render() {
+      var e = data.entries;
+      fillSelect('fCountry', uniq(e.map(function (c) { return c.country; })), 'All');
+      fillSelect('fMeeting', uniq(e.map(function (c) { return c.meeting; })), 'All meetings');
+      var fields = uniq(e.filter(function (c) { return !isAddRemove(c.field); }).map(function (c) { return c.field; }));
+      if (e.some(function (c) { return isAddRemove(c.field); })) fields.push(ADD_REMOVE);
+      fillSelect('fField', fields, 'Everything');
+
+      var country = document.getElementById('fCountry').value;
+      var meeting = document.getElementById('fMeeting').value;
+      var field = document.getElementById('fField').value;
+      var text = document.getElementById('fText').value.toLowerCase();
+      var onlyFixed = document.getElementById('fFixed').checked;
+      var rows = e.filter(function (c) {
+        return (!country || c.country === country) && (!meeting || c.meeting === meeting) &&
+          (!field || c.field === field || (field === ADD_REMOVE && isAddRemove(c.field))) &&
+          (!onlyFixed || c.kind === 'fixed') &&
+          (!text || (c.runner + ' ' + c.old + ' ' + c.new + ' ' + c.meeting + ' ' + c.field).toLowerCase().indexOf(text) !== -1);
+      });
+      function n(k) { return rows.filter(function (c) { return c.kind === k; }).length; }
+      document.getElementById('tAll').textContent = rows.length;
+      document.getElementById('tFixed').textContent = n('fixed');
+      document.getElementById('tMissing').textContent = n('missing');
+      document.getElementById('tScr').textContent = n('scratched');
+      document.getElementById('tAdded').textContent = n('added');
+
+      var groups = [];
+      rows.forEach(function (c) {
+        var g = groups[groups.length - 1];
+        if (!g || g.time !== c.time) { g = { time: c.time, items: [] }; groups.push(g); }
+        g.items.push(c);
+      });
+      var date = document.getElementById('fDate').value;
+      var emptyText = data.trackedDates.indexOf(date) === -1 && !e.length
+        ? 'No changes recorded for this date. Changes are recorded for yesterday to 2 days ahead, and kept for 30 days.'
+        : 'No changes for these filters yet.';
+      document.getElementById('batches').innerHTML = groups.length ? groups.map(function (g) {
+        var meetings = uniq(g.items.map(function (c) { return c.meeting; }));
+        return '<section class="adm-card" aria-label="Changes seen at ' + hhmm(g.time) + '">' +
+          '<div class="chg-batch-head"><span class="chg-batch-time">' + hhmm(g.time) + '</span><span class="chg-batch-sum"><b>' + g.items.length + ' change' + (g.items.length === 1 ? '' : 's') + '</b> in ' + esc(meetings.join(', ')) + '</span></div>' +
+          '<div class="adm-table-wrap"><table class="adm-table"><thead><tr><th>Where</th><th>Runner</th><th>What changed</th><th>Before &rarr; after</th><th></th></tr></thead><tbody>' +
+          g.items.map(function (c) {
+            return '<tr><td class="chg-where"><b>' + esc(c.meeting) + (c.raceNo ? ' R' + esc(c.raceNo) : '') + '</b><small>' + esc(c.country) + ' &middot; ' + esc(DISC[c.discipline] || c.discipline) + '</small></td>' +
+              '<td>' + (c.runner ? esc(c.runner) : '<span class="adm-foot">-</span>') + '</td>' +
+              '<td class="chg-field">' + esc(c.field) + '</td>' +
+              '<td><span class="chg-old">' + val(c.old) + '</span><span class="chg-arrow">&rarr;</span><span class="chg-new">' + val(c.new) + '</span></td>' +
+              '<td><span class="chg-tag ' + esc(c.kind) + '">' + esc(KIND_LABEL[c.kind] || c.kind) + '</span></td></tr>';
+          }).join('') + '</tbody></table></div></section>';
+      }).join('') : '<div class="adm-card adm-empty">' + emptyText + '</div>';
+    }
+
+    function load(date) {
+      var url = '/api/changes' + (date ? '?date=' + encodeURIComponent(date) : '');
+      return fetch(url).then(function (res) {
+        return res.json().then(function (json) {
+          if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+          return json;
+        });
+      }).then(function (json) {
+        data = json;
+        document.getElementById('fDate').value = json.date;
+        document.getElementById('lastCheck').textContent = json.lastCheckAt ? hhmm(json.lastCheckAt) : 'not yet';
+        document.getElementById('everyMin').textContent = json.checkEveryMinutes;
+        document.getElementById('keepDays').textContent = json.keepDays;
+        document.getElementById('loadError').hidden = true;
+        render();
+      }).catch(function (err) {
+        var el = document.getElementById('loadError');
+        el.textContent = 'Could not load changes: ' + err.message;
+        el.hidden = false;
+      });
+    }
+
+    ['fCountry', 'fMeeting', 'fField', 'fFixed'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+    document.getElementById('fText').addEventListener('input', render);
+    document.getElementById('fDate').addEventListener('change', function (e) { load(e.target.value); });
+    document.getElementById('refreshBtn').addEventListener('click', function () { load(document.getElementById('fDate').value); });
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load();
+      setInterval(function () { load(document.getElementById('fDate').value); }, 2 * 60 * 1000);
+    })();
+  </script>
+</body>
+</html>

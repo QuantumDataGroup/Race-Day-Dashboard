@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - System Health</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Admin</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main">
+    {{ADMIN_TABS_HTML}}
+    <div class="adm-page-head">
+      <div>
+        <h1>System Health</h1>
+        <p>Everything the dashboard depends on, checked live. Refreshes every 60 seconds.</p>
+      </div>
+      <button type="button" class="adm-btn" id="checkNow"><i class="fa-solid fa-rotate"></i> Check now</button>
+    </div>
+
+    <div class="sh-banner sh-loading" id="banner" role="status"><span class="sh-dot"></span><div><b id="bannerTitle">Checking...</b><br><span id="bannerText">Running the checks, this can take up to 25 seconds.</span></div></div>
+    <p class="adm-error" id="loadError" hidden></p>
+
+    <div class="sh-grid" id="grid"></div>
+
+    <div class="sh-foot">
+      <span>Page updated <b id="pageUpdated">-</b></span>
+      <span>Checks run at <b id="checkedAt">-</b></span>
+      <span>Next check in <b id="nextIn">60</b> s</span>
+    </div>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    var LABEL = { ok: 'OK', warn: 'Warning', bad: 'Down' };
+    var REFRESH_S = 60;
+    var left = REFRESH_S;
+    var busy = false;
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    // Server text carries ISO times; show them in this computer's time.
+    function localTimes(s) {
+      return esc(s).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, function (iso) {
+        var d = new Date(iso);
+        return d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      });
+    }
+    function clock(d) { return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+
+    function render(h) {
+      var banner = document.getElementById('banner');
+      banner.className = 'sh-banner sh-' + h.overall;
+      document.getElementById('bannerTitle').textContent = h.summary;
+      document.getElementById('bannerText').textContent = h.problems.length ? 'Needs a look: ' + h.problems.join(', ') + '.' : 'Every check passed.';
+      document.getElementById('grid').innerHTML = h.checks.map(function (c) {
+        return '<article class="sh-check sh-' + c.status + '"><div class="sh-check-top"><h2>' + esc(c.name) + '</h2>' +
+          '<span class="sh-pill sh-' + c.status + '"><i></i>' + LABEL[c.status] + '</span></div>' +
+          '<div class="sh-main">' + localTimes(c.main) + '</div><div class="sh-sub">' + localTimes(c.sub) + '</div></article>';
+      }).join('');
+      document.getElementById('checkedAt').textContent = clock(new Date(h.checkedAt));
+    }
+
+    function load(fresh) {
+      if (busy) return;
+      busy = true;
+      document.getElementById('checkNow').disabled = true;
+      fetch('/api/admin/health' + (fresh ? '?fresh=1' : ''))
+        .then(function (res) {
+          return res.json().then(function (json) {
+            if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')'));
+            return json;
+          });
+        })
+        .then(function (h) {
+          document.getElementById('loadError').hidden = true;
+          render(h);
+        })
+        .catch(function (err) {
+          var el = document.getElementById('loadError');
+          el.textContent = 'Could not run the health checks: ' + err.message;
+          el.hidden = false;
+        })
+        .then(function () {
+          busy = false;
+          left = REFRESH_S;
+          document.getElementById('checkNow').disabled = false;
+          document.getElementById('pageUpdated').textContent = clock(new Date());
+        });
+    }
+
+    document.getElementById('checkNow').addEventListener('click', function () { load(true); });
+    setInterval(function () {
+      if (busy) return;
+      left -= 1;
+      if (left <= 0) load(false);
+      document.getElementById('nextIn').textContent = Math.max(left, 0);
+    }, 1000);
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load(false);
+    })();
+  </script>
+</body>
+</html>
