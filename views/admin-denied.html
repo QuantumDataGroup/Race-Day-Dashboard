@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Admins only</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+</head>
+<body>
+  <main class="adm-denied">
+    <h1>Admins only</h1>
+    <p>This page is only for admin accounts.</p>
+    <p><a class="logout-link" href="/">Back to the dashboard</a></p>
+  </main>
+  <script>
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('rdd_theme_v2') || 'dark'); } catch (e) { /* ignore */ }
+  </script>
+</body>
+</html>

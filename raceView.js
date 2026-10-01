@@ -789,7 +789,7 @@ function buildRaceDetail(doc) {
   let favouriteOdds = Infinity;
   runners.forEach((r, i) => {
     if (r.isScratched || !r.currentOdds) return;
-    const val = parseFloat(r.currentOdds);
+    const val = parseFloat(String(r.currentOdds).replace(/^\$+/, ''));
     if (!isNaN(val) && val > 0 && val < favouriteOdds) {
       favouriteOdds = val;
       favouriteIdx = i;
@@ -799,6 +799,8 @@ function buildRaceDetail(doc) {
 
   return {
     id: doc._id,
+    date: doc.rDate,
+    url: raceUrl({ discipline: doc.rDiscipline, country: doc.rCountry, meeting: doc.rCourseDisplayName, date: doc.rDate, rNo: doc.rNo }),
     meeting: doc.rCourseDisplayName,
     rName: doc.rName || doc.rDisplayName || '',
     country: doc.rCountry,
@@ -1137,6 +1139,34 @@ function countryFlagImg(countryCode) {
   return `<img class="country-flag" src="https://flagcdn.com/20x15/${iso}.png" srcset="https://flagcdn.com/40x30/${iso}.png 2x" width="20" height="15" alt="">`;
 }
 
+// Readable race links (1 Oct 2026, per Dinesh, like racingandsports.com.au):
+// /race/thoroughbred/australia/kalgoorlie/2026-10-01/R1. Country names come
+// through the same ISO mapping as the flags, so GB and GBR both become
+// great-britain; a code with no name stays as the lowercase code. The same
+// rules are duplicated in dashboard.html (raceUrlClient) for links built in
+// the browser -- keep the two in step.
+const COUNTRY_SLUG_BY_ISO = {
+  ae: 'uae', ar: 'argentina', au: 'australia', br: 'brazil', ca: 'canada', cl: 'chile', de: 'germany', dk: 'denmark',
+  es: 'spain', fr: 'france', gb: 'great-britain', hk: 'hong-kong', ie: 'ireland', it: 'italy', jp: 'japan',
+  kr: 'south-korea', mu: 'mauritius', mx: 'mexico', my: 'malaysia', nz: 'new-zealand', pa: 'panama', rs: 'serbia',
+  sa: 'saudi-arabia', se: 'sweden', tr: 'turkey', us: 'usa', uy: 'uruguay', za: 'south-africa',
+};
+const DISCIPLINE_SLUGS = { T: 'thoroughbred', H: 'harness', G: 'greyhound' };
+
+function slugify(text) {
+  return String(text || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function countrySlug(code) {
+  const upper = String(code || '').toUpperCase();
+  return COUNTRY_SLUG_BY_ISO[COUNTRY_FLAG_ISO[upper]] || slugify(upper);
+}
+
+function raceUrl({ discipline, country, meeting, date, rNo }) {
+  return `/race/${DISCIPLINE_SLUGS[discipline] || slugify(discipline)}/${countrySlug(country)}/${slugify(meeting)}/${date}/R${rNo}`;
+}
+
 function formatDateHeading(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -1170,9 +1200,68 @@ function formatDatePickerLabel(dateStr) {
 const DASHBOARD_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'dashboard.html'), 'utf8');
 const LOGIN_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'login.html'), 'utf8');
 const MEETINGS_LIST_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'meetings-list.html'), 'utf8');
+const ADMIN_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'admin.html'), 'utf8');
+const ADMIN_DENIED_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'admin-denied.html'), 'utf8');
+const CHANGES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'changes.html'), 'utf8');
+const SYSTEM_HEALTH_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'system-health.html'), 'utf8');
+const MISSING_MEETINGS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'missing-meetings.html'), 'utf8');
+
+// styles.css is served with a long cache lifetime in production, so the
+// pages link it as /styles.css?v=<file mtime>: a new upload gets a new URL
+// and browsers can't keep using a stale copy.
+const STYLES_PATH = path.join(__dirname, 'public', 'styles.css');
+function stylesVersion() {
+  try {
+    return Math.floor(fs.statSync(STYLES_PATH).mtimeMs).toString(36);
+  } catch (e) {
+    return '0';
+  }
+}
+
+// "Logged in as X | Logout", plus an Admin link for anyone with at least
+// one admin-area section (see accessOf in server.js).
+function renderUserBlock(username, access) {
+  if (!username) return '';
+  const adminLink = access && access.any ? `<a class="meetings-list-link admin-link" href="/admin"><i class="fa-solid fa-user-shield"></i> Admin</a>` : '';
+  return `${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
+}
+
+// User Activity | System Health | Data Changes | Missing Meetings buttons
+// across the admin-area pages, only the sections this user has.
+const ADMIN_SECTIONS = [
+  { key: 'activity', href: '/admin', icon: 'fa-users', label: 'User Activity' },
+  { key: 'health', href: '/system-health', icon: 'fa-heart-pulse', label: 'System Health' },
+  { key: 'changes', href: '/changes', icon: 'fa-clock-rotate-left', label: 'Data Changes' },
+  { key: 'missing', href: '/missing-meetings', icon: 'fa-triangle-exclamation', label: 'Missing Meetings' },
+];
+function renderAdminTabs(active, access) {
+  return `<nav class="adm-tabs" aria-label="Admin sections">${ADMIN_SECTIONS.filter((s) => access && access[s.key]).map((s) =>
+    `<a class="adm-tab${s.key === active ? ' on' : ''}" href="${s.href}"${s.key === active ? ' aria-current="page"' : ''}><i class="fa-solid ${s.icon}"></i> ${s.label}</a>`).join('')}</nav>`;
+}
+
+function renderAdminPage(options = {}) {
+  return renderTemplate(ADMIN_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('activity', options.access) });
+}
+
+function renderAdminDeniedPage() {
+  return renderTemplate(ADMIN_DENIED_TEMPLATE, {});
+}
+
+function renderChangesPage(options = {}) {
+  return renderTemplate(CHANGES_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('changes', options.access) });
+}
+
+function renderSystemHealthPage(options = {}) {
+  return renderTemplate(SYSTEM_HEALTH_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('health', options.access) });
+}
+
+function renderMissingMeetingsPage(options = {}) {
+  return renderTemplate(MISSING_MEETINGS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('missing', options.access) });
+}
 
 function renderTemplate(template, vars) {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in vars ? vars[key] : match));
+  const allVars = { STYLES_VERSION: stylesVersion(), ...vars };
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in allVars ? allVars[key] : match));
 }
 
 function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
@@ -1276,7 +1365,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           // (dashboard.html) does the preventDefault for that plain-click
           // case; modifier-clicks/right-click bypass it entirely, same as
           // any other link.
-          const raceHref = `/?date=${encodeURIComponent(dateStr)}&race=${encodeURIComponent(race.id)}`;
+          const raceHref = raceUrl({ discipline: m.discipline, country: m.country, meeting: m.meeting, date: dateStr, rNo: n });
           return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" data-formissue="${Boolean(race.missingFormFlagged)}" data-otherissue-flags="${otherIssueFlags.join(' ')}" title="${escapeHtml(titleParts.join(' | '))}"><a class="race-cell-link" href="${escapeHtml(raceHref)}" target="_blank" onclick="return handleRaceCellClick(event, '${escapeHtml(race.id)}', this)">${raceNoLabel}${timeLabel}${cellIssueIcon}${trialLine}${resultLine}${abandonedLine}</a></td>`;
         }).join('');
 
@@ -1352,7 +1441,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         // starts (10 Aug 2026) -- without it the menu stayed open after a
         // download since the download itself doesn't navigate the page away.
         const closeOnClick = `onclick="this.closest('details').removeAttribute('open')"`;
-        const downloadWidget = `<details class="meeting-download"><summary title="Download this meeting's full race &amp; runner details (CSV / Excel / JSON / PDF)">&#11015;</summary><div class="meeting-download-menu"><a href="/meeting-report.csv${dlQuery}" ${closeOnClick}>CSV</a><a href="/meeting-report.xlsx${dlQuery}" ${closeOnClick}>Excel</a><a href="/meeting-report.json${dlQuery}" ${closeOnClick}>JSON</a><a href="/meeting-report.pdf${dlQuery}" ${closeOnClick}>PDF</a></div></details>`;
+        const downloadWidget = `<details class="meeting-download"><summary title="Download this meeting's full race &amp; runner details (CSV / Excel / JSON / PDF)">&#11015;</summary><div class="meeting-download-menu"><a href="/meeting-report.csv${dlQuery}" ${closeOnClick}>CSV</a><a href="/meeting-report.xlsx${dlQuery}" ${closeOnClick}>Excel</a><a href="/meeting-report.json${dlQuery}" ${closeOnClick}>JSON</a><a href="#" onclick="return startMeetingPdfDownload(this)">PDF</a></div></details>`;
 
         // Meeting cell (15 Sep 2026, per Dinesh, a reference mockup) --
         // name+country on the left, TAB/Non-TAB pill on the right, flexed
@@ -1382,7 +1471,6 @@ function renderHtml(dateStr, schedule, options = {}) {
   const heading = formatDateHeading(dateStr);
   const includeTrials = Boolean(options.includeTrials);
   const selectedDiscipline = DISCIPLINE_ORDER.includes(options.discipline) ? options.discipline : DISCIPLINE_ORDER[0];
-  const username = options.username ? escapeHtml(options.username) : null;
 
   const countryOptions = ['<option value="">All countries</option>']
     .concat(countries.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`))
@@ -1458,9 +1546,7 @@ function renderHtml(dateStr, schedule, options = {}) {
   </section>`;
   }).join('\n');
 
-  const usernameBlock = username
-    ? `<span class="session-info">Logged in as <strong>${username}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`
-    : '';
+  const usernameBlock = renderUserBlock(options.username, options.access);
 
   const todayLinkHtml = `<a class="today-link" href="/${includeTrials ? '?includeTrials=true' : ''}" onclick="clearSavedFilters()">Jump to today</a>`;
 
@@ -1505,9 +1591,32 @@ function renderHtml(dateStr, schedule, options = {}) {
     REPORT_LINKS_HTML: reportLinksHtml,
     MEETINGS_LIST_LINKS_HTML: meetingsListLinksHtml,
     TABS: tabs,
+    // A race id only ever has hex digits and dashes; anything else is dropped
+    // so it can sit inside the page's script safely.
+    INITIAL_RACE_ID: /^[A-Za-z0-9-]+$/.test(options.initialRaceId || '') ? options.initialRaceId : '',
     COUNTRY_OPTIONS: countryOptions,
     SECTIONS: sections,
+    HEALTH_STRIP_HTML: renderHealthStrip(options),
   });
+}
+
+// Bottom-of-dashboard strip (30 Sep 2026, per Dinesh): page update time and
+// when data was last scraped for everyone; the health status/link and the
+// Data Changes check time only for users with those sections. Times are
+// ISO here and shown in the viewer's local time by dashboard.html.
+function renderHealthStrip(options) {
+  const access = options.access || {};
+  const t = (iso) => (iso ? `<b data-local-time="${escapeHtml(iso)}">-</b>` : null);
+  const scraped = t(options.lastScrapeSeenAt) || `<b>not seen since the server started</b>`;
+  const checked = access.changes ? `<span>Changes checked ${t(options.lastChangeCheckAt) || '<b>not yet</b>'}</span>` : '';
+  const pill = access.health
+    ? `<a class="hs-pill hs-loading" id="healthPill" href="/system-health"><i></i>Checking health...</a>`
+    : '';
+  const link = access.health ? `<a class="hs-link" href="/system-health">Health details &rarr;</a>` : '';
+  return `<footer class="health-strip" id="healthStrip">
+    <div class="hs-group">${pill}<span>Data last scraped ${scraped}</span>${checked}</div>
+    <div class="hs-group"><span>Page updated <b id="pageUpdatedAt">-</b></span>${link}</div>
+  </footer>`;
 }
 
 // --- Login page -------------------------------------------------------------
@@ -1551,9 +1660,7 @@ function renderMeetingsListPage(rows, options = {}) {
     ? formatDateHeading(fromDate)
     : `${formatDateHeading(fromDate)} to ${formatDateHeading(toDate)}`;
 
-  const usernameBlock = username
-    ? `<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`
-    : '';
+  const usernameBlock = renderUserBlock(username, options.access);
 
   const countryOptionsHtml = countries
     .map((c) => `<option value="${escapeHtml(c)}"${c === country ? ' selected' : ''}>${escapeHtml(c)}</option>`)
@@ -1631,11 +1738,12 @@ function buildMeetingsListRowsForRange(docsByDate, disciplineFilter, countryFilt
 
 module.exports = {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, parseClock, disciplineLabel, escapeHtml,
+  slugify, countrySlug, raceUrl, DISCIPLINE_SLUGS,
   countMissingJockeys, hasDuplicateJockey, countDuplicateJockeyGroups, issueForRunner, jockeyCounts,
   tabNoCounts, hasDuplicateTabNo, countTabNoIssues, tabIssueForRunner,
   countMissingTrainers,
   buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
   buildMeetingsListReport, meetingsListReportToCsv,
-  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange,
+  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
   MISSING_JOCKEY_BORDER_THRESHOLD, MISSING_FORM_BORDER_THRESHOLD, MAX_EXPECTED_HORSE_AGE, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };

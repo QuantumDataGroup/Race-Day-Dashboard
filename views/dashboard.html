@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Race Day Dashboard - {{DATE_STR}}</title>
 <link rel="icon" type="image/png" href="/logo.png">
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -42,6 +42,12 @@
   <div class="header-status-bar">
     <span class="refresh-pill"><span class="refresh-indicator" id="refreshIndicator">Auto-refresh every 3 min</span></span>
     <span class="date-heading">{{HEADING}}</span>
+  </div>
+
+  <div class="upcoming-ticker-bar" id="upcomingTickerBar" hidden>
+    <button type="button" class="upcoming-ticker-arrow left" onclick="scrollUpcomingTicker(-1)" aria-label="Scroll left"><i class="fa-solid fa-chevron-left"></i></button>
+    <div class="upcoming-ticker-track" id="upcomingTickerTrack"></div>
+    <button type="button" class="upcoming-ticker-arrow right" onclick="scrollUpcomingTicker(1)" aria-label="Scroll right"><i class="fa-solid fa-chevron-right"></i></button>
   </div>
 
   <div class="control-bar">
@@ -122,6 +128,7 @@
   <main class="app-main">
 {{SECTIONS}}
   </main>
+  {{HEALTH_STRIP_HTML}}
 
   <div class="modal-overlay" id="detailModal" onclick="if(event.target===this) closeRaceDetail()">
     <div class="modal-box">
@@ -133,6 +140,21 @@
   <!-- Race-replay video plays as an overlay on top of whatever's open,
        instead of navigating away to a new tab (18 Sep 2026, per Dinesh:
        "Race View vides play click panna, video overlap play aganum"). -->
+  <div class="modal-overlay pdf-prompt-overlay" id="pdfSpeedMapPrompt" onclick="if(event.target===this) closePdfPrompt()">
+    <div class="modal-box pdf-prompt-box">
+      <div class="pdf-prompt-ask">
+        <button class="modal-close" onclick="closePdfPrompt()" aria-label="Close">&times;</button>
+        <h3><i class="fa-solid fa-file-pdf"></i> Download PDF</h3>
+        <p class="modal-sub">Include the Speed Map in this PDF?</p>
+        <div class="pdf-prompt-actions">
+          <button type="button" class="popup-tab-btn active" onclick="runPdfJob(true)"><i class="fa-solid fa-plus"></i> Add Speed Map</button>
+          <button type="button" class="popup-tab-btn" onclick="runPdfJob(false)">Ignore</button>
+        </div>
+      </div>
+      <div class="pdf-prompt-busy"><i class="fa-solid fa-spinner fa-spin"></i> <span id="pdfBusyText">Generating PDF...</span></div>
+    </div>
+  </div>
+
   <div class="modal-overlay video-modal-overlay" id="videoModal" onclick="if(event.target===this) closeVideoOverlay()">
     <div class="video-modal-box">
       <button class="modal-close" onclick="closeVideoOverlay()" aria-label="Close">&times;</button>
@@ -141,6 +163,28 @@
   </div>
 
   <script>
+    // A server restart clears every login session, after which /api calls
+    // return 401 -- send the user to the login page instead of showing a
+    // confusing load error.
+    (function () {
+      var nativeFetch = window.fetch.bind(window);
+      window.fetch = function () {
+        return nativeFetch.apply(null, arguments).then(function (res) {
+          if (res.status === 401) location.href = '/login';
+          return res;
+        });
+      };
+    })();
+
+    // The race a readable /race/... link points at (set by server.js), and
+    // the date this page was rendered for -- read from the page, not the
+    // query string, since /race/... links carry no ?date=.
+    var INITIAL_RACE_ID = '{{INITIAL_RACE_ID}}';
+    function pageDateStr() {
+      var dateInput = document.getElementById('dateInput');
+      return (dateInput && dateInput.value) || new URLSearchParams(location.search).get('date') || '';
+    }
+
     function escapeHtmlClient(str) {
       return String(str).replace(/[&<>"']/g, function (c) {
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
@@ -857,10 +901,16 @@
         if (panel) panel.innerHTML = _originalExportPanelHtml;
       }
       try {
-        var params = new URLSearchParams(location.search);
-        params.delete('race');
-        var qs = params.toString();
-        history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
+        if (location.pathname.indexOf('/race/') === 0) {
+          // Back to the plain dashboard for the same day.
+          var trials = document.querySelector('input[name="includeTrials"]');
+          history.pushState(null, '', '/?date=' + encodeURIComponent(pageDateStr()) + (trials && trials.checked ? '&includeTrials=true' : ''));
+        } else {
+          var params = new URLSearchParams(location.search);
+          params.delete('race');
+          var qs = params.toString();
+          history.pushState(null, '', location.pathname + (qs ? '?' + qs : ''));
+        }
       } catch (e) { /* ignore */ }
     }
 
@@ -1024,20 +1074,6 @@
       content.innerHTML = '<p class="modal-loading">Loading...</p>';
       modal.classList.add('open');
 
-      // Keeps the address bar (and so "copy link"/"open in new tab" from
-      // THIS tab, and browser back/forward) in sync with whichever race is
-      // actually open -- matches the href already on the grid cell. Skipped
-      // when the URL already says this race (e.g. the initial deep-link
-      // load below), so opening a shared link doesn't push a pointless
-      // duplicate history entry on top of itself.
-      try {
-        var params = new URLSearchParams(location.search);
-        if (params.get('race') !== id) {
-          params.set('race', id);
-          history.pushState(null, '', location.pathname + '?' + params.toString());
-        }
-      } catch (e) { /* ignore */ }
-
       // Falls back to finding the matching grid cell by its data-race-id
       // when none was passed in directly (the standalone full-screen view
       // opened via a fresh ?race=<id> load, with no click to hand us one)
@@ -1068,10 +1104,28 @@
           if (!res.ok) return throwWithServerError(res);
           return res.json();
         })
-        .then(renderRacePopup)
+        .then(function (race) {
+          syncAddressBarToRace(race, id);
+          return renderRacePopup(race);
+        })
         .catch(function (err) {
           content.innerHTML = '<p class="modal-error">Could not load race detail: ' + escapeHtmlClient(err.message) + '</p>';
         });
+    }
+
+    // Keeps the address bar (so "copy link", "open in new tab" and browser
+    // back/forward) on the open race's readable link, e.g.
+    // /race/thoroughbred/australia/kalgoorlie/2026-10-01/R1 -- the same href
+    // the grid cell has (1 Oct 2026, per Dinesh). An old ?race=<id> link is
+    // swapped for the readable one in place rather than adding a history
+    // entry; already being on the link adds nothing.
+    function syncAddressBarToRace(race, id) {
+      if (!race || !race.url || _currentRaceId !== id) return;
+      try {
+        if (location.pathname === race.url) return;
+        if (new URLSearchParams(location.search).get('race')) history.replaceState(null, '', race.url);
+        else history.pushState(null, '', race.url);
+      } catch (e) { /* ignore */ }
     }
 
     // Cached at load so closeRaceDetail can put the normal day-wide Export
@@ -1083,19 +1137,25 @@
       var panel = document.getElementById('exportDataPanel');
       if (!panel) return;
       if (_originalExportPanelHtml === null) _originalExportPanelHtml = panel.innerHTML;
-      var params = new URLSearchParams(location.search);
-      var dateStr = params.get('date') || '';
+      panel.innerHTML = raceExportLinksHtml(race);
+    }
+
+    // PDF is built client-side (see downloadRacePdf) so it looks like the
+    // race view itself; CSV/Excel/JSON still come from server.js.
+    function raceExportLinksHtml(race) {
+      var dateStr = pageDateStr();
       var qs = 'date=' + encodeURIComponent(dateStr) +
         '&race=' + encodeURIComponent(race.id) +
         '&meeting=' + encodeURIComponent(race.meeting || '') +
         '&country=' + encodeURIComponent(race.country || '') +
-        '&discipline=' + encodeURIComponent(race.discipline || '');
-      panel.innerHTML = '<span class="report-links">' +
+        '&discipline=' + encodeURIComponent(race.discipline || '') +
+        (race.isTrial ? '&includeTrials=true' : '');
+      return '<span class="report-links">' +
         '<span class="report-links-label">&#11015; Download this race:</span>' +
         '<a class="report-link" href="/race-report.csv?' + qs + '">CSV</a>' +
         '<a class="report-link" href="/race-report.xlsx?' + qs + '">Excel</a>' +
         '<a class="report-link" href="/race-report.json?' + qs + '">JSON</a>' +
-        '<a class="report-link" href="/race-report.pdf?' + qs + '">PDF</a>' +
+        '<a class="report-link" href="#" onclick="return startRacePdfDownload(this)">PDF</a>' +
         '</span>';
     }
 
@@ -1192,7 +1252,7 @@
         var oddsHtml = r.isScratched
           ? '-'
           : r.currentOdds
-            ? '<span class="odds-pill">$' + escapeHtmlClient(r.currentOdds) + '</span>' + (r.isFavourite ? '<span class="odds-favourite-tag">Favourite</span>' : '')
+            ? '<span class="odds-pill">$' + escapeHtmlClient(String(r.currentOdds).replace(/^\$+/, '')) + '</span>' + (r.isFavourite ? '<span class="odds-favourite-tag">Favourite</span>' : '')
             : '-';
         return '<tr class="' + (r.isScratched ? 'scratched' : '') + '">' +
           positionCell +
@@ -1244,11 +1304,16 @@
       var videoButtonHtml = race.videoUrl
         ? '<button type="button" class="popup-tab-btn video-watch-btn" onclick="playVideoOverlay(\'' + escapeHtmlClient(race.videoUrl) + '\')">Watch race video</button>'
         : '';
+      var exportMenuHtml = '<details class="meeting-download export-data-menu popup-export-menu">' +
+          '<summary class="popup-tab-btn"><i class="fa-solid fa-download"></i> Export Data <i class="fa-solid fa-chevron-down export-caret"></i></summary>' +
+          '<div class="meeting-download-menu export-data-panel">' + raceExportLinksHtml(race) + '</div>' +
+        '</details>';
       var popupTabsHtml = '<div class="popup-tabs">' +
           '<button type="button" class="popup-tab-btn active" id="raceFieldTabBtn" onclick="switchPopupTab(\'field\')">Race Field</button>' +
           (hasSpeedMap ? '<button type="button" class="popup-tab-btn" id="speedMapTabBtn" onclick="switchPopupTab(\'speedmap\')">Speed Map</button>' : '') +
           '<button type="button" class="popup-tab-btn" id="raceCardTabBtn" onclick="switchPopupTab(\'racecard\')">Race Card</button>' +
           '<button type="button" class="popup-tab-btn" id="dataDumpTabBtn" onclick="switchPopupTab(\'datadump\')">Data Dump</button>' +
+          exportMenuHtml +
           videoButtonHtml +
         '</div>';
       content.innerHTML =
@@ -1578,6 +1643,500 @@
       });
     }
 
+    // ---- Race PDF export ----
+    // A print-style race report (design approved by Dinesh, 28 Sep 2026),
+    // laid out as A4 sheets off-screen and captured page by page with
+    // html2canvas. Libraries and fonts load on first use only.
+    var PDF_LIB_URLS = [
+      'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    ];
+    var _pdfLibsPromise = null;
+    function loadPdfLibs() {
+      if (!_pdfLibsPromise) {
+        _pdfLibsPromise = Promise.all(PDF_LIB_URLS.map(function (src) {
+          return new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = function () { reject(new Error('Could not load ' + src)); };
+            document.head.appendChild(s);
+          });
+        })).catch(function (err) { _pdfLibsPromise = null; throw err; });
+      }
+      return _pdfLibsPromise;
+    }
+
+    function raceHasSpeedMapData(race) {
+      return Array.isArray(race.speedMap) && race.speedMap.some(function (p) {
+        return p.paceRating || (p.paceCategory && p.paceCategory !== 'Not Known');
+      });
+    }
+
+    function showPdfPrompt(state) {
+      var prompt = document.getElementById('pdfSpeedMapPrompt');
+      prompt.dataset.state = state;
+      prompt.classList.add('open');
+    }
+    function closePdfPrompt() {
+      var prompt = document.getElementById('pdfSpeedMapPrompt');
+      if (prompt.dataset.state === 'busy') return;
+      prompt.classList.remove('open');
+    }
+    function setPdfBusyText(text) {
+      document.getElementById('pdfBusyText').textContent = text;
+    }
+    function finishPdfPrompt() {
+      var prompt = document.getElementById('pdfSpeedMapPrompt');
+      prompt.dataset.state = '';
+      prompt.classList.remove('open');
+    }
+
+    // The PDF waiting on the Add Speed Map / Ignore answer: a function
+    // taking includeSpeedMap and returning a promise.
+    var _pdfJob = null;
+    function askSpeedMapThen(hasSpeedMap, job) {
+      _pdfJob = job;
+      if (hasSpeedMap) showPdfPrompt('ask');
+      else runPdfJob(false);
+    }
+    function runPdfJob(includeSpeedMap) {
+      var job = _pdfJob;
+      _pdfJob = null;
+      if (!job) return;
+      setPdfBusyText('Generating PDF...');
+      showPdfPrompt('busy');
+      job(includeSpeedMap)
+        .catch(function (err) { alert('Could not create PDF: ' + err.message); })
+        .then(finishPdfPrompt);
+    }
+
+    function startRacePdfDownload(linkEl) {
+      var menu = linkEl && linkEl.closest('details');
+      if (menu) menu.removeAttribute('open');
+      var race = _currentRaceData;
+      if (!race) return false;
+      askSpeedMapThen(raceHasSpeedMapData(race), function (includeSpeedMap) {
+        return generateReportPdf([race], includeSpeedMap, pdfFilename(race));
+      });
+      return false;
+    }
+
+    // Per-meeting download widget's PDF: every race at that meeting in the
+    // same report format, one after another (per Dinesh, 28 Sep 2026).
+    function startMeetingPdfDownload(linkEl) {
+      var menu = linkEl.closest('details');
+      if (menu) menu.removeAttribute('open');
+      var row = linkEl.closest('tr.meeting-row');
+      var ids = row ? Array.prototype.map.call(row.querySelectorAll('td.cell.time.clickable[data-race-id]'), function (td) { return td.dataset.raceId; }) : [];
+      if (!ids.length) {
+        alert('No races found for this meeting.');
+        return false;
+      }
+      setPdfBusyText('Loading ' + ids.length + ' race' + (ids.length === 1 ? '' : 's') + '...');
+      showPdfPrompt('busy');
+      var races = [];
+      var next = 0;
+      function worker() {
+        if (next >= ids.length) return Promise.resolve();
+        var id = ids[next++];
+        return fetch('/api/race/' + encodeURIComponent(id))
+          .then(function (res) {
+            if (!res.ok) throw new Error('could not load a race (HTTP ' + res.status + ')');
+            return res.json();
+          })
+          .then(function (race) { races.push(race); return worker(); });
+      }
+      Promise.all([worker(), worker(), worker(), worker()])
+        .then(function () {
+          races.sort(function (a, b) { return (a.rNo || 0) - (b.rNo || 0); });
+          finishPdfPrompt();
+          askSpeedMapThen(races.some(raceHasSpeedMapData), function (includeSpeedMap) {
+            return generateReportPdf(races, includeSpeedMap, meetingPdfFilename(races[0]));
+          });
+        })
+        .catch(function (err) {
+          finishPdfPrompt();
+          alert('Could not create PDF: ' + err.message);
+        });
+      return false;
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(reader.result); };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    var _pdfImageDataCache = {};
+    function imageUrlToDataUrl(url) {
+      if (!_pdfImageDataCache[url]) {
+        _pdfImageDataCache[url] = fetch(url)
+          .then(function (res) { if (!res.ok) throw new Error(res.status); return res.blob(); })
+          .then(blobToDataUrl);
+      }
+      return _pdfImageDataCache[url];
+    }
+
+    // html2canvas can't draw the silk SVGs (their pattern overlays are
+    // <image> elements inside masks, and the "missing silk" outline is
+    // styled from styles.css), so each one is turned into a PNG <img>
+    // first: CSS-driven fill/stroke copied inline, pattern images inlined
+    // as data URLs, then drawn onto a canvas.
+    function rasterizeSilkSvgs(root) {
+      var svgs = Array.prototype.slice.call(root.querySelectorAll('svg.silk-icon'));
+      return Promise.all(svgs.map(function (svg) {
+        svg.querySelectorAll('path, rect').forEach(function (el) {
+          var cs = getComputedStyle(el);
+          ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity'].forEach(function (prop) {
+            el.style.setProperty(prop, cs.getPropertyValue(prop));
+          });
+        });
+        var images = Array.prototype.slice.call(svg.querySelectorAll('image'));
+        return Promise.all(images.map(function (img) {
+          var href = img.getAttribute('href');
+          return imageUrlToDataUrl(href).then(function (dataUrl) { img.setAttribute('href', dataUrl); }, function () { img.remove(); });
+        })).then(function () {
+          var rect = svg.getBoundingClientRect();
+          var w = Math.round(rect.width) || 52;
+          var h = Math.round(rect.height) || 57;
+          var clone = svg.cloneNode(true);
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          clone.setAttribute('width', w);
+          clone.setAttribute('height', h);
+          var svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+          return new Promise(function (resolve) {
+            var image = new Image();
+            image.onload = function () {
+              var canvas = document.createElement('canvas');
+              canvas.width = w * 3;
+              canvas.height = h * 3;
+              canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+              var out = document.createElement('img');
+              out.className = svg.getAttribute('class');
+              out.width = w;
+              out.height = h;
+              out.src = canvas.toDataURL('image/png');
+              svg.replaceWith(out);
+              out.decode ? out.decode().then(resolve, resolve) : resolve();
+            };
+            image.onerror = function () { resolve(); };
+            image.src = svgUrl;
+          });
+        });
+      }));
+    }
+
+    var REPORT_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap';
+    var _reportFontsPromise = null;
+    function loadReportFonts() {
+      if (!_reportFontsPromise) {
+        _reportFontsPromise = new Promise(function (resolve) {
+          var link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = REPORT_FONTS_URL;
+          link.onload = link.onerror = resolve;
+          document.head.appendChild(link);
+        }).then(function () {
+          return Promise.all(['400 12px Barlow', '600 12px Barlow', '700 20px "Barlow Condensed"', '800 20px "Barlow Condensed"', '600 11px "IBM Plex Mono"']
+            .map(function (f) { return document.fonts.load(f).catch(function () {}); }));
+        });
+      }
+      return _reportFontsPromise;
+    }
+
+    var REPORT_SEX_LABELS = { M: 'mare', G: 'gelding', F: 'filly', C: 'colt', H: 'horse', R: 'rig' };
+    var REPORT_GREYHOUND_SEX_LABELS = { B: 'bitch', D: 'dog' };
+
+    function reportDateStr() {
+      var dateInput = document.getElementById('dateInput');
+      return pageDateStr();
+    }
+    function reportDateLabel(dateStr, long) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+      if (!m) return dateStr;
+      var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return long
+        ? d.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        : d.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    function reportOrdinal(n) {
+      var s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+    function reportPrice(s) {
+      var n = Number(String(s || '').replace(/[^0-9.]/g, ''));
+      if (!n) return null;
+      return '$' + (n < 10 ? n.toFixed(2) : String(n));
+    }
+    function reportMoney(s) {
+      var n = Number(String(s || '').replace(/[^0-9.]/g, ''));
+      return n ? '$' + Math.round(n).toLocaleString('en-AU') : (s || '-');
+    }
+    function reportPrize(s) {
+      return String(s || '').replace(/\d{4,}/g, function (d) { return Number(d).toLocaleString('en-AU'); });
+    }
+    function reportShortDate(d) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '');
+      if (!m) return d || '';
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+    }
+    function reportFormChips(f) {
+      return '<span class="rr-form-chips">' + String(f).slice(-10).split('').map(function (c) {
+        if (c.toLowerCase() === 'x') return '<i class="rr-fx">x</i>';
+        return '<i class="rr-f' + escapeHtmlClient(c) + '">' + escapeHtmlClient(c) + '</i>';
+      }).join('') + '</span>';
+    }
+    function reportSilk(race, tabNo, silkDescription) {
+      return race.discipline === 'G' ? renderGreyhoundBoxIcon(tabNo) : renderSilkSvg(silkDescription);
+    }
+
+    function reportRunnerCard(race, r) {
+      var fin = r.position ? '<span class="rr-fin rr-p' + (r.position <= 3 ? r.position : 'x') + '">' + reportOrdinal(r.position) + '</span>' : '';
+      var metaParts = [];
+      var desc = [r.age != null ? r.age + 'yo' : null, r.colour ? String(r.colour).toLowerCase() : null, r.sex ? ((race.discipline === 'G' ? REPORT_GREYHOUND_SEX_LABELS : REPORT_SEX_LABELS)[r.sex] || r.sex) : null].filter(Boolean).join(' ');
+      if (desc) metaParts.push('<b>' + escapeHtmlClient(desc) + '</b>');
+      if (r.sire || r.dam) metaParts.push(escapeHtmlClient(r.sire || '?') + ' &times; ' + escapeHtmlClient(r.dam || '?'));
+      var people = [];
+      if (race.discipline !== 'G') people.push('<span><small>Jockey</small><b>' + escapeHtmlClient(r.jockey || '-') + '</b></span>');
+      people.push('<span><small>Trainer</small><b>' + escapeHtmlClient(r.trainer || '-') + '</b></span>');
+
+      var price = reportPrice(r.currentOdds);
+      var weight = r.weightKg ? escapeHtmlClient(r.weightKg) + 'kg' : null;
+      var rightRows = '<div class="rr-odds-row">' + (price ? '<span class="rr-odds">' + price + '</span>' : '<span class="rr-no-price">No price</span>') +
+        (r.isFavourite ? '<span class="rr-fav">Favourite</span>' : (weight ? '<span class="rr-weight">' + weight + '</span>' : '')) + '</div>';
+      if (r.isFavourite && weight) rightRows += '<div class="rr-odds-row"><span class="rr-bar">Weight</span><span class="rr-weight">' + weight + '</span></div>';
+      var st = r.performanceStatistics;
+      if (st) {
+        rightRows += '<div class="rr-stats">' +
+          [['Career', st.career], ['Win', st.winPer], ['Place', st.placePer], ['Track', st.track], ['Dist', st.distance], ['Prize', st.prizeMoney ? reportMoney(st.prizeMoney) : null]]
+            .map(function (s) { return '<div class="rr-stat"><small>' + s[0] + '</small><b>' + escapeHtmlClient(s[1] || '-') + '</b></div>'; }).join('') +
+          '</div>';
+      }
+      var last = r.pastRaces && r.pastRaces[0];
+      if (last && last.FinishPosition) {
+        rightRows += '<div class="rr-last-start"><b>Last start:</b> ' + reportOrdinal(last.FinishPosition) + (last.Starters ? ' of ' + last.Starters : '') +
+          (last.Course ? ' at ' + escapeHtmlClient(last.Course) : '') + (last.Distance ? ' ' + escapeHtmlClient(last.Distance) + 'm' : '') +
+          (last.Date ? ', ' + reportShortDate(last.Date) : '') + (last.TrackCondition ? ' (' + escapeHtmlClient(last.TrackCondition) + ')' : '') +
+          (last.LengthsBehind && last.FinishPosition !== 1 ? ', ' + escapeHtmlClient(last.LengthsBehind) + 'L' : '') +
+          (reportPrice(last.StartingPrice) ? ' &middot; SP ' + reportPrice(last.StartingPrice) : '') + '</div>';
+      }
+
+      return '<article class="rr-runner">' +
+        '<div class="rr-left"><span class="rr-tab">' + (r.tabNo != null ? r.tabNo : '-') + '</span>' + reportSilk(race, r.tabNo, r.silkDescription) +
+          (r.barrierPosition != null ? '<span class="rr-bar">' + (race.discipline === 'G' ? 'Box ' : 'Bar ') + r.barrierPosition + '</span>' : '') + '</div>' +
+        '<div class="rr-main">' +
+          '<div class="rr-name-row">' + fin + '<span class="rr-name">' + escapeHtmlClient(r.horseName) + '</span>' + (r.region ? '<span class="rr-region">(' + escapeHtmlClient(r.region) + ')</span>' : '') + '</div>' +
+          (metaParts.length ? '<div class="rr-meta">' + metaParts.join(' &middot; ') + '</div>' : '') +
+          '<div class="rr-people">' + people.join('') + '</div>' +
+          (r.formFigures ? '<div class="rr-form-row">Last 10 ' + reportFormChips(r.formFigures) + '</div>' : '') +
+          (r.runnerComment ? '<div class="rr-comment">' + escapeHtmlClient(r.runnerComment) + '</div>' : '') +
+        '</div>' +
+        '<div class="rr-right">' + rightRows + '</div>' +
+      '</article>';
+    }
+
+    // Builds the report as fixed A4-sized sheets (794x1123 CSS px), filling
+    // each until the next block would overflow, then starting a new sheet.
+    // The Speed Map always starts on a sheet of its own.
+    function buildRaceReportSheets(race, includeSpeedMap, root) {
+      var dateStr = reportDateStr();
+      var active = race.runners.filter(function (r) { return !r.isScratched; });
+      var scratched = race.runners.filter(function (r) { return r.isScratched; });
+      var byTab = {};
+      race.runners.forEach(function (r) { if (r.tabNo != null) byTab[r.tabNo] = r; });
+
+      var footerHtml = '<footer class="rr-foot"><span><b>RacingHub</b> &middot; Race Day Dashboard</span><span>' +
+        escapeHtmlClient(race.meeting) + ' R' + race.rNo + (dateStr ? ' &middot; ' + escapeHtmlClient(reportDateLabel(dateStr, false)) : '') +
+        '</span><span class="rr-pg"></span></footer>';
+      function miniHead(label) {
+        return '<div class="rr-mini-head"><div class="rr-mh-left"><span class="rr-mh-badge">R' + race.rNo + '</span><b>' + escapeHtmlClient(String(race.meeting || '').toUpperCase()) + '</b>' +
+          (race.rName ? '<small>' + escapeHtmlClient(race.rName) + '</small>' : '') + '</div><small>' + label + '</small></div>';
+      }
+      function newSheet(topHtml) {
+        var sheet = document.createElement('section');
+        sheet.className = 'rr-sheet';
+        sheet.innerHTML = (topHtml || '') + '<div class="rr-body"></div>' + footerHtml;
+        root.appendChild(sheet);
+        return sheet.querySelector('.rr-body');
+      }
+      function place(body, html, onOverflow) {
+        body.insertAdjacentHTML('beforeend', html);
+        if (body.scrollHeight <= body.clientHeight + 1) return body;
+        body.lastElementChild.remove();
+        var next = onOverflow();
+        next.insertAdjacentHTML('beforeend', html);
+        return next;
+      }
+
+      var masthead = '<header class="rr-masthead">' +
+        '<div class="rr-mast-top"><span class="rr-brand">RACING<span>HUB</span></span><span>Race Report' + (dateStr ? ' &middot; ' + escapeHtmlClient(reportDateLabel(dateStr, true)) : '') + '</span></div>' +
+        '<div class="rr-mast-main"><div class="rr-race-badge"><small>RACE</small><b>' + race.rNo + '</b></div>' +
+          '<div class="rr-mast-title"><h1>' + countryFlagImg(race.country) + escapeHtmlClient(String(race.meeting || '').toUpperCase()) + ' <span class="rr-cc">' + escapeHtmlClient(race.country || '') + '</span></h1>' +
+          (race.rName ? '<p>' + escapeHtmlClient(race.rName) + '</p>' : '') + '</div></div>' +
+      '</header>';
+
+      var facts = [
+        ['Start', race.timeLabel], ['Distance', race.rDistance ? race.rDistance + 'm' : null], ['Class', race.rClass || race.disciplineLabel],
+        ['Prize', race.rPrizeMoney ? reportPrize(race.rPrizeMoney) : null], ['Field', active.length + ' runners'], ['Scratched', String(scratched.length)],
+      ];
+      var introHtml = '<div class="rr-facts">' + facts.map(function (f) {
+        return '<div class="rr-fact"><small>' + f[0] + '</small><b>' + escapeHtmlClient(f[1] || '-') + '</b></div>';
+      }).join('') + '</div>';
+
+      var resultTabs = race.hasResult && race.resultString ? String(race.resultString).split('-').map(function (s) { return Number(s.trim()); }).filter(function (n) { return n && byTab[n]; }).slice(0, 4) : [];
+      if (resultTabs.length) {
+        introHtml += '<div class="rr-result-strip" style="grid-template-columns:92px repeat(' + resultTabs.length + ', 1fr)"><div class="rr-result-label"><small>Official</small><b>RESULT</b></div>' +
+          resultTabs.map(function (tab, i) {
+            var r = byTab[tab];
+            var who = race.discipline === 'G' ? r.trainer : r.jockey;
+            return '<div class="rr-podium"><span class="rr-place rr-place-' + (i + 1) + '">' + reportOrdinal(i + 1) + '</span><div class="rr-who"><b>' + escapeHtmlClient(r.horseName) + '</b><small>No. ' + tab + (who ? ' &middot; ' + escapeHtmlClient(who) : '') + '</small></div></div>';
+          }).join('') + '</div>';
+      }
+      if (race.raceComment) introHtml += '<div class="rr-preview"><h3>Race preview</h3><p>' + escapeHtmlClient(race.raceComment) + '</p></div>';
+      introHtml += '<div class="rr-section-head"><h2>Field &amp; form</h2><span>' + active.length + ' runners &middot; ' + (race.hasResult ? 'finishing order' : 'tab order') + '</span></div>';
+      // Above the runner cards rather than after them, so it can never
+      // spill onto a page of its own.
+      if (scratched.length) {
+        introHtml += '<div class="rr-scratched"><h4>Scratched</h4>' + scratched.map(function (r) {
+          return '<span>No. ' + (r.tabNo != null ? r.tabNo : '-') + ' <b>' + escapeHtmlClient(r.horseName) + '</b></span>';
+        }).join('') + '</div>';
+      }
+
+      var body = newSheet(masthead);
+      body.insertAdjacentHTML('beforeend', introHtml);
+      var continuation = function () { return newSheet(miniHead('Field &amp; form (continued)')); };
+      active.forEach(function (r) { body = place(body, reportRunnerCard(race, r), continuation); });
+
+      if (includeSpeedMap) {
+        var scratchedIds = {};
+        scratched.forEach(function (r) { if (r.runnerId) scratchedIds[r.runnerId] = true; });
+        var silkById = {};
+        race.runners.forEach(function (r) { if (r.runnerId) silkById[r.runnerId] = r.silkDescription; });
+        var entries = race.speedMap.filter(function (p) { return !scratchedIds[p.runnerId]; })
+          .sort(function (a, b) { return (a.runnerNumber || 0) - (b.runnerNumber || 0); });
+        var groups = {};
+        entries.forEach(function (p) {
+          var cat = p.paceRating && p.paceCategory && p.paceCategory !== 'Not Known' ? p.paceCategory : 'Not Known';
+          (groups[cat] = groups[cat] || []).push(p.runnerNumber);
+        });
+        var groupOrder = PACE_CATEGORIES.slice().reverse().concat(['Not Known']);
+        var groupHtml = groupOrder.filter(function (c) { return groups[c]; }).map(function (c) {
+          return '<div><b>' + escapeHtmlClient(c) + '</b><span>' + groups[c].map(function (no) { return 'No. ' + no; }).join(', ') + '</span></div>';
+        }).join('');
+        var leaders = entries.filter(function (p) { return p.paceCategory === 'Leader' && p.paceRating; });
+        var nearLead = entries.filter(function (p) { return p.paceRating && ['Leader', 'Prominent', 'On Pace'].indexOf(p.paceCategory) !== -1; }).length;
+        var outlook = '';
+        if (leaders.length) {
+          outlook += leaders.map(function (p) { return '<b>' + escapeHtmlClient(p.runnerName) + ' (' + p.runnerNumber + ')</b>'; }).join(' and ') +
+            (leaders.length > 1 ? ' are' : ' is') + ' expected to lead. ';
+        }
+        outlook += nearLead + ' runner' + (nearLead === 1 ? ' is' : 's are') + ' predicted to race on or near the lead' +
+          (nearLead >= 4 ? ', so expect a genuine tempo.' : nearLead <= 2 ? ', so the pace could be muted.' : '.');
+
+        var rowsHtml = entries.map(function (p) {
+          var known = Boolean(p.paceRating && p.paceCategory && p.paceCategory !== 'Not Known');
+          var pct = known ? Math.max(3, Math.min(97, 100 - p.paceRating)) : 0;
+          return '<div class="rr-sm-row"><div class="rr-sm-who"><span class="rr-sm-no">' + escapeHtmlClient(p.runnerNumber != null ? String(p.runnerNumber) : '-') + '</span>' +
+            '<span class="rr-sm-name">' + escapeHtmlClient(p.runnerName || '') + '<span class="rr-sm-cat">' + (known ? escapeHtmlClient(p.paceCategory) + ' &middot; rating ' + p.paceRating : 'Pace not known') + '</span></span></div>' +
+            '<div class="rr-sm-track"><span class="rr-sm-zonebg"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>' + (known ? '<div class="rr-sm-bar" style="width:' + pct + '%"></div><span class="rr-sm-dot" style="left:' + pct + '%">' + reportSilk(race, p.runnerNumber, silkById[p.runnerId]) + '</span>' : '') + '</div></div>';
+        }).join('');
+
+        var smBody = newSheet(miniHead('Speed Map'));
+        smBody.insertAdjacentHTML('beforeend',
+          '<div class="rr-section-head"><h2>Speed Map</h2><span>Predicted early pace</span></div>' +
+          '<div class="rr-sm-intro"><div class="rr-sm-card"><h3>Pace outlook</h3><p>' + outlook + '</p></div>' +
+            '<div class="rr-sm-card"><h3>Pace groups</h3><div class="rr-pace-groups">' + groupHtml + '</div></div></div>' +
+          '<div class="rr-sm-grid"><div class="rr-sm-scale"><span></span><div class="rr-zones">' +
+            PACE_CATEGORIES.map(function (c) { return '<span' + (c === 'Leader' ? ' class="rr-lead"' : '') + '>' + escapeHtmlClient(c) + '</span>'; }).join('') +
+          '</div></div>' + rowsHtml + '</div>' +
+          '<div class="rr-sm-arrow"><span>&larr; Back of field</span><span>Race direction &rarr;</span></div>');
+      }
+
+    }
+
+    function pdfFilenameBase(race) {
+      return String(race.meeting || 'race').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+    function pdfFilename(race) {
+      var dateStr = reportDateStr();
+      return pdfFilenameBase(race) + '-R' + race.rNo + (dateStr ? '-' + dateStr : '') + '.pdf';
+    }
+    function meetingPdfFilename(race) {
+      var dateStr = reportDateStr();
+      return pdfFilenameBase(race) + (dateStr ? '-' + dateStr : '') + '.pdf';
+    }
+
+    // Each race starts on a fresh sheet; the Speed Map is only added for
+    // races that actually have speed-map data.
+    function generateReportPdf(races, includeSpeedMap, filename) {
+      var root = null;
+      var SCALE = 2;
+      return Promise.all([loadPdfLibs(), loadReportFonts()])
+        .then(function () {
+          root = document.createElement('div');
+          root.className = 'race-report';
+          document.body.appendChild(root);
+          races.forEach(function (race) {
+            buildRaceReportSheets(race, includeSpeedMap && raceHasSpeedMapData(race), root);
+          });
+          var allSheets = root.querySelectorAll('.rr-sheet');
+          allSheets.forEach(function (s, i) { s.querySelector('.rr-pg').textContent = 'Page ' + (i + 1) + ' of ' + allSheets.length; });
+          // A cached older styles.css leaves the sheets unstyled, which
+          // produced a blank-looking PDF on 28 Sep 2026.
+          if (root.querySelector('.rr-sheet').offsetHeight !== 1123) {
+            throw new Error('the page styles are out of date. Press Ctrl+F5 to reload the page, then download again.');
+          }
+          return rasterizeSilkSvgs(root);
+        })
+        .then(function () {
+          return Promise.all(Array.prototype.slice.call(root.querySelectorAll('img')).map(function (img) {
+            return img.complete ? null : new Promise(function (resolve) { img.onload = img.onerror = resolve; });
+          }));
+        })
+        .then(function () {
+          var jsPDF = window.jspdf.jsPDF;
+          var pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+          var pageW = pdf.internal.pageSize.getWidth();
+          var pageH = pdf.internal.pageSize.getHeight();
+          var sheets = Array.prototype.slice.call(root.querySelectorAll('.rr-sheet'));
+          return sheets.reduce(function (chain, sheet, i) {
+            return chain.then(function () {
+              if (sheets.length > 1) setPdfBusyText('Generating PDF... page ' + (i + 1) + ' of ' + sheets.length);
+              // Fixed desktop-size capture window, so a phone's narrow
+              // viewport doesn't clip or reflow the 794px-wide sheet.
+              return window.html2canvas(sheet, {
+                scale: SCALE,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                windowWidth: 1280,
+                windowHeight: 1400,
+                // Clone only this sheet, not the whole dashboard or the
+                // other sheets -- keeps a 30-page meeting PDF fast.
+                ignoreElements: function (el) {
+                  if (el.parentNode === document.body) return el !== root;
+                  return el !== sheet && el.classList && el.classList.contains('rr-sheet');
+                },
+                onclone: function (doc) {
+                  var el = doc.querySelector('.race-report');
+                  if (el) { el.style.left = '0'; el.style.top = '0'; }
+                },
+              }).then(function (canvas) {
+                if (i > 0) pdf.addPage();
+                pdf.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, pageW, pageH);
+              });
+            });
+          }, Promise.resolve()).then(function () {
+            pdf.save(filename);
+            fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: filename }) }).catch(function () {});
+          });
+        })
+        .then(function () { if (root) root.remove(); }, function (err) { if (root) root.remove(); throw err; });
+    }
+
     // Labels for the performance-stats tiles, in display order -- keys match
     // racecards.Runners[].PerformanceStatistics exactly (lowerCamelCase,
     // unlike most of that document's PascalCase fields).
@@ -1812,7 +2371,7 @@
       win.document.write(
         '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
         '<link rel="icon" type="image/png" href="/logo.png">' +
-        '<link rel="stylesheet" href="/styles.css"></head><body class="past-race-page">' +
+        '<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}"></head><body class="past-race-page">' +
         // Same RacingHub header as every other page (18 Sep 2026, per
         // Dinesh: "Anda open agura pagela Racing Hub Name and Logo... home
         // page button venu") -- this window has no dashboard grid of its
@@ -2090,7 +2649,9 @@
     }
 
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') closeRaceDetail();
+      if (e.key !== 'Escape') return;
+      if (document.getElementById('pdfSpeedMapPrompt').classList.contains('open')) closePdfPrompt();
+      else closeRaceDetail();
     });
 
     // Close any open "meeting download" dropdown when clicking ANYWHERE else
@@ -2400,7 +2961,7 @@
       var panel = document.getElementById('globalSearchResults');
       if (!panel) return;
       var seq = ++_globalSearchSeq;
-      var dateStr = new URLSearchParams(location.search).get('date') || '';
+      var dateStr = pageDateStr();
       fetch('/api/search?date=' + encodeURIComponent(dateStr) + '&q=' + encodeURIComponent(q))
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -2419,7 +2980,7 @@
         var rows = items.map(function (item) {
           var main = item.horseName || item.name || item.course || '';
           var sub = [item.course, item.rNo ? 'R' + item.rNo : ''].filter(Boolean).join(' ');
-          var href = '/?date=' + encodeURIComponent(dateStr || '') + '&race=' + encodeURIComponent(item.raceId);
+          var href = item.url || ('/?date=' + encodeURIComponent(dateStr || '') + '&race=' + encodeURIComponent(item.raceId));
           return '<a class="global-search-item" href="' + href + '"><span><i class="fa-solid ' + icon + '"></i> ' +
             escapeHtmlClient(main) + '</span><span class="gs-sub">' + escapeHtmlClient(sub) + '</span></a>';
         }).join('');
@@ -2557,7 +3118,93 @@
       }, 1000);
     }
 
+    // ---- "Upcoming Races" ticker (26 Sep 2026, per Dinesh, an approved
+    // draft mockup) -- soonest-starting races across every meeting/
+    // discipline, scrollable, with a live per-second countdown. Re-fetches
+    // the underlying list itself every 60s (races start/finish, so the set
+    // changes), independently of the unrelated 3-minute full-page
+    // auto-refresh above. Reuses handleRaceCellClick (same plain-click-vs-
+    // new-tab behaviour as every other race link) -- that function falls
+    // back to finding the race's own grid cell when its `td` ancestor
+    // lookup comes up empty (these cards aren't table cells), the same
+    // fallback path the standalone deep-link view already relies on.
+    var DISC_ICON_CLASS = { T: 'disc-icon-thoroughbred', H: 'disc-icon-harness', G: 'disc-icon-greyhound' };
+    var _upcomingRaces = [];
+    function formatUpcomingCountdown(ms) {
+      if (ms <= 0) return '00:00:00';
+      var totalSec = Math.floor(ms / 1000);
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = totalSec % 60;
+      function pad(n) { return (n < 10 ? '0' : '') + n; }
+      return pad(h) + ':' + pad(m) + ':' + pad(s);
+    }
+    function renderUpcomingTicker() {
+      var bar = document.getElementById('upcomingTickerBar');
+      var track = document.getElementById('upcomingTickerTrack');
+      if (!bar || !track) return;
+      if (!_upcomingRaces.length) { bar.hidden = true; return; }
+      var dateStr = pageDateStr();
+      track.innerHTML = _upcomingRaces.map(function (r) {
+        var msLeft = new Date(r.targetTime).getTime() - Date.now();
+        var soon = msLeft < 90000;
+        var href = r.url || ('/?date=' + encodeURIComponent(dateStr) + '&race=' + encodeURIComponent(r.raceId));
+        return '<a class="upcoming-race-card' + (soon ? ' soon' : '') + '" href="' + href + '" target="_blank" onclick="return handleRaceCellClick(event, \'' + r.raceId + '\', this)">' +
+          '<span class="disc-icon ' + (DISC_ICON_CLASS[r.discipline] || '') + '"></span>' +
+          '<span class="upcoming-race-info">' +
+            '<span class="upcoming-race-line1"><span class="upcoming-race-no">R' + r.rNo + '</span><span class="upcoming-meeting-name">' + escapeHtmlClient(r.course || '') + '</span></span>' +
+            '<span class="upcoming-race-line2"><span class="upcoming-countdown">' + formatUpcomingCountdown(msLeft) + '</span><span>' + countryFlagImg(r.country) + '<span class="upcoming-country-code">' + escapeHtmlClient(r.country || '') + '</span></span></span>' +
+          '</span>' +
+        '</a>';
+      }).join('');
+      bar.hidden = false;
+    }
+    function loadUpcomingRaces() {
+      var dateStr = pageDateStr();
+      fetch('/api/upcoming?date=' + encodeURIComponent(dateStr))
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          _upcomingRaces = (data && data.races) || [];
+          renderUpcomingTicker();
+        })
+        .catch(function () { /* best-effort -- leave the ticker as-is on failure */ });
+    }
+    function scrollUpcomingTicker(dir) {
+      var track = document.getElementById('upcomingTickerTrack');
+      if (track) track.scrollBy({ left: dir * 250, behavior: 'smooth' });
+    }
+    function startUpcomingTicker() {
+      loadUpcomingRaces();
+      setInterval(renderUpcomingTicker, 1000);
+      setInterval(loadUpcomingRaces, 60000);
+    }
+
+    // Bottom strip: times in the viewer's clock, and (admins only) the
+    // overall health status from the System Health checks.
+    function initHealthStrip() {
+      var fmt = function (d) { return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+      var page = document.getElementById('pageUpdatedAt');
+      if (page) page.textContent = fmt(new Date());
+      document.querySelectorAll('#healthStrip [data-local-time]').forEach(function (el) {
+        el.textContent = new Date(el.getAttribute('data-local-time')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      });
+      var pill = document.getElementById('healthPill');
+      if (!pill) return;
+      fetch('/api/admin/health')
+        .then(function (res) { if (!res.ok) throw new Error(res.status); return res.json(); })
+        .then(function (h) {
+          pill.className = 'hs-pill hs-' + h.overall;
+          pill.innerHTML = '<i></i>' + escapeHtmlClient(h.summary);
+          pill.title = h.problems.length ? 'Needs a look: ' + h.problems.join(', ') : 'Every check passed';
+        })
+        .catch(function () {
+          pill.className = 'hs-pill hs-bad';
+          pill.innerHTML = '<i></i>Health check failed';
+        });
+    }
+
     (function init() {
+      initHealthStrip();
       // Reads the v2 key only (17 Sep 2026, per Dinesh: "Default dark theme
       // kudunga") -- anyone whose browser still has the OLD 'rdd_theme'
       // key saved as "light" from before RacingHub made dark the default
@@ -2572,6 +3219,7 @@
       restoreFilterState();
       applyFilters();
       scheduleAutoRefresh();
+      startUpcomingTicker();
 
       // Opening a race's link directly (a fresh load, a new tab, a shared
       // URL) should land straight on that race's popup instead of just the
@@ -2589,7 +3237,7 @@
       // in-page click, since a click already has the schedule grid to go
       // back to.
       try {
-        var deepLinkRaceId = new URLSearchParams(location.search).get('race');
+        var deepLinkRaceId = INITIAL_RACE_ID || new URLSearchParams(location.search).get('race');
         if (deepLinkRaceId) {
           document.body.classList.add('race-standalone-view');
           showRaceDetail(deepLinkRaceId);
