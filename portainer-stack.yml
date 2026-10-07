@@ -1,0 +1,30 @@
+# Portainer stack for Race Day Dashboard.
+# Stacks > Add stack > Web editor (or Repository), paste this file and set the
+# variables from stack.env.example under "Environment variables".
+services:
+  dashboard:
+    image: ghcr.io/quantumdatagroup/race-day-dashboard:${IMAGE_TAG:-latest}
+    container_name: race-day-dashboard
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-7800}:7800"
+    environment:
+      PORT: "7800"
+      MONGODB_URI: ${MONGODB_URI}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      RUNNERS_API_URL: ${RUNNERS_API_URL:-http://nextdc.racingandsports.com:9542/api/v1/neds/meetings}
+      NEDS_SITE_BASE: ${NEDS_SITE_BASE:-https://nedsform.com.au}
+      TZ: ${TZ:-Australia/Sydney}
+    volumes:
+      - dashboard_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7800/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  dashboard_data:

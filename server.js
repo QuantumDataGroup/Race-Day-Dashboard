@@ -339,8 +339,9 @@ let clientPromise = null;
 
 function getClient() {
   if (!clientPromise) {
-    const config = loadConfig(DB_CONFIG_PATH);
-    const { connectionString } = extractConnectionString(config, CONNECTION_NAME);
+    // MONGODB_URI (Docker/Portainer) wins over the db.json config file.
+    const connectionString = process.env.MONGODB_URI
+      || extractConnectionString(loadConfig(DB_CONFIG_PATH), CONNECTION_NAME).connectionString;
     const client = new MongoClient(connectionString, { serverSelectionTimeoutMS: 8000 });
     clientPromise = client.connect().then(() => client).catch((err) => {
       clientPromise = null; // allow retry on next request
@@ -3568,7 +3569,7 @@ app.get('/health', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[race-dashboard] Listening on http://localhost:${PORT}`);
   console.log(`[race-dashboard] View dashboard: http://localhost:${PORT}/`);
-  console.log(`[race-dashboard] Config file: ${DB_CONFIG_PATH}`);
+  console.log(`[race-dashboard] Database: ${process.env.MONGODB_URI ? 'MONGODB_URI env' : DB_CONFIG_PATH}`);
   console.log(`[race-dashboard] Login config: ${activeAuthPath(AUTH_CONFIG_PATH)}${authConfig ? ` (${authConfig.users.length} user${authConfig.users.length === 1 ? '' : 's'}: ${authConfig.users.map((u) => u.username).join(', ')})` : ' (NOT SET UP -- run "node setup-auth.js")'}`);
   console.log(`[race-dashboard] Activity logs: ${ACTIVITY_LOG_DIR} (activity-log-YYYY-MM.jsonl, older than ${KEEP_PREVIOUS_MONTHS} months deleted)`);
   maintainLogs(new Date());

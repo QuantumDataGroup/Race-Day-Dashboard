@@ -1,0 +1,14 @@
+node_modules
+.git
+.github
+.env
+db.json
+auth.json
+auth-users.json
+admin-bootstrap.json*
+*.jsonl
+*.bat
+web.config
+ONBOARDING.md
+docker-compose*.yml
+portainer-stack.yml
