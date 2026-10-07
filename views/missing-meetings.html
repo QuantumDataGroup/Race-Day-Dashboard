@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Race Day Dashboard - Missing Meetings</title>
+<title>Race Day Dashboard - Missing Data</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -29,11 +29,55 @@
     {{ADMIN_TABS_HTML}}
     <div class="adm-page-head">
       <div>
-        <h1>Missing Meetings</h1>
+        <h1>Missing Data</h1>
       </div>
-      <div class="chg-last-check"><span class="chg-dot" id="checkDot"></span>Last check: <b id="lastCheck">-</b></div>
+      <div class="chg-last-check" id="meetingsCheck"><span class="chg-dot" id="checkDot"></span>Last check: <b id="lastCheck">-</b></div>
+      <div class="chg-last-check" id="runnersCheck" hidden><span class="chg-dot" id="rCheckDot"></span>Last runners check: <b id="rLastCheck">-</b></div>
     </div>
 
+    <!-- Missing Meetings | Missing / Mismatched Runners (2 Oct 2026, per
+         Dinesh: "buttons varanu like User activity madhiri"). -->
+    <div class="adm-subtabs" role="tablist" aria-label="Missing Data views">
+      <button type="button" class="adm-subtab on" role="tab" id="subMeetings" aria-selected="true" aria-controls="paneMeetings" data-pane="meetings"><i class="fa-solid fa-calendar-xmark"></i> Missing Meetings</button>
+      <button type="button" class="adm-subtab" role="tab" id="subRunners" aria-selected="false" aria-controls="paneRunners" data-pane="runners"><i class="fa-solid fa-horse"></i> Missing / Mismatched Runners</button>
+    </div>
+
+    <div class="adm-pane" id="paneRunners" role="tabpanel" aria-labelledby="subRunners" hidden>
+      <p class="adm-error" id="rError" hidden></p>
+      <section class="adm-tiles mm-tiles mm-tiles-5" aria-label="Runners summary">
+        <div class="adm-tile"><small>Races checked</small><b id="rChecked">-</b><span id="rCheckedSub">in the last check</span></div>
+        <div class="adm-tile adm-warn"><small>Runner Missing</small><b id="rMissing">-</b><span>in the source, not in ours</span></div>
+        <div class="adm-tile adm-warn"><small>Runner Mismatched</small><b id="rMismatched">-</b><span>name / not in field / scratched</span></div>
+        <div class="adm-tile adm-warn"><small>Runner Count Mismatched</small><b id="rCount">-</b><span>races</span></div>
+        <div class="adm-tile adm-warn"><small>Jockey Missing</small><b id="rJockey">-</b><span>blank in ours, the source has one</span></div>
+      </section>
+      <div class="adm-filters chg-filters" role="group" aria-label="Runner filters">
+        <label for="rDate">Date</label>
+        <select id="rDate"><option value="">Today to 2 days ahead</option></select>
+        <label for="rCountry">Country</label>
+        <select id="rCountry"><option value="">All</option></select>
+        <label for="rDisc">Code</label>
+        <select id="rDisc"><option value="">All</option><option value="T">Thoroughbred</option><option value="H">Harness</option><option value="G">Greyhound</option></select>
+        <label for="rKind">Show</label>
+        <select id="rKind"><option value="">Everything</option><option value="missing">Runner Missing</option><option value="mismatched">Runner Mismatched</option><option value="count">Runner Count Mismatched</option><option value="jockey">Jockey Missing</option><option value="ignored">Ignored</option></select>
+        <input type="search" id="rText" placeholder="Search meeting, horse..." aria-label="Search runners">
+        <button type="button" class="adm-btn primary" id="rCheckBtn"><i class="fa-solid fa-rotate"></i> Check now</button>
+        <span class="mm-source" id="rSource"></span>
+        <span class="mm-source" id="rJockeyCheck"></span>
+      </div>
+      <p class="adm-msg mm-check-msg" id="rCheckMsg" hidden></p>
+      <section class="adm-card">
+        <div class="adm-table-wrap">
+          <table class="adm-table">
+            <thead><tr><th>Date</th><th>Meeting</th><th>Race</th><th>Runners</th><th>Issue</th></tr></thead>
+            <tbody id="rRows"><tr><td colspan="5" class="adm-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+      <p class="adm-foot">Runners are checked every <span id="rEvery">8</span> hours, for today to 2 days ahead (races already run are skipped). The RAS API and the Neds website take turns; if one doesn't answer, the other is used. "Check now" runs it straight away (at most once every 10 minutes). A difference fixed in our database disappears straight away. Runners = running horses in the source / in ours.</p>
+    </div>
+
+    <div class="adm-pane" id="paneMeetings" role="tabpanel" aria-labelledby="subMeetings">
     <p class="adm-error" id="loadError" hidden></p>
     <p class="adm-error" id="sourceErrors" hidden></p>
 
@@ -69,11 +113,12 @@
     <section class="adm-card">
       <div class="adm-table-wrap">
         <table class="adm-table">
-          <thead><tr><th>Date</th><th>Meeting</th><th>Status</th><th>Feed meeting ID</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="4" class="adm-empty">Loading...</td></tr></tbody>
+          <thead><tr><th>Date</th><th>Meeting</th><th>Status</th><th>Runners</th><th>Feed meeting ID</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="adm-empty">Loading...</td></tr></tbody>
         </table>
       </div>
     </section>
+    </div>
   </main>
 
   <script>
@@ -104,6 +149,35 @@
       sel.innerHTML = '<option value="">' + allLabel + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(labelOf ? labelOf(v) : v) + '</option>'; }).join('');
       sel.value = values.indexOf(keep) !== -1 ? keep : '';
     }
+
+    // Runners column: the meeting's latest runners check (every 8 hours).
+    function runnersCell(m) {
+      var r = m.runners;
+      if (m.status !== 'ok' || !r) return '<span class="adm-foot">-</span>';
+      if (!r.checked) return '<span class="adm-foot" title="Its races have already run, or the source has no runners for it yet">Not checked</span>';
+      if (!r.missing && !r.mismatched) return '<span class="chg-tag fixed">OK</span>';
+      // Just the counts; a click opens the race list, each race opening that
+      // race (2 Oct 2026, per Dinesh).
+      var tags = (r.missing ? '<span class="chg-tag missing">' + r.missing + ' Missing</span>' : '') +
+        (r.mismatched ? '<span class="chg-tag mm-mismatch">' + r.mismatched + ' Mismatched</span>' : '');
+      var key = String(m.sourceMeetingId);
+      var races = (r.byRace || []).map(function (x) {
+        var label = 'R' + esc(x.rNo) + '</b>' + (x.missing ? ' &middot; ' + x.missing + ' Missing' : '') + (x.mismatched ? ' &middot; ' + x.mismatched + ' Mismatched' : '');
+        var title = esc(x.lines.join('\n'));
+        return x.url
+          ? '<a class="mm-race-link" href="' + esc(x.url) + '" target="_blank" title="' + title + '"><b>' + label + ' <i class="fa-solid fa-arrow-up-right-from-square"></i></a>'
+          : '<span class="mm-race-link" title="' + title + '"><b>' + label + '</span>';
+      }).join('');
+      return '<details class="mm-runners" data-key="' + esc(key) + '"' + (openRunners[key] ? ' open' : '') + '>' +
+        '<summary><span class="mm-found">' + tags + '</span><i class="fa-solid fa-chevron-down mm-caret"></i></summary>' +
+        '<div class="mm-race-list">' + races + '</div></details>';
+    }
+    // Which meetings' race lists are open, so the 5-minute refresh keeps them open.
+    var openRunners = {};
+    document.getElementById('rows').addEventListener('toggle', function (e) {
+      var d = e.target;
+      if (d.classList && d.classList.contains('mm-runners')) openRunners[d.getAttribute('data-key')] = d.open;
+    }, true);
 
     function render() {
       fillSelect('fDate', data.dates, 'Today to 2 days ahead', dayLabel);
@@ -137,10 +211,13 @@
         }
         return '<tr' + (missing ? ' class="mm-row-missing"' : '') + '>' +
           '<td class="mm-nowrap">' + esc(dayLabel(m.date)) + '</td>' +
-          '<td class="chg-where"><b>' + esc(m.course) + '</b><small>' + esc(m.country) + (m.races ? ' &middot; ' + m.races + ' races' : '') + '</small></td>' +
+          '<td class="chg-where"><b>' + esc(m.course) + '</b><small>' + esc(m.country) + (m.races ? ' &middot; ' + m.races + ' races' : '') + '</small>' +
+            // One meeting the feed split by surface (e.g. SHA TIN + SHA TIN AW).
+            (m.splitNames && m.splitNames.length > 1 ? '<small class="mm-note">Feed: ' + m.splitNames.map(esc).join(' + ') + '</small>' : '') + '</td>' +
           '<td>' + status + '</td>' +
-          '<td class="mm-mono">' + esc(m.sourceMeetingId) + '</td></tr>';
-      }).join('') : '<tr><td colspan="4" class="adm-empty">' + (data.meetings.length ? 'Nothing for these filters.' : 'No thoroughbred meetings in the feed for these countries.') + '</td></tr>';
+          '<td>' + runnersCell(m) + '</td>' +
+          '<td class="mm-mono">' + (m.sourceMeetingIds || [m.sourceMeetingId]).map(esc).join('<br>') + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="adm-empty">' + (data.meetings.length ? 'Nothing for these filters.' : 'No thoroughbred meetings in the feed for these countries.') + '</td></tr>';
     }
 
     function load(fresh) {
@@ -264,12 +341,167 @@
     ['fDate', 'fCountry', 'fMissing'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
     document.getElementById('refreshBtn').addEventListener('click', function () { load(true); });
 
+    // --- Missing / Mismatched Runners pane --------------------------------
+    var DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+    var KIND_TAG = { missing: ['missing', 'Runner Missing'], mismatched: ['mm-mismatch', 'Runner Mismatched'], count: ['missing', 'Runner Count Mismatched'], jockey: ['mm-jockey', 'Jockey Missing'] };
+    var rData = null;
+
+    function ageLabel(iso) {
+      var mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + ' min ago';
+      var h = Math.floor(mins / 60);
+      return h + ' h ' + (mins % 60) + ' min ago';
+    }
+    function renderRunners() {
+      if (!rData) return;
+      fillSelect('rDate', uniq(rData.races.map(function (r) { return r.date; })), 'Today to 2 days ahead', dayLabel);
+      fillSelect('rCountry', uniq(rData.races.map(function (r) { return r.country; })), 'All');
+      var date = document.getElementById('rDate').value;
+      var country = document.getElementById('rCountry').value;
+      var disc = document.getElementById('rDisc').value;
+      var kind = document.getElementById('rKind').value;
+      var text = document.getElementById('rText').value.toLowerCase();
+      var rows = rData.races.filter(function (r) {
+        return (!date || r.date === date) && (!country || r.country === country) && (!disc || r.discipline === disc) &&
+          (!kind || r.issues.some(function (i) { return kind === 'ignored' ? i.ignored : (i.kind === kind && !i.ignored); })) &&
+          (!text || (r.meeting + ' ' + r.issues.map(function (i) { return i.horse + ' ' + i.text; }).join(' ')).toLowerCase().indexOf(text) !== -1);
+      });
+      // Ignored issues stay listed (greyed, with Undo) but aren't counted.
+      function count(k) { return rows.reduce(function (n, r) { return n + r.issues.filter(function (i) { return i.kind === k && !i.ignored; }).length; }, 0); }
+      document.getElementById('rMissing').textContent = count('missing');
+      document.getElementById('rMismatched').textContent = count('mismatched');
+      document.getElementById('rCount').textContent = count('count');
+      document.getElementById('rJockey').textContent = count('jockey');
+      document.getElementById('rRows').innerHTML = rows.length ? rows.map(function (r) {
+        var c = r.counts;
+        var countCell = c ? '<span class="' + (c.source !== c.ours ? 'mm-count-bad' : '') + '">' + c.source + ' / ' + c.ours + '</span>' : '-';
+        var issues = r.issues.map(function (i) {
+          var tag = i.ignored ? ['ignored', 'Ignored'] : (KIND_TAG[i.kind] || ['missing', i.kind]);
+          // Jockey issues show their own label (Jockey Missing).
+          if (!i.ignored && i.kind === 'jockey') tag = ['mm-jockey', i.text.split(' (')[0]];
+          var action = i.ignored
+            ? '<button type="button" class="adm-btn mm-act" data-rkey="' + esc(i.key) + '" data-ract="undo">Undo</button>' +
+              '<small class="mm-note-inline">by ' + esc(i.ignoredBy || '?') + (i.ignoredAt ? ', ' + esc(hhmm(i.ignoredAt)) : '') + '</small>'
+            : '<button type="button" class="adm-btn mm-act" data-rkey="' + esc(i.key) + '" data-ract="ignore"><i class="fa-solid fa-eye-slash"></i> Ignore</button>';
+          return '<div class="mm-issue' + (i.ignored ? ' mm-issue-ignored' : '') + '"><span class="chg-tag ' + tag[0] + '">' + tag[1] + '</span> ' +
+            (i.tab != null ? '<b>#' + esc(i.tab) + ' ' + esc(i.horse) + '</b> ' : '') +
+            '<span class="mm-issue-text">' + esc(i.ignored ? i.text : i.text.replace(/^(Runner (Missing|Mismatched|Count Mismatched)|Jockey (Missing|Mismatched)|Weight Mismatched)[: ]*/, '')) + '</span>' + action + '</div>';
+        }).join('');
+        return '<tr><td class="mm-nowrap">' + esc(dayLabel(r.date)) + '</td>' +
+          '<td class="chg-where"><b>' + esc(r.meeting) + '</b><small>' + esc(r.country) + ' &middot; ' + esc(DISC[r.discipline] || r.discipline) + '</small></td>' +
+          '<td class="mm-nowrap">' + (r.url ? '<a class="adm-user-link" href="' + esc(r.url) + '" target="_blank">R' + esc(r.rNo) + '</a>' : 'R' + esc(r.rNo)) + '</td>' +
+          '<td class="mm-nowrap" title="Running horses: source / ours">' + countCell + '</td>' +
+          '<td>' + issues + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="adm-empty">' + (rData.races.length ? 'Nothing for these filters.' : (rData.lastRunAt ? 'No missing or mismatched runners in the last check.' : 'The runners check hasn\'t run yet.')) + '</td></tr>';
+    }
+    function loadRunners() {
+      return fetch('/api/missing-runners').then(function (res) {
+        return res.json().then(function (json) { if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')')); return json; });
+      }).then(function (json) {
+        rData = json;
+        var s = json.stats || {};
+        document.getElementById('rChecked').textContent = s.racesChecked != null ? s.racesChecked : '-';
+        document.getElementById('rCheckedSub').textContent = s.meetings != null ? 'in ' + s.meetings + ' meetings' : 'in the last check';
+        document.getElementById('rEvery').textContent = json.everyHours;
+        document.getElementById('rLastCheck').textContent = json.running ? 'running now' : (json.lastRunAt ? hhmm(json.lastRunAt) + ' (' + ageLabel(json.lastRunAt) + ')' : 'not yet');
+        document.getElementById('rCheckDot').className = 'chg-dot' + (json.error || json.races.length ? ' mm-dot-warn' : '');
+        var err = document.getElementById('rError');
+        err.hidden = !json.error;
+        err.textContent = json.error ? 'The last runners check failed with both sources: ' + json.error + '. It tries again every hour; the list shows the last good check.' : '';
+        document.getElementById('rSource').innerHTML = json.sourceLabel
+          ? 'Checked with <b>' + esc(json.sourceLabel) + '</b>' + (json.fallbackReason ? ' <span class="mm-fallback" title="' + esc(json.fallbackReason) + '">(other source failed)</span>' : '') + ' &middot; next: ' + esc(json.nextSourceLabel)
+          : 'Next: ' + esc(json.nextSourceLabel);
+        var jc = json.jockeyCheck || {};
+        document.getElementById('rJockeyCheck').innerHTML = jc.nedsPausedUntil
+          ? '<span class="mm-fallback">Neds website paused until ' + esc(hhmm(jc.nedsPausedUntil)) + ' (it asked us to slow down)</span>'
+          : 'Jockey check every ' + esc(jc.everyHours) + ' h' + (jc.lastRunAt ? ' &middot; last ' + esc(hhmm(jc.lastRunAt)) + ': ' + esc(jc.racesWanted) + ' races missing a jockey, ' + esc(jc.jockeysFound) + ' found on Neds' : ' &middot; not run yet') + (jc.error ? ' <span class="mm-fallback">(' + esc(jc.error) + ')</span>' : '');
+        var btn = document.getElementById('rCheckBtn');
+        btn.disabled = Boolean(json.running);
+        btn.innerHTML = json.running ? '<i class="fa-solid fa-spinner fa-spin"></i> Checking...' : '<i class="fa-solid fa-rotate"></i> Check now';
+        renderRunners();
+        return json;
+      }).catch(function (e) {
+        var err = document.getElementById('rError');
+        err.textContent = 'Could not load runners: ' + e.message;
+        err.hidden = false;
+      });
+    }
+    // "Check now": starts a check on the server, then polls until it's done.
+    function showCheckMsg(text, isError) {
+      var el = document.getElementById('rCheckMsg');
+      el.textContent = text;
+      el.className = 'adm-msg mm-check-msg' + (isError ? ' err' : '');
+      el.hidden = !text;
+    }
+    function waitForCheck(tries) {
+      setTimeout(function () {
+        loadRunners().then(function (json) {
+          if (json && json.running && tries < 90) return waitForCheck(tries + 1);
+          if (json && !json.running) showCheckMsg(json.error ? 'Check failed: ' + json.error : 'Check done with ' + (json.sourceLabel || 'the source') + (json.fallbackReason ? ' (the other source didn\'t answer)' : '') + ' - ' + json.races.length + ' race' + (json.races.length === 1 ? '' : 's') + ' with differences.', Boolean(json.error));
+        });
+      }, 4000);
+    }
+    document.getElementById('rCheckBtn').addEventListener('click', function () {
+      var btn = this;
+      btn.disabled = true;
+      fetch('/api/missing-runners/check', { method: 'POST' }).then(function (res) {
+        return res.json().then(function (json) { return { ok: res.ok, status: res.status, json: json }; });
+      }).then(function (r) {
+        if (r.ok || r.status === 409) {
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
+          showCheckMsg('Checking with ' + (r.json.source || 'the next source') + '... The RAS API takes a few seconds, the Neds website a minute or two.', false);
+          waitForCheck(0);
+        } else {
+          btn.disabled = false;
+          showCheckMsg(r.json.error || ('Request failed (' + r.status + ')'), true);
+        }
+      }).catch(function (e) { btn.disabled = false; showCheckMsg('Could not start the check: ' + e.message, true); });
+    });
+
+    // Ignore / Undo one issue: saved on the server (shared by every user,
+    // and left off the dashboard), then updated in place.
+    document.getElementById('rRows').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-rkey]');
+      if (!btn) return;
+      var key = btn.getAttribute('data-rkey');
+      var ignored = btn.getAttribute('data-ract') === 'ignore';
+      btn.disabled = true;
+      fetch('/api/missing-runners/ignore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, ignored: ignored }) })
+        .then(function (res) { return res.json().then(function (json) { if (!res.ok) throw new Error(json.error || ('Request failed (' + res.status + ')')); return json; }); })
+        .then(function (json) {
+          rData.races.forEach(function (r) { r.issues.forEach(function (i) { if (i.key === key) { i.ignored = json.ignored; i.ignoredBy = json.ignoredBy; i.ignoredAt = json.ignoredAt; } }); });
+          renderRunners();
+        })
+        .catch(function (err) { btn.disabled = false; showCheckMsg('Could not save: ' + err.message, true); });
+    });
+
+    ['rDate', 'rCountry', 'rDisc', 'rKind'].forEach(function (id) { document.getElementById(id).addEventListener('change', renderRunners); });
+    document.getElementById('rText').addEventListener('input', renderRunners);
+
+    function showPane(name) {
+      ['meetings', 'runners'].forEach(function (p) {
+        var on = p === name;
+        document.getElementById(p === 'meetings' ? 'paneMeetings' : 'paneRunners').hidden = !on;
+        document.getElementById(p === 'meetings' ? 'meetingsCheck' : 'runnersCheck').hidden = !on;
+        var tab = document.querySelector('.adm-subtab[data-pane="' + p + '"]');
+        tab.classList.toggle('on', on);
+        tab.setAttribute('aria-selected', String(on));
+      });
+      if (name === 'runners' && !rData) loadRunners();
+      try { history.replaceState(null, '', name === 'runners' ? '#runners' : location.pathname + location.search); } catch (e) { /* ignore */ }
+    }
+    document.querySelectorAll('.adm-subtab').forEach(function (tab) {
+      tab.addEventListener('click', function () { showPane(tab.getAttribute('data-pane')); });
+    });
+
     (function init() {
       var savedTheme = 'dark';
       try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
       applyTheme(savedTheme);
       load(false);
-      setInterval(function () { load(false); }, 5 * 60 * 1000);
+      setInterval(function () { load(false); if (rData) loadRunners(); }, 5 * 60 * 1000);
+      if (location.hash === '#runners') showPane('runners');
     })();
   </script>
 </body>

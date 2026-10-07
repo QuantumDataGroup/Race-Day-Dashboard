@@ -97,6 +97,7 @@
             <option value="missingvideo">Missing Video</option>
             <option value="missingspeedmap">Missing Speed Map</option>
             <option value="missingscratching">Scratching Not Updated</option>
+            <option value="runnermismatch">Runner Missing / Mismatched</option>
             <option value="missingresults">Results Missing</option>
             <option value="missingracecomment">Missing Race Comment</option>
             <option value="scheduleissue">Schedule Issue</option>
@@ -495,6 +496,19 @@
       "eagle": { slug: "eagle", kind: "icon", mode: "alpha" },
       "five fleur de lys": { slug: "five-fleur-de-lys", kind: "icon", mode: "alpha" },
       "fleur de lys": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      // Other spellings in real descriptions (1 Oct 2026, per Dinesh --
+      // Reevacity's "Grey Fleur De Lis" showed no icon): "fleur de lis" was
+      // on 149 runners since August, plus the hyphenated and run-together
+      // forms. Bare "fleur" catches anything else (longest match wins).
+      "five fleur de lis": { slug: "five-fleur-de-lys", kind: "icon", mode: "alpha" },
+      "five fleur-de-lys": { slug: "five-fleur-de-lys", kind: "icon", mode: "alpha" },
+      "five fleur-de-lis": { slug: "five-fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur de lis": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur-de-lys": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur-de-lis": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur delis": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleurdelis": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
+      "fleur": { slug: "fleur-de-lys", kind: "icon", mode: "alpha" },
       "four leaf clover": { slug: "four-leaf-clover", kind: "icon", mode: "luminance" },
       "horse head": { slug: "horse-head", kind: "icon", mode: "alpha" },
       "horseshoe": { slug: "horseshoe", kind: "icon", mode: "alpha" },
@@ -937,7 +951,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -955,6 +969,7 @@
       'missing-video': { label: 'Missing Video', code: 'missingvideo' },
       'missing-speed-map': { label: 'Missing Speed Map', code: 'missingspeedmap' },
       'missing-scratching': { label: 'Scratching Not Updated', code: 'missingscratching' },
+      'runner-mismatch': { label: 'Runner Missing / Mismatched', code: 'runnermismatch' },
       'missing-results': { label: 'Results Missing', code: 'missingresults' },
       'horse-age-issue': { label: 'Horse Age Issue', code: 'ageissue' },
       'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
@@ -1168,6 +1183,50 @@
     // without threading the whole object through onclick attributes.
     var _currentHorseDetailRunner = null;
 
+    // Spotlights tab (6 Oct 2026, per Dinesh: "Spot light mattu vainga",
+    // "Spotlights Button podunga") -- the 3 horses to watch from llmContent
+    // (server.js's attachSpotlights), in the race country's style.
+    // Comments V2 tab (7 Oct 2026, per Dinesh) -- race overview, spotlights
+    // and every running horse's comment, written by comments-v2.js from the
+    // racecard (no AI). AU / UK / US switch; opens on the race country's style.
+    var _commentsV2Style = null;
+    function commentsV2PanelHtml(race) {
+      var all = race.commentsV2 || {};
+      var styles = ['AU', 'UK', 'US'].filter(function (s) { return all[s]; });
+      var style = styles.indexOf(_commentsV2Style) !== -1 ? _commentsV2Style : (styles.indexOf(race.commentStyle) !== -1 ? race.commentStyle : styles[0]);
+      var c = all[style];
+      if (!c) return '';
+      var byTab = {};
+      (race.runners || []).forEach(function (r) { if (r.tabNo != null) byTab[r.tabNo] = r; });
+      var runnerRows = Object.keys(c.runners).sort(function (a, b) { return Number(a) - Number(b); }).map(function (tab) {
+        var r = byTab[tab];
+        if (r && r.isScratched) return '';
+        return '<div class="cv2-runner"><span class="cv2-tab">' + escapeHtmlClient(tab) + '</span><p>' + escapeHtmlClient(c.runners[tab]) + '</p></div>';
+      }).join('');
+      return '<div class="cv2-head"><span class="cv2-seg" role="group" aria-label="Comments style">' +
+          styles.map(function (s) {
+            return '<button type="button" class="' + (s === style ? 'active' : '') + '" onclick="setCommentsV2Style(\'' + s + '\')">' + s + '</button>';
+          }).join('') +
+        '</span><span class="cv2-note">Written from the race card data</span></div>' +
+        (c.overview ? '<div class="modal-race-comment"><span class="cv2-label">Race overview</span>' + escapeHtmlClient(c.overview) + '</div>' : '') +
+        (c.spotlights && c.spotlights.length ? '<span class="cv2-label">Spotlights</span>' + spotlightsPanelHtml({ spotlights: c.spotlights }) : '') +
+        '<span class="cv2-label">Runner comments</span><div class="cv2-runners">' + runnerRows + '</div>';
+    }
+
+    function setCommentsV2Style(style) {
+      _commentsV2Style = style;
+      var view = document.getElementById('commentsV2View');
+      if (view && _currentRaceData) view.innerHTML = commentsV2PanelHtml(_currentRaceData);
+    }
+
+    function spotlightsPanelHtml(race) {
+      return '<div class="llm-spots">' + (race.spotlights || []).map(function (s) {
+        return '<div class="llm-spot"><span class="llm-spot-title">' + escapeHtmlClient(s.name) + '</span>' +
+          '<span class="llm-spot-horse">' + escapeHtmlClient(s.horse) + '</span>' +
+          '<span class="llm-spot-text">' + escapeHtmlClient(s.explanation) + '</span></div>';
+      }).join('') + '</div>';
+    }
+
     function renderRacePopup(race) {
       _currentRaceData = race;
       var content = document.getElementById('detailContent');
@@ -1196,7 +1255,8 @@
         else if (r.issue.indexOf('age issue') !== -1) issueClass = 'issue-cell age-issue';
         else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
         else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
-        var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? r.position : '-') + '</td>' : '';
+        // 1st / 2nd / 3rd... (1 Oct 2026, per Dinesh), same as the PDF.
+        var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? reportOrdinal(r.position) : '-') + '</td>' : '';
         // Manual "confirm no form" tick -- lets someone who's actually
         // checked the real source (punters.com.au) and confirmed a
         // runner genuinely has no past form (e.g. a first starter) stop
@@ -1233,6 +1293,13 @@
         // of the 4 confirm buttons above is actually on screen for this
         // runner, so someone can look up the real source before ticking
         // "Confirm"/"Checked" rather than after.
+        // Ignore for a Runner Missing / Mismatched issue (2 Oct 2026, per
+        // Dinesh: "Ignore button illaye") -- users with Missing Data access.
+        var runnerCheckBtnHtml = race.canIgnoreRunnerCheck && !r.isScratched
+          ? (r.runnerCheckItems || []).map(function (it) {
+              return ' <button type="button" class="missing-jockey-ignore-btn runner-check-ignore-btn" data-rkey="' + escapeHtmlClient(it.key) + '" data-rtext="' + escapeHtmlClient(it.text) + '" onclick="ignoreRunnerCheck(this)" title="Stop showing: ' + escapeHtmlClient(it.text) + '">&#10003; Ignore</button>';
+            }).join('')
+          : '';
         var siteCheckHtml = (race.externalCheckUrl && (showFormBtn || showAgeBtn || showDupJockeyBtn || showMissingJockeyBtn))
           ? ' <a class="site-check-link" href="' + escapeHtmlClient(race.externalCheckUrl) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the official racing site to check against the real source">Site for check</a>'
           : '';
@@ -1265,13 +1332,23 @@
           (showWeight ? '<td class="weight-cell">' + (r.weightKg ? escapeHtmlClient(r.weightKg) + 'kg' : '-') + '</td>' : '') +
           (showWeight ? '<td class="form-figures-cell">' + (r.formFigures ? escapeHtmlClient(r.formFigures.slice(-10)) : '-') + '</td>' : '') +
           '<td class="odds-cell">' + oddsHtml + '</td>' +
-          '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + siteCheckHtml)) + '</td>' +
+          '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + runnerCheckBtnHtml + siteCheckHtml)) + '</td>' +
           '</tr>';
       }).join('');
 
       var positionHeader = race.hasResult ? '<th class="position-cell">Pos</th>' : '';
       var resultLine = race.hasResult
         ? '<p class="modal-result">Result' + (race.resultString ? ' (tab numbers, 1st-4th): ' + escapeHtmlClient(race.resultString) : '') + '</p>'
+        : '';
+      // Race-level runner check lines (Runner Missing, or a field that
+      // doesn't match); per-runner ones show in that runner's Issue column.
+      var lineItems = (race.runnerCheckLineItems && race.runnerCheckLineItems.length) ? race.runnerCheckLineItems : (race.runnerCheckLines || []).map(function (t) { return { text: t, key: null }; });
+      var runnerCheckLine = lineItems.length
+        ? '<p class="modal-runner-check"><i class="fa-solid fa-triangle-exclamation"></i> ' + lineItems.map(function (it) {
+            return escapeHtmlClient(it.text) + (race.canIgnoreRunnerCheck && it.key
+              ? ' <button type="button" class="missing-jockey-ignore-btn runner-check-ignore-btn" data-rkey="' + escapeHtmlClient(it.key) + '" data-rtext="' + escapeHtmlClient(it.text) + '" onclick="ignoreRunnerCheck(this)">&#10003; Ignore</button>'
+              : '');
+          }).join(' &middot; ') + '</p>'
         : '';
       var formIgnoreAllLine = _currentFormFlaggedRunners.length
         ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
@@ -1291,6 +1368,8 @@
       // Speed Map is built lazily on first click, not up front, since most
       // popup opens never look at it.
       var hasSpeedMap = Array.isArray(race.speedMap) && race.speedMap.length > 0;
+      var hasSpotlights = Array.isArray(race.spotlights) && race.spotlights.length > 0;
+      var hasCommentsV2 = Boolean(race.commentsV2 && Object.keys(race.commentsV2).length);
       // "Race Card"/"Data Dump" (10 Sep 2026, per Dinesh) -- a debug/verify
       // view of the raw upstream `racecards`/`datadumps` documents for this
       // race, fetched lazily (see loadRawView) same as Speed Map. Always
@@ -1308,9 +1387,19 @@
           '<summary class="popup-tab-btn"><i class="fa-solid fa-download"></i> Export Data <i class="fa-solid fa-chevron-down export-caret"></i></summary>' +
           '<div class="meeting-download-menu export-data-panel">' + raceExportLinksHtml(race) + '</div>' +
         '</details>';
+      // "Results" instead of "Race Field" once full results are in (1 Oct
+      // 2026, per Dinesh: "Full Results vandadu 'Race Field' > 'Results'
+      // maranu"): every runner that ran has a finish position, or more of
+      // them than the 1st-4th result string covers (so one runner with no
+      // position, e.g. a fall, doesn't keep it as Race Field).
+      var finishers = (race.runners || []).filter(function (r) { return !r.isScratched; });
+      var placed = finishers.filter(function (r) { return r.position != null; }).length;
+      var hasFullResults = finishers.length > 0 && (placed === finishers.length || placed > 4);
       var popupTabsHtml = '<div class="popup-tabs">' +
-          '<button type="button" class="popup-tab-btn active" id="raceFieldTabBtn" onclick="switchPopupTab(\'field\')">Race Field</button>' +
+          '<button type="button" class="popup-tab-btn active" id="raceFieldTabBtn" onclick="switchPopupTab(\'field\')">' + (hasFullResults ? 'Results' : 'Race Field') + '</button>' +
           (hasSpeedMap ? '<button type="button" class="popup-tab-btn" id="speedMapTabBtn" onclick="switchPopupTab(\'speedmap\')">Speed Map</button>' : '') +
+          (hasSpotlights ? '<button type="button" class="popup-tab-btn" id="spotlightsTabBtn" onclick="switchPopupTab(\'spotlights\')">Spotlights</button>' : '') +
+          (hasCommentsV2 ? '<button type="button" class="popup-tab-btn" id="commentsV2TabBtn" onclick="switchPopupTab(\'commentsv2\')">Comments V2</button>' : '') +
           '<button type="button" class="popup-tab-btn" id="raceCardTabBtn" onclick="switchPopupTab(\'racecard\')">Race Card</button>' +
           '<button type="button" class="popup-tab-btn" id="dataDumpTabBtn" onclick="switchPopupTab(\'datadump\')">Data Dump</button>' +
           exportMenuHtml +
@@ -1331,12 +1420,15 @@
           (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
         (race.raceComment ? '<p class="modal-race-comment">' + escapeHtmlClient(race.raceComment) + '</p>' : '') +
         resultLine +
+        runnerCheckLine +
         popupTabsHtml +
         '<div id="raceFieldView" class="popup-tab-panel">' +
           formIgnoreAllLine +
           '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>BP</th>' + (showWeight ? '<th>Wgt</th><th>Form</th>' : '') + '<th>Odds</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
         (hasSpeedMap ? '<div id="speedMapView" class="popup-tab-panel" hidden></div>' : '') +
+        (hasSpotlights ? '<div id="spotlightsView" class="popup-tab-panel" hidden>' + spotlightsPanelHtml(race) + '</div>' : '') +
+        (hasCommentsV2 ? '<div id="commentsV2View" class="popup-tab-panel" hidden>' + commentsV2PanelHtml(race) + '</div>' : '') +
         '<div id="raceCardView" class="popup-tab-panel" hidden></div>' +
         '<div id="dataDumpView" class="popup-tab-panel" hidden></div>';
     }
@@ -1347,6 +1439,8 @@
     var POPUP_TABS = [
       { key: 'field', viewId: 'raceFieldView', btnId: 'raceFieldTabBtn' },
       { key: 'speedmap', viewId: 'speedMapView', btnId: 'speedMapTabBtn' },
+      { key: 'spotlights', viewId: 'spotlightsView', btnId: 'spotlightsTabBtn' },
+      { key: 'commentsv2', viewId: 'commentsV2View', btnId: 'commentsV2TabBtn' },
       { key: 'racecard', viewId: 'raceCardView', btnId: 'raceCardTabBtn' },
       { key: 'datadump', viewId: 'dataDumpView', btnId: 'dataDumpTabBtn' },
     ];
@@ -2416,7 +2510,7 @@
     function syncGridFormBadge() {
       if (!_currentRaceId) return;
       var remaining = document.querySelectorAll('#detailContent .form-ignore-btn:not(.form-ignore-all-btn)').length;
-      var flagged = remaining > 3; // matches raceView.js's MISSING_FORM_BORDER_THRESHOLD
+      var flagged = remaining > 0; // matches raceView.js's MISSING_FORM_BORDER_THRESHOLD (0 since 2 Oct 2026)
 
       var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + _currentRaceId + '"]');
       if (cell) {
@@ -2586,6 +2680,37 @@
       if (navEntry) navEntry.hasOtherIssue = Boolean(cell && cell.dataset.otherissueFlags);
       var navBar = document.getElementById('raceNavBar');
       if (navBar) navBar.innerHTML = renderRaceNavButtons();
+    }
+
+    // Saves the ignore (same list as Admin > Missing Data, where it can be
+    // undone), then re-renders the popup and the grid cell's flag.
+    function ignoreRunnerCheck(btn) {
+      var key = btn.getAttribute('data-rkey');
+      var text = btn.getAttribute('data-rtext');
+      var raceId = _currentRaceId;
+      if (!key || !raceId) return;
+      if (!window.confirm('Ignore "' + text + '"? It stops showing on the dashboard. You can undo it in Admin > Missing Data > Missing / Mismatched Runners.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/missing-runners/ignore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, ignored: true }) })
+        .then(function (res) { if (!res.ok) return throwWithServerError(res); return res.json(); })
+        .then(function () { return fetch('/api/race/' + encodeURIComponent(raceId)); })
+        .then(function (res) { if (!res.ok) return throwWithServerError(res); return res.json(); })
+        .then(function (race) {
+          if (_currentRaceId !== raceId) return;
+          renderRacePopup(race);
+          var left = (race.runnerCheckLineItems || []).length + (race.runners || []).filter(function (r) { return (r.runnerCheckItems || []).length; }).length;
+          var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + raceId + '"]');
+          if (cell && !left) {
+            cell.setAttribute('data-otherissue-flags', (cell.getAttribute('data-otherissue-flags') || '').split(' ').filter(function (f) { return f && f !== 'runner-mismatch'; }).join(' '));
+            refreshIssueIcons(cell);
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.innerHTML = '&#10003; Ignore';
+          window.alert('Could not save: ' + err.message);
+        });
     }
 
     function confirmMissingJockeyOk(btn) {

@@ -85,7 +85,12 @@ const PDFDocument = require('pdfkit');
 const { loadConfig, extractConnectionString } = require('./db-config');
 const { MIN_PASSWORD_LENGTH, USERNAME_RE, loadAuthFile, saveAuthFile, findUserIndex, usersFilePath, activeAuthPath } = require('./auth-store');
 const { KEEP_PREVIOUS_MONTHS, activityLogDir, monthKey, monthFilePath, migrateLegacyLog, deleteOldMonths, readEntries } = require('./activity-log');
-const { DEFAULT_COUNTRIES: MISSING_DEFAULT_COUNTRIES, pickSourceMeetings, uncheckedFeedCountries, compareMeetings } = require('./missing-meetings');
+const { DEFAULT_COUNTRIES: MISSING_DEFAULT_COUNTRIES, pickSourceMeetings, uncheckedFeedCountries, compareMeetings, sameCourse: sameCourseName } = require('./missing-meetings');
+const { generateCommentsV2 } = require('./comments-v2');
+const {
+  RUNNERS_API_URL, NEDS_SITE_BASE, NEDS_SITE_HEADERS, parseNedsSiteMeetings, parseNedsSiteRunners,
+  sameCountry, parseRunnerMeetings, compareRunners, countRunners, stillDiffers,
+} = require('./runners-check');
 const { KEEP_DAYS: CHANGE_KEEP_DAYS, meetingSnap, raceSnap, diffMeeting, diffRace, appendChanges, readChanges, deleteOldChangeFiles } = require('./change-tracker');
 const {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, escapeHtml, buildIssuesReport, issuesReportToCsv,
@@ -723,6 +728,24 @@ async function runHealthChecks() {
     r.ok ? `${r.ms > FEED_SLOW_MS ? 'Slow (over 20 s) · ' : ''}${r.value} ${unit} today` : r.error);
   feed('speedmap', 'Speed Map feed', speed, 'rows');
   feed('scratchings', 'Scratchings feed', scratch, 'meetings');
+  const runnersLast = runnersCheckState.lastRunAt ? Date.parse(runnersCheckState.lastRunAt) : null;
+  const runnersLate = !runnersLast || now - runnersLast > RUNNERS_CHECK_EVERY_MS + 60 * 60 * 1000;
+  const ns = runnersCheckState.stats;
+  const usedSource = RUNNERS_SOURCES[runnersCheckState.source];
+  add('runners', 'Runner check (RAS / Neds)', runnersCheckRunning ? 'ok' : (runnersCheckState.error || (runnersLate && uptimeMs > 5 * 60 * 1000) ? 'warn' : 'ok'),
+    runnersCheckRunning ? 'Running now' : (runnersLast ? ageText(now - runnersLast) : 'Not run yet'),
+    runnersCheckState.error ? `Last try failed (both sources): ${runnersCheckState.error} · retrying hourly${runnersLast ? ` · last good check ${ageText(now - runnersLast)}` : ''}`
+      : ns ? `Every 8 h · last with ${usedSource || '?'}${runnersCheckState.fallbackReason ? ` (other source failed: ${runnersCheckState.fallbackReason})` : ''} · ${ns.racesChecked} races in ${ns.meetings} meetings checked, ${ns.racesWithDifferences} with differences · next: ${RUNNERS_SOURCES[nextRunnersSource()]}`
+        : 'First run starts a minute after the server starts');
+  const jc = jockeyCheckState;
+  const jockeyLast = jc.lastRunAt ? Date.parse(jc.lastRunAt) : null;
+  const nedsPaused = (jc.nedsPausedUntil || 0) > now;
+  add('jockeys', 'Jockey check (Neds)', jockeyCheckRunning ? 'ok' : (nedsPaused || jc.error ? 'warn' : 'ok'),
+    jockeyCheckRunning ? 'Running now' : (jockeyLast ? ageText(now - jockeyLast) : 'Not run yet'),
+    nedsPaused ? `Neds website paused until ${new Date(jc.nedsPausedUntil).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })} -- it ${jc.nedsPauseReason || 'asked us to slow down'}`
+      : jc.error ? `Last run failed: ${jc.error}`
+        : jockeyLast ? `Every ${JOCKEY_CHECK_EVERY_MS / 3600000} h · ${jc.racesWanted} races in the next 24 h missing a jockey, ${jc.racesChecked} checked on Neds, ${jc.jockeysFound} jockeys found`
+          : 'First run starts two minutes after the server starts');
   add('video', 'Race video storage (S3)', video.ok ? 'ok' : 'bad', video.ok ? `${(video.ms / 1000).toFixed(1)} s` : 'Not reachable',
     video.ok ? 'Video listing reachable' : video.error);
 
@@ -899,10 +922,24 @@ async function attachVideoStatus(docs, dateStr) {
   }
 
   for (const doc of eligible) {
-    const key = buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo);
-    doc.hasVideo = existingKeys.has(key);
-    if (doc.hasVideo) doc.videoUrl = `${VIDEO_LIST_URL}${key}`;
+    const exact = buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo);
+    const key = existingKeys.has(exact) ? exact : similarVideoKey(existingKeys, dateStr, doc);
+    doc.hasVideo = Boolean(key);
+    if (key) doc.videoUrl = `${VIDEO_LIST_URL}${key}`;
   }
+}
+
+// The video can be named a little differently from our course -- ours
+// KEMPTON, the file GB_KEMPTON_PARK_race1_... (5 Oct 2026, per Dinesh:
+// "ipdi vanda ada anda meeting nameku podunga"). Same date, country and race
+// number, and a course name with every word of ours (sameCourse); used only
+// when exactly one course like that has videos that day.
+function similarVideoKey(existingKeys, dateStr, doc) {
+  const prefix = `client1/${dateStr}/${doc.rCountry}_`;
+  const suffix = `_race${doc.rNo}_${dateStr}.mp4`;
+  const hits = [...existingKeys].filter((k) => k.startsWith(prefix) && k.endsWith(suffix)
+    && sameCourseName(doc.rCourseDisplayName, k.slice(prefix.length, k.length - suffix.length).replace(/_/g, ' ')));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 function buildVideoKey(dateStr, country, course, raceNo) {
@@ -1058,6 +1095,440 @@ async function attachScratchingStatus(docs, dateStr) {
     }
     doc.missingScratching = unsynced.length > 0;
     doc.missingScratchingNames = unsynced;
+  }
+}
+
+// --- Runners check (2 Oct 2026, per Dinesh) -------------------------------
+// Runners from two sources compared with ours (see runners-check.js), for
+// today to 2 days ahead, every 8 hours ("Per day 3 times check panna podu 8
+// hours once"): AUS + NZ for every code, plus the Missing Meetings
+// countries for thoroughbred. The sources take turns -- one run the RAS
+// API, the next the Neds website -- and when the one whose turn it is
+// fails, the other is used in the same run ("Oru thadawa RAS Api check
+// pannunga next time NEDS Api check pannunga... RAS api work pannallanna
+// inda API use panni"). The RAS API is one request per day; the Neds
+// website is one page per day plus one per race we have (two at a time).
+// Races already resulted are skipped. The result is kept in memory and in
+// runners-check-state.json (so a restart doesn't trigger an extra run), and
+// attachRunnersCheck() reads it for the grid and the race popup -- nothing
+// waits on a source during a page load. A "Check now" button runs it on
+// demand, at most once every 10 minutes.
+const RUNNERS_CHECK_EVERY_MS = 8 * 60 * 60 * 1000;
+const RUNNERS_CHECK_RETRY_MS = 60 * 60 * 1000; // after a failed run
+const RUNNERS_CHECK_MANUAL_GAP_MS = 10 * 60 * 1000;
+const RUNNERS_CHECK_STATE_PATH = path.join(ACTIVITY_LOG_DIR, 'runners-check-state.json');
+const RUNNERS_API_TIMEOUT_MS = 60 * 1000;
+const RUNNERS_SOURCES = { ras: 'RAS API', neds: 'Neds website' };
+let runnersCheckState = { lastRunAt: null, lastAttemptAt: null, durationMs: null, dates: [], stats: null, error: null, races: {}, source: null, fallbackReason: null, trigger: null };
+let runnersCheckRunning = false;
+try {
+  if (fs.existsSync(RUNNERS_CHECK_STATE_PATH)) runnersCheckState = { ...runnersCheckState, ...JSON.parse(fs.readFileSync(RUNNERS_CHECK_STATE_PATH, 'utf8')) };
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${RUNNERS_CHECK_STATE_PATH}: ${err.message} -- next runners check starts fresh`);
+}
+
+// Node's fetch only says "fetch failed"; the reason is on err.cause.
+function networkReason(err) {
+  const code = err && err.cause && (err.cause.code || err.cause.name);
+  if (code) return `${err.message} (${code})`;
+  if (err && err.name === 'TimeoutError') return `no answer within ${RUNNERS_API_TIMEOUT_MS / 1000} s`;
+  return String((err && err.message) || err);
+}
+
+async function fetchSource(label, url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, { ...options, signal: AbortSignal.timeout(RUNNERS_API_TIMEOUT_MS) });
+  } catch (err) {
+    throw new Error(`${label} not reachable: ${networkReason(err)}`);
+  }
+  if (!res.ok) throw new Error(`${label} answered ${res.status}`);
+  return res;
+}
+
+// --- Neds website politeness (5 Oct 2026, per Dinesh: "Ipdi panna inda site
+// enga IP block pannuma?") -------------------------------------------------
+// Every Neds page goes through fetchNeds(): a gap between requests, and if
+// the site ever answers 429 (too many) or 403 (blocked) every Neds request
+// stops for 6 hours -- so we back off long before a real block. The pause is
+// kept in jockey-check-state.json and shown on System Health.
+const NEDS_PAUSE_MS = 6 * 60 * 60 * 1000;
+const JOCKEY_CHECK_EVERY_MS = 3 * 60 * 60 * 1000; // 5 Oct 2026: 3 h for now; Dinesh will ask for 2 h later
+const JOCKEY_CHECK_STATE_PATH = path.join(ACTIVITY_LOG_DIR, 'jockey-check-state.json');
+let jockeyCheckState = { lastRunAt: null, durationMs: null, error: null, racesWanted: 0, racesChecked: 0, jockeysFound: 0, issues: 0, nedsPausedUntil: 0, nedsPauseReason: null };
+let jockeyCheckRunning = false;
+try {
+  if (fs.existsSync(JOCKEY_CHECK_STATE_PATH)) jockeyCheckState = { ...jockeyCheckState, ...JSON.parse(fs.readFileSync(JOCKEY_CHECK_STATE_PATH, 'utf8')) };
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${JOCKEY_CHECK_STATE_PATH}: ${err.message} -- starting fresh`);
+}
+function saveJockeyCheckState() {
+  try { fs.writeFileSync(JOCKEY_CHECK_STATE_PATH, JSON.stringify(jockeyCheckState), 'utf8'); } catch (err) { /* in-memory state still works */ }
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchNeds(url) {
+  if (Date.now() < (jockeyCheckState.nedsPausedUntil || 0)) {
+    throw Object.assign(new Error(`${RUNNERS_SOURCES.neds} paused until ${new Date(jockeyCheckState.nedsPausedUntil).toISOString()} (it asked us to slow down)`), { paused: true });
+  }
+  let res;
+  try {
+    res = await fetch(url, { headers: NEDS_SITE_HEADERS, signal: AbortSignal.timeout(RUNNERS_API_TIMEOUT_MS) });
+  } catch (err) {
+    throw new Error(`${RUNNERS_SOURCES.neds} not reachable: ${networkReason(err)}`);
+  }
+  if (res.status === 429 || res.status === 403) {
+    jockeyCheckState.nedsPausedUntil = Date.now() + NEDS_PAUSE_MS;
+    jockeyCheckState.nedsPauseReason = `answered ${res.status} at ${new Date().toISOString()}`;
+    saveJockeyCheckState();
+    console.warn(`[race-dashboard] WARNING: ${RUNNERS_SOURCES.neds} answered ${res.status} -- pausing all Neds requests for 6 hours`);
+    throw Object.assign(new Error(`${RUNNERS_SOURCES.neds} answered ${res.status} -- paused for 6 hours`), { paused: true });
+  }
+  if (!res.ok) throw new Error(`${RUNNERS_SOURCES.neds} answered ${res.status}`);
+  return res.text();
+}
+
+// Race pages, a few workers, a gap after each request. Stops at once when
+// the site asks us to slow down.
+async function fetchNedsRaceRunners(jobs, { workers, gapMs, stats }) {
+  let next = 0;
+  let stopped = null;
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (next < jobs.length && !stopped) {
+      const job = jobs[next++];
+      try {
+        job.nr.runners = parseNedsSiteRunners(await fetchNeds(`${NEDS_SITE_BASE}/form/${encodeURIComponent(job.nr.id)}`));
+      } catch (err) {
+        if (err.paused) stopped = err;
+        else stats.pageErrors++;
+      }
+      if (!stopped) await sleep(gapMs);
+    }
+  }));
+  if (stopped) throw stopped;
+}
+
+// Whose turn: the other source from the last run (RAS first).
+function nextRunnersSource() {
+  return runnersCheckState.source === 'ras' ? 'neds' : 'ras';
+}
+
+// AUS + NZ for every code, plus the Missing Data countries for thoroughbred.
+function runnersCheckScope() {
+  const extraCountries = new Set(missingMeetingCountries);
+  return {
+    countries: ['AUS', 'NZ', 'NZL', ...extraCountries],
+    inScope: (country, discipline) => country === 'AUS' || country === 'NZ' || (discipline === 'T' && extraCountries.has(country)),
+  };
+}
+
+// Our races, yesterday to 2 days ahead (yesterday only so overseas Neds
+// meetings can be told apart -- see matchSourceRaces).
+async function loadRunnersCheckRaces(countries) {
+  return (await getClient()).db().collection('races')
+    .find({ rDate: { $in: trackedDates() }, rCountry: { $in: countries }, isHidden: { $ne: true }, isTrail: { $ne: true } })
+    .project({
+      rDate: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTimeUTC: 1, resultString: 1,
+      'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1,
+    })
+    .toArray();
+}
+
+// One source's meeting lists for the given days, merged (a meeting can be
+// listed under the day before its local date on the RAS API). The same
+// track + day can also be listed twice on one page -- the Neds website had
+// two "Globe Derby" meetings on 7 Oct 2026, one with R3 and a second R4 --
+// so same-key meetings are merged race by race rather than the later one
+// dropped (dropping it lost the real R1-R8 and paired our R4 with the
+// wrong one).
+async function fetchSourceMeetings(source, listDates, keepDates, inScope) {
+  const byKey = new Map();
+  for (const dateStr of listDates) {
+    const list = source === 'ras'
+      ? parseRunnerMeetings(await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json())
+      : parseNedsSiteMeetings(await fetchNeds(`${NEDS_SITE_BASE}/${dateStr}`));
+    for (const m of list) {
+      if (!keepDates.includes(m.date) || !inScope(m.country, m.discipline)) continue;
+      const key = `${m.date}|${m.country}|${m.discipline}|${m.track}`;
+      const kept = byKey.get(key);
+      if (!kept) { byKey.set(key, { ...m, races: [...m.races] }); continue; }
+      for (const nr of m.races) {
+        const dup = kept.races.some((k) => (k.id && k.id === nr.id) || (k.rNo === nr.rNo && (k.start || null) === (nr.start || null)));
+        if (!dup) kept.races.push(nr);
+      }
+    }
+    if (source === 'neds') await sleep(1000);
+  }
+  return [...byKey.values()];
+}
+
+// Two source races can carry the same number (see fetchSourceMeetings);
+// ours pairs with the one starting closest to it. One that starts over 3
+// hours from ours is a different race, not ours, and is left out.
+const MAX_RACE_START_GAP_MS = 3 * 60 * 60 * 1000;
+function pickSourceRace(candidates, race) {
+  const ourStart = Date.parse(race.rScheduleTimeUTC || '');
+  if (isNaN(ourStart)) return candidates[0];
+  const gap = (nr) => (nr.start ? Math.abs(nr.start - ourStart) : null);
+  const timed = candidates.filter((nr) => gap(nr) != null).sort((a, b) => gap(a) - gap(b));
+  if (timed.length && gap(timed[0]) <= MAX_RACE_START_GAP_MS) return timed[0];
+  return candidates.find((nr) => gap(nr) == null) || null;
+}
+
+// Source meetings -> [{ race (ours), nr (theirs), date }] for races not yet
+// resulted on the given dates.
+function matchSourceRaces(sourceMeetings, dbRaces, dates, stats) {
+  const jobs = [];
+  const MAX_DATE_OFFSET_MS = 6 * 60 * 60 * 1000;
+  for (const m of sourceMeetings) {
+    // Overseas meetings on the Neds website: the site dates them by the AUS
+    // day (Canada's 2 Oct evening shows as 3 Oct), so the meeting's date in
+    // ours is the one whose races, number by number, start closest to the
+    // source's (median gap, within 6 hours) -- our UTC times can be an hour
+    // out (LAS AMERICAS, 2 Oct 2026), so races are then paired by number,
+    // not by time. Everything else (the RAS API, AUS/NZ on Neds) goes by the
+    // meeting's own date + race number.
+    const byStart = m.country !== 'AUS' && m.country !== 'NZ' && m.races.some((nr) => nr.start);
+    const ours = dbRaces.filter((r) => (byStart || r.rDate === m.date) && r.rDiscipline === m.discipline && sameCountry(r.rCountry, m.country));
+    const course = [...new Set(ours.map((r) => r.rCourseDisplayName))].find((name) => sameCourseName(name, m.track));
+    if (!course) { stats.meetingsNotInDb.push(`${m.track} (${m.country} ${m.discipline} ${m.date})`); continue; }
+    let meetingDate = m.date;
+    if (byStart) {
+      meetingDate = null;
+      let best = Infinity;
+      for (const d of [...new Set(ours.filter((r) => r.rCourseDisplayName === course).map((r) => r.rDate))]) {
+        const gaps = m.races.map((nr) => {
+          const r = ours.find((x) => x.rDate === d && x.rCourseDisplayName === course && x.rNo === nr.rNo);
+          return r && nr.start && r.rScheduleTimeUTC ? Math.abs(Date.parse(r.rScheduleTimeUTC) - nr.start) : null;
+        }).filter((g) => g != null).sort((a, b) => a - b);
+        const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+        if (median <= MAX_DATE_OFFSET_MS && median < best) { best = median; meetingDate = d; }
+      }
+      if (!meetingDate) { stats.meetingsNotInDb.push(`${m.track} (${m.country} ${m.discipline}, no matching day)`); continue; }
+    }
+    stats.meetings++;
+    for (const rNo of [...new Set(m.races.map((nr) => nr.rNo))]) {
+      const race = ours.find((r) => r.rDate === meetingDate && r.rCourseDisplayName === course && r.rNo === rNo);
+      if (!race) continue;
+      const nr = pickSourceRace(m.races.filter((x) => x.rNo === rNo), race);
+      if (nr && !race.resultString && !nr.final && dates.includes(race.rDate)) jobs.push({ race, nr, date: race.rDate });
+    }
+  }
+  return jobs;
+}
+
+function runnersCheckEntry(race, date, sourceRunners, source) {
+  return {
+    date, items: compareRunners(race, sourceRunners, { fromNeds: /^neds/.test(source) }), source,
+    meeting: race.rCourseDisplayName, country: race.rCountry, discipline: race.rDiscipline, rNo: race.rNo,
+    counts: countRunners(race, sourceRunners),
+  };
+}
+
+// One source, all dates -> { races, stats }. Throws when the source can't
+// be read at all, so runRunnersCheck() can fall back to the other one.
+async function checkRunnersWith(source, dates, dbRaces, inScope) {
+  const races = {};
+  const stats = { meetings: 0, meetingsNotInDb: [], racesChecked: 0, racesWithDifferences: 0, differences: 0, pageErrors: 0 };
+  const sourceMeetings = await fetchSourceMeetings(source, dates, dates, inScope);
+  const jobs = matchSourceRaces(sourceMeetings, dbRaces, dates, stats);
+  // The Neds website needs each race's own page -- two at a time, a short
+  // gap after each.
+  if (source === 'neds') {
+    await fetchNedsRaceRunners(jobs, { workers: 2, gapMs: 250, stats });
+    if (jobs.length && stats.pageErrors === jobs.length) throw new Error(`${RUNNERS_SOURCES.neds}: none of its ${jobs.length} race pages could be read`);
+  }
+  for (const { race, nr, date } of jobs) {
+    if (!Array.isArray(nr.runners) || !nr.runners.length) continue; // no field there yet
+    const entry = runnersCheckEntry(race, date, nr.runners, source);
+    stats.racesChecked++;
+    if (entry.items.length) { stats.racesWithDifferences++; stats.differences += entry.items.length; }
+    races[race._id] = entry;
+  }
+  return { races, stats };
+}
+
+async function runRunnersCheck(trigger = 'schedule') {
+  if (runnersCheckRunning) return false;
+  runnersCheckRunning = true;
+  const startedAt = Date.now();
+  const dates = trackedDates().slice(1); // today, tomorrow, day after -- same days as Missing Meetings
+  const { countries, inScope } = runnersCheckScope();
+  let summary = '';
+  try {
+    const dbRaces = await loadRunnersCheckRaces(countries);
+    const first = nextRunnersSource();
+    const failures = [];
+    let result = null;
+    let used = null;
+    for (const source of [first, first === 'ras' ? 'neds' : 'ras']) {
+      try {
+        result = await checkRunnersWith(source, dates, dbRaces, inScope);
+        used = source;
+        break;
+      } catch (err) {
+        console.warn(`[race-dashboard] WARNING: Runners check with ${RUNNERS_SOURCES[source]} failed: ${err.message}`);
+        failures.push(err.message);
+      }
+    }
+    if (!used) throw new Error(failures.join(' · '));
+    const now = new Date().toISOString();
+    runnersCheckState = {
+      lastRunAt: now, lastAttemptAt: now, durationMs: Date.now() - startedAt, dates, stats: result.stats, error: null, races: result.races,
+      source: used, fallbackReason: failures.length ? failures[0] : null, trigger,
+    };
+    summary = `${result.stats.racesChecked} races, ${result.stats.racesWithDifferences} with differences (${RUNNERS_SOURCES[used]}${failures.length ? ', fallback' : ''})`;
+    // The grid's cached race docs carry the previous result; reload them.
+    for (const key of memoCache.keys()) if (dates.some((d) => key.startsWith(`docs|${d}|`) || key.startsWith('race|'))) memoCache.delete(key);
+  } catch (err) {
+    // Keep the last good result on screen; try again in an hour.
+    runnersCheckState = { ...runnersCheckState, lastAttemptAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: err.message, trigger };
+    summary = `failed (${err.message})`;
+  } finally {
+    runnersCheckRunning = false;
+    try { fs.writeFileSync(RUNNERS_CHECK_STATE_PATH, JSON.stringify(runnersCheckState), 'utf8'); } catch (err) { /* in-memory state still works */ }
+    console.log(`[race-dashboard] Runners check (${trigger}): ${summary} in ${Math.round((Date.now() - startedAt) / 1000)} s`);
+    scheduleRunnersCheck();
+  }
+  return true;
+}
+
+// --- Jockey check (5 Oct 2026, per Dinesh) ----------------------------------
+// The RAS feed fills jockeys late; the Neds website often has them sooner
+// (Palermo 5 Oct: our R4 #17 XA had none, Neds had Juan Pablo Paoloni). Every
+// JOCKEY_CHECK_EVERY_MS this reads the Neds pages of only the races starting
+// in the next 24 hours that still have a running horse with no jockey in
+// ours -- one page at a time, a second apart -- and updates those races'
+// runners check result (Jockey Missing / Mismatched, plus the runner
+// checks). Nothing to read, no requests.
+async function runJockeyCheck() {
+  if (jockeyCheckRunning || runnersCheckRunning) { scheduleJockeyCheck(10 * 60 * 1000); return; }
+  jockeyCheckRunning = true;
+  const startedAt = Date.now();
+  const stats = { meetings: 0, meetingsNotInDb: [], pageErrors: 0 };
+  let summary = '';
+  try {
+    const { countries, inScope } = runnersCheckScope();
+    const dbRaces = await loadRunnersCheckRaces(countries);
+    const now = Date.now();
+    const wanted = dbRaces.filter((r) => {
+      const start = r.rScheduleTimeUTC ? Date.parse(r.rScheduleTimeUTC) : NaN;
+      return r.rDiscipline !== 'G' && !r.resultString && inScope(r.rCountry === 'NZL' ? 'NZ' : r.rCountry, r.rDiscipline)
+        && start > now - 30 * 60 * 1000 && start < now + 24 * 60 * 60 * 1000
+        && (r.runners || []).some((x) => !x.isScratched && !String(x.jockey || '').trim());
+    });
+    const wantedIds = new Set(wanted.map((r) => r._id));
+    let checked = 0;
+    let found = 0;
+    let issues = 0;
+    if (wanted.length) {
+      const raceDates = [...new Set(wanted.map((r) => r.rDate))];
+      // Overseas meetings are listed on Neds under the next (AUS) day.
+      const listDates = [...new Set(wanted.flatMap((r) => (r.rCountry === 'AUS' || r.rCountry === 'NZ' || r.rCountry === 'NZL'
+        ? [r.rDate]
+        : [r.rDate, new Date(Date.parse(`${r.rDate}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)])))].sort();
+      const sourceMeetings = await fetchSourceMeetings('neds', listDates, listDates, inScope);
+      const jobs = matchSourceRaces(sourceMeetings, dbRaces, raceDates, stats).filter((j) => wantedIds.has(j.race._id));
+      await fetchNedsRaceRunners(jobs, { workers: 1, gapMs: 1000, stats });
+      for (const { race, nr, date } of jobs) {
+        if (!Array.isArray(nr.runners) || !nr.runners.length) continue;
+        const entry = runnersCheckEntry(race, date, nr.runners, 'neds-jockey');
+        checked++;
+        issues += entry.items.length;
+        found += entry.items.filter((it) => it.field === 'jockey' && /^Jockey Missing/.test(it.text)).length;
+        runnersCheckState.races[race._id] = entry;
+      }
+      if (checked) {
+        try { fs.writeFileSync(RUNNERS_CHECK_STATE_PATH, JSON.stringify(runnersCheckState), 'utf8'); } catch (err) { /* in-memory state still works */ }
+        for (const key of memoCache.keys()) if (raceDates.some((d) => key.startsWith(`docs|${d}|`)) || key.startsWith('race|')) memoCache.delete(key);
+      }
+    }
+    Object.assign(jockeyCheckState, {
+      lastRunAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: null,
+      racesWanted: wanted.length, racesChecked: checked, jockeysFound: found, issues,
+    });
+    summary = `${wanted.length} races missing a jockey, ${checked} checked, ${found} jockeys found on Neds`;
+  } catch (err) {
+    Object.assign(jockeyCheckState, { lastRunAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: err.message });
+    summary = `failed (${err.message})`;
+  } finally {
+    jockeyCheckRunning = false;
+    saveJockeyCheckState();
+    console.log(`[race-dashboard] Jockey check: ${summary} in ${Math.round((Date.now() - startedAt) / 1000)} s`);
+    scheduleJockeyCheck();
+  }
+}
+
+// Every JOCKEY_CHECK_EVERY_MS from the last run (two minutes after start-up
+// when overdue, after the runners check's own first run).
+let jockeyCheckTimer = null;
+function scheduleJockeyCheck(waitMs) {
+  clearTimeout(jockeyCheckTimer);
+  const last = jockeyCheckState.lastRunAt ? Date.parse(jockeyCheckState.lastRunAt) : 0;
+  const wait = waitMs != null ? waitMs : Math.max(2 * 60 * 1000, last + JOCKEY_CHECK_EVERY_MS - Date.now());
+  jockeyCheckTimer = setTimeout(runJockeyCheck, wait);
+}
+
+// Next run 8 hours after the last good one (an hour after a failed one; a
+// minute after start-up when that's already overdue), so restarts don't add
+// extra checks.
+let runnersCheckTimer = null;
+function scheduleRunnersCheck() {
+  clearTimeout(runnersCheckTimer);
+  const last = runnersCheckState.lastRunAt ? Date.parse(runnersCheckState.lastRunAt) : 0;
+  const attempt = runnersCheckState.lastAttemptAt ? Date.parse(runnersCheckState.lastAttemptAt) : 0;
+  const due = runnersCheckState.error && attempt > last ? attempt + RUNNERS_CHECK_RETRY_MS : last + RUNNERS_CHECK_EVERY_MS;
+  const wait = Math.max(60 * 1000, due - Date.now());
+  runnersCheckTimer = setTimeout(runRunnersCheck, wait);
+}
+
+// Puts the latest runners check differences on the race docs: runner.runnerCheckDiffs for a
+// runner's Issue column, doc.runnerCheckLines for race-level ones (a runner absent
+// or scratched on one side), doc.runnerMismatch for the grid flag. A
+// difference whose value has changed in our DB since the check is dropped.
+// Ignore button on Missing Data > Missing / Mismatched Runners (2 Oct 2026,
+// per Dinesh: "Runners Mismatched Ignore option venu"). One entry per issue
+// (race + kind + runner + text, so a different count or name shows again);
+// entries for dates over a week old are dropped on the next save. An
+// ignored issue is left off the grid, the popup and the Runners column.
+const RUNNER_CHECK_IGNORE_PATH = process.env.RUNNER_CHECK_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\runner-check-ignores.json';
+let runnerCheckIgnores = {};
+try {
+  if (fs.existsSync(RUNNER_CHECK_IGNORE_PATH)) runnerCheckIgnores = JSON.parse(fs.readFileSync(RUNNER_CHECK_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${RUNNER_CHECK_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function runnerIssueKey(raceId, it) {
+  return `${raceId}|${it.field}|${it.tab == null ? '' : it.tab}|${it.text}`;
+}
+function runnerIssueIgnored(raceId, it) {
+  return runnerCheckIgnores[runnerIssueKey(raceId, it)] || null;
+}
+function saveRunnerCheckIgnores() {
+  const cutoff = new Date(Date.parse(`${todayStr()}T00:00:00Z`) - 7 * 86400000).toISOString().slice(0, 10);
+  for (const [key, e] of Object.entries(runnerCheckIgnores)) if (!e.date || e.date < cutoff) delete runnerCheckIgnores[key];
+  const dir = path.dirname(RUNNER_CHECK_IGNORE_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(RUNNER_CHECK_IGNORE_PATH, JSON.stringify(runnerCheckIgnores, null, 2), 'utf8');
+}
+
+function attachRunnersCheck(docs) {
+  for (const doc of docs) {
+    const entry = runnersCheckState.races[doc._id];
+    if (!entry || !entry.items.length) continue;
+    const items = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !runnerIssueIgnored(doc._id, it));
+    for (const r of doc.runners || []) {
+      const mine = items.filter((it) => !it.raceLevel && it.tab === r.tabNo && !r.isScratched);
+      if (mine.length) {
+        r.runnerCheckDiffs = mine.map((it) => it.text);
+        // With keys, for the popup's Ignore buttons.
+        r.runnerCheckItems = mine.map((it) => ({ key: runnerIssueKey(doc._id, it), text: it.text }));
+      }
+    }
+    doc.runnerCheckLines = items.filter((it) => it.raceLevel).map((it) => it.text);
+    doc.runnerCheckLineItems = items.filter((it) => it.raceLevel).map((it) => ({ key: runnerIssueKey(doc._id, it), text: it.text }));
+    doc.runnerMismatch = doc.runnerCheckLines.length > 0 || (doc.runners || []).some((r) => r.runnerCheckDiffs);
+    doc.runnersCheckedAt = runnersCheckState.lastRunAt;
   }
 }
 
@@ -1275,6 +1746,40 @@ async function fetchRaceDocs(dateStr, includeTrials) {
   return docs;
 }
 
+// Finish positions from finalResults (1 Oct 2026, per Dinesh: "Inda
+// meetings full results kaattudilla"): the scraper sometimes writes a
+// race's resultString but never copies each runner's finish position into
+// races.runners[].fp -- that day 110 of 244 resulted races (101 AUS, e.g.
+// all of Gatton) had no fp, while finalResults had every one of them, and
+// agreed with fp wherever both existed. So a resulted race with no fp at
+// all gets its positions from finalResults, matched on runnerId (tab
+// number only for a runner without one).
+async function fillFinishPositions(docs) {
+  const needs = docs.filter((d) => d.resultString && (d.runners || []).length && !d.runners.some((r) => r.fp != null));
+  if (!needs.length) return;
+  const finals = await (await getClient()).db().collection('finalResults')
+    .find({ raceId: { $in: needs.map((d) => d._id) } })
+    .project({ raceId: 1, 'results.runnerId': 1, 'results.runnerNumber': 1, 'results.finishPosition': 1 })
+    .toArray();
+  const resultsByRace = new Map(finals.map((f) => [f.raceId, f.results || []]));
+  for (const doc of needs) {
+    const results = resultsByRace.get(doc._id);
+    if (!results) continue;
+    const byRunnerId = new Map();
+    const byTabNo = new Map();
+    for (const x of results) {
+      if (!(x.finishPosition > 0)) continue;
+      if (x.runnerId) byRunnerId.set(x.runnerId, x.finishPosition);
+      if (x.runnerNumber != null) byTabNo.set(x.runnerNumber, x.finishPosition);
+    }
+    for (const r of doc.runners) {
+      if (r.isScratched) continue;
+      const fp = r.runnerId ? byRunnerId.get(r.runnerId) : byTabNo.get(r.tabNo);
+      if (fp != null) r.fp = fp;
+    }
+  }
+}
+
 async function loadRaceDocs(dateStr, includeTrials) {
   const client = await getClient();
   // NOTE: no longer filtering out isAbandoned here -- the dashboard now has
@@ -1295,6 +1800,7 @@ async function loadRaceDocs(dateStr, includeTrials) {
       meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
       'runners.trainer': 1, 'runners.horseName': 1, 'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1,
+      'runners.weight': 1, // runners check weight issues (attachRunnersCheck)
     })
     .sort({ rCourseDisplayName: 1, rNo: 1 })
     .toArray();
@@ -1315,7 +1821,8 @@ async function loadRaceDocs(dateStr, includeTrials) {
     doc.rsMeetingId = extras ? extras.rsMeetingId : null;
     doc.tabMeetingId = extras ? extras.tabMeetingId : null;
   }
-  await Promise.all([attachFormLineStatus(docs, { light: true }), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr)]);
+  await Promise.all([attachFormLineStatus(docs, { light: true }), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr), fillFinishPositions(docs)]);
+  attachRunnersCheck(docs);
   return docs;
 }
 
@@ -1337,7 +1844,7 @@ async function loadRaceById(id) {
         rName: 1, rDisplayName: 1, isTrail: 1,
         rDate: 1, createdAt: 1, meetingId: 1,
         'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
-        'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1, 'runners.bp': 1,
+        'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1, 'runners.bp': 1, 'runners.weight': 1,
       },
     }
   );
@@ -1362,9 +1869,68 @@ async function loadRaceById(id) {
       }),
       attachFormLineStatus([doc]),
       attachVideoStatus([doc], doc.rDate),
+      fillFinishPositions([doc]),
+      attachSpotlights(doc),
+      attachCommentsV2(doc),
     ]);
+    attachRunnersCheck([doc]);
   }
   return doc;
+}
+
+// Comments V2 (7 Oct 2026, per Dinesh: free, no AI) -- written by
+// comments-v2.js from this race's racecard, Thoroughbred only, on each popup
+// load (a few ms; nothing saved). Runners scratched in ours are left out
+// even when the racecard hasn't caught up.
+async function attachCommentsV2(doc) {
+  doc.commentsV2 = null;
+  if (doc.rDiscipline !== 'T') return;
+  try {
+    const cards = await (await getClient()).db().collection('racecards')
+      .find({ RaceId: doc._id })
+      .project({ Style: 1, Course: 1, Date: 1, OffTimeUtc: 1, RaceDistance: 1, Runners: 1 })
+      .toArray();
+    const card = cards.find((c) => c.Style === 'AU') || cards[0];
+    if (!card) return;
+    const scratched = new Set((doc.runners || []).filter((r) => r.isScratched).map((r) => r.tabNo));
+    doc.commentsV2 = generateCommentsV2(card, scratched);
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: Comments V2 for race ${doc._id} failed: ${err.message}`);
+  }
+}
+
+// Spotlights (6 Oct 2026, per Dinesh: "Spot light mattu vainga") -- the 3
+// "horses to watch" the company pipeline writes alongside its race/runner
+// comments in `llmContent` (contentType RACE_CARD_COMMENTS), one doc per
+// style (AU/UK/US). A race can have several docs per style after re-runs --
+// the newest wins. Kept per style here; buildRaceDetail picks the race
+// country's. llmContent has no raceId index, so this is a collection scan
+// (~0.4 s), only done for the one race a popup opens.
+async function attachSpotlights(doc) {
+  doc.llmSpotlights = null;
+  try {
+    const rows = await (await getClient()).db().collection('llmContent')
+      .find({ raceId: doc._id, contentType: 'RACE_CARD_COMMENTS' })
+      .project({ 'contentInfo.style': 1, content: 1, updatedAt: 1 })
+      .toArray();
+    rows.sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')));
+    const byStyle = {};
+    for (const row of rows) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(String(row.content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+      } catch (e) {
+        continue;
+      }
+      const spotlights = (parsed && Array.isArray(parsed.spotlights) ? parsed.spotlights : [])
+        .filter((s) => s && (s.horse || s.name))
+        .map((s) => ({ horse: String(s.horse || ''), name: String(s.name || ''), explanation: String(s.explanation || '') }));
+      if (spotlights.length) byStyle[String((row.contentInfo || {}).style || 'AU').toUpperCase()] = spotlights;
+    }
+    if (Object.keys(byStyle).length) doc.llmSpotlights = byStyle;
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: llmContent lookup for race ${doc._id} failed: ${err.message}`);
+  }
 }
 
 // Global search (22 Sep 2026, per Dinesh: "Search panel onnu podunga, Ella
@@ -1495,16 +2061,19 @@ async function fetchMeetingRaceDocs(dateStr, meeting, country, discipline, inclu
   const filter = { rDate: dateStr, rCourseDisplayName: meeting, rCountry: country, rDiscipline: discipline, isHidden: { $ne: true } };
   if (!includeTrials) filter.isTrail = false;
 
-  return client.db().collection('races')
+  const docs = await client.db().collection('races')
     .find(filter)
     .project({
       _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rPrizeMoney: 1, rScheduleTime: 1,
       rName: 1, rDisplayName: 1, resultString: 1, isAbandoned: 1, rStatus: 1, isOpen: 1,
       meetingId: 1, rDate: 1,
       'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
+      'runners.runnerId': 1,
     })
     .sort({ rNo: 1 })
     .toArray();
+  await fillFinishPositions(docs);
+  return docs;
 }
 
 // Builds the issues report as an .xlsx workbook buffer. Kept in server.js
@@ -1910,6 +2479,39 @@ function saveMissingMeetingCountries(username) {
   }, null, 2), 'utf8');
 }
 
+// "Runners" column (2 Oct 2026, per Dinesh): each matched meeting's latest
+// runners check result -- row.runners = { checked, missing, mismatched,
+// races, lines }. checked is false when none of its races was in the last
+// check (already resulted, or no runners in the source yet).
+async function attachMeetingRunnerChecks(db, rows, dates) {
+  const meetingIds = [...new Set(rows.map((r) => r.dbMeetingId).filter(Boolean))];
+  const races = meetingIds.length ? await db.collection('races')
+    .find({ meetingId: { $in: meetingIds }, rDate: { $in: dates }, isHidden: { $ne: true } })
+    .project({ meetingId: 1, rNo: 1, 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1 })
+    .toArray() : [];
+  for (const row of rows) {
+    // byRace: one entry per race with an issue, for the click-to-expand list
+    // (2 Oct 2026, per Dinesh: just "3 Missing | 3 Mismatched", the races
+    // underneath on click, each opening that race).
+    const result = { checked: false, missing: 0, mismatched: 0, races: 0, byRace: [] };
+    for (const race of races.filter((r) => r.meetingId === row.dbMeetingId).sort((a, b) => a.rNo - b.rNo)) {
+      const entry = runnersCheckState.races[race._id];
+      if (!entry) continue;
+      result.checked = true;
+      const items = entry.items.filter((it) => stillDiffers(race, it, entry.source) && !runnerIssueIgnored(race._id, it) && !(race.runners || []).some((x) => x.tabNo === it.tab && x.isScratched && !it.raceLevel));
+      if (!items.length) continue;
+      result.races++;
+      const one = { rNo: race.rNo, missing: 0, mismatched: 0, lines: [], url: entry.meeting ? raceUrl({ discipline: entry.discipline, country: entry.country, meeting: entry.meeting, date: entry.date, rNo: entry.rNo }) : null };
+      for (const it of items) {
+        if (it.field === 'present' && it.raceLevel) { result.missing++; one.missing++; } else { result.mismatched++; one.mismatched++; }
+        one.lines.push(`${it.tab != null && !it.raceLevel ? `#${it.tab} ` : ''}${it.text}`);
+      }
+      result.byRace.push(one);
+    }
+    row.runners = result;
+  }
+}
+
 async function getMissingMeetings(fresh) {
   const dates = trackedDates().slice(1); // today, tomorrow, day after
   if (fresh) dates.forEach((d) => memoCache.delete(`feed-scratchings|${d}`));
@@ -1939,9 +2541,12 @@ async function getMissingMeetings(fresh) {
   ]);
   const rows = compareMeetings(source, dbMeetings, new Map(raceCounts.map((r) => [r._id, r.n])));
   for (const row of rows) {
-    const ignore = row.status === 'missing' && missingMeetingIgnores[String(row.sourceMeetingId)];
+    // A merged surface split (see missing-meetings.js) counts as ignored
+    // under any of its feed MeetingIDs.
+    const ignore = row.status === 'missing' && row.sourceMeetingIds.map((id) => missingMeetingIgnores[String(id)]).find(Boolean);
     if (ignore) Object.assign(row, { status: 'ignored', ignoredBy: ignore.ignoredBy, ignoredAt: ignore.ignoredAt });
   }
+  await attachMeetingRunnerChecks(db, rows, dates);
   return {
     dates,
     checkedAt: new Date().toISOString(),
@@ -1962,6 +2567,105 @@ app.get('/missing-meetings', requirePermission('missing'), (req, res) => {
 
 // Admins only (1 Oct 2026, per Dinesh: "adminku mattu da country add
 // pandra option wenu").
+// Missing Data > Missing / Mismatched Runners (2 Oct 2026, per Dinesh): every
+// race where the last runners check found a difference that's still true
+// in our DB (Runner Missing / Runner Mismatched / Runner Count Mismatched).
+app.get('/api/missing-runners', requirePermission('missing'), async (req, res) => {
+  try {
+    const state = runnersCheckState;
+    const ids = Object.keys(state.races || {}).filter((id) => state.races[id].items.length);
+    const docs = ids.length ? await (await getClient()).db().collection('races')
+      .find({ _id: { $in: ids } })
+      .project({ 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1 })
+      .toArray() : [];
+    const races = [];
+    for (const doc of docs) {
+      const entry = state.races[doc._id];
+      const items = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !(!it.raceLevel && (doc.runners || []).some((x) => x.tabNo === it.tab && x.isScratched)));
+      if (!items.length) continue;
+      const horse = (tab) => ((doc.runners || []).find((x) => x.tabNo === tab) || {}).horseName || '';
+      races.push({
+        raceId: doc._id, date: entry.date, meeting: entry.meeting, country: entry.country, discipline: entry.discipline, rNo: entry.rNo,
+        url: entry.meeting ? raceUrl({ discipline: entry.discipline, country: entry.country, meeting: entry.meeting, date: entry.date, rNo: entry.rNo }) : null,
+        counts: entry.counts || null,
+        issues: items.map((it) => {
+          const ignore = runnerIssueIgnored(doc._id, it);
+          return {
+            kind: it.field === 'count' ? 'count' : it.field === 'jockey' || it.field === 'weight' ? 'jockey' : (it.field === 'present' && it.raceLevel) || it.field === 'field' ? 'missing' : 'mismatched',
+            tab: it.raceLevel ? null : it.tab,
+            horse: it.raceLevel ? '' : horse(it.tab),
+            text: it.text,
+            key: runnerIssueKey(doc._id, it),
+            ignored: Boolean(ignore),
+            ignoredBy: ignore ? ignore.ignoredBy : null,
+            ignoredAt: ignore ? ignore.ignoredAt : null,
+          };
+        }),
+      });
+    }
+    races.sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.country).localeCompare(String(b.country)) || String(a.meeting).localeCompare(String(b.meeting)) || a.rNo - b.rNo);
+    const attempt = state.lastAttemptAt ? Date.parse(state.lastAttemptAt) : 0;
+    res.json({
+      lastRunAt: state.lastRunAt, lastAttemptAt: state.lastAttemptAt, error: state.error, running: runnersCheckRunning,
+      source: state.source, sourceLabel: RUNNERS_SOURCES[state.source] || null, fallbackReason: state.fallbackReason || null, trigger: state.trigger || null,
+      nextSourceLabel: RUNNERS_SOURCES[nextRunnersSource()],
+      canCheckAt: attempt ? new Date(attempt + RUNNERS_CHECK_MANUAL_GAP_MS).toISOString() : null,
+      everyHours: RUNNERS_CHECK_EVERY_MS / 3600000, dates: state.dates || [], stats: state.stats, races,
+      jockeyCheck: {
+        lastRunAt: jockeyCheckState.lastRunAt, everyHours: JOCKEY_CHECK_EVERY_MS / 3600000, error: jockeyCheckState.error,
+        racesWanted: jockeyCheckState.racesWanted, racesChecked: jockeyCheckState.racesChecked, jockeysFound: jockeyCheckState.jockeysFound,
+        nedsPausedUntil: jockeyCheckState.nedsPausedUntil > Date.now() ? new Date(jockeyCheckState.nedsPausedUntil).toISOString() : null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ignore / Undo for one runner check issue (see runnerIssueKey).
+app.post('/api/missing-runners/ignore', requirePermission('missing'), (req, res) => {
+  const { key, ignored } = req.body || {};
+  if (typeof key !== 'string' || key.length > 500) return res.status(400).json({ error: 'key is required' });
+  const raceId = key.split('|')[0];
+  const entry = runnersCheckState.races[raceId];
+  const item = entry && entry.items.find((it) => runnerIssueKey(raceId, it) === key);
+  const saved = runnerCheckIgnores[key];
+  if (ignored && !item) return res.status(404).json({ error: 'That issue is no longer in the last check' });
+  const label = `${(entry && entry.meeting) || (saved && saved.meeting) || ''} R${(entry && entry.rNo) || (saved && saved.rNo) || '?'}: ${(item && item.text) || (saved && saved.text) || ''}`;
+  if (ignored) {
+    runnerCheckIgnores[key] = {
+      date: entry.date, meeting: entry.meeting, rNo: entry.rNo, text: item.text,
+      ignoredAt: new Date().toISOString(), ignoredBy: req.session.username,
+    };
+  } else {
+    delete runnerCheckIgnores[key];
+  }
+  try {
+    saveRunnerCheckIgnores();
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  // The grid's cached race docs carry the old flags.
+  for (const k of memoCache.keys()) if (k.startsWith('docs|') || k === `race|${raceId}`) memoCache.delete(k);
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Runner issue ${ignored ? 'ignored' : 'un-ignored'}: ${label}` });
+  res.json({ ok: true, ignored: Boolean(ignored), ignoredBy: ignored ? req.session.username : null, ignoredAt: ignored ? runnerCheckIgnores[key].ignoredAt : null });
+});
+
+// "Check now" (2 Oct 2026, per Dinesh: "Aditiona la check button podunga"):
+// runs the runners check straight away with whichever source is available,
+// at most once every 10 minutes. The page polls /api/missing-runners until
+// it's done.
+app.post('/api/missing-runners/check', requirePermission('missing'), (req, res) => {
+  if (runnersCheckRunning) return res.status(409).json({ error: 'A check is already running', running: true });
+  const attempt = runnersCheckState.lastAttemptAt ? Date.parse(runnersCheckState.lastAttemptAt) : 0;
+  const waitMs = attempt + RUNNERS_CHECK_MANUAL_GAP_MS - Date.now();
+  if (waitMs > 0) return res.status(429).json({ error: `Checked less than 10 minutes ago -- try again in ${Math.ceil(waitMs / 60000)} min`, retryInMs: waitMs });
+  const source = RUNNERS_SOURCES[nextRunnersSource()];
+  logActivity(req, 'runners-check', { detail: `Ran the runners check (${source} first)` });
+  runRunnersCheck('manual');
+  res.status(202).json({ started: true, source });
+});
+
 app.post('/api/missing-meetings/countries', requireAdmin, (req, res) => {
   const { action } = req.body || {};
   const code = String((req.body && req.body.code) || '').trim().toUpperCase();
@@ -2267,7 +2971,9 @@ app.get('/api/race/:id', async (req, res) => {
     const doc = await fetchRaceById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'Race not found' });
     logActivity(req, 'view-race', { detail: `${doc.rCourseDisplayName || doc.rCourse} R${doc.rNo} (${doc.rCountry}) ${doc.rDate}` }, { key: req.params.id, ms: 10 * 60 * 1000 });
-    res.json(buildRaceDetail(doc));
+    // canIgnoreRunnerCheck: the popup's runner check Ignore buttons, for
+    // users with the Missing Data section (same as its Ignore endpoint).
+    res.json({ ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing) });
     prefetchMeetingRaces(doc);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2872,4 +3578,8 @@ app.listen(PORT, () => {
   lastDashboardUseAt = Date.now();
   keepTodayWarm();
   setInterval(keepTodayWarm, 60 * 1000);
+  scheduleRunnersCheck();
+  scheduleJockeyCheck();
+  console.log(`[race-dashboard] Jockey check: every ${JOCKEY_CHECK_EVERY_MS / 3600000} h (Neds website, races missing a jockey)`);
+  console.log(`[race-dashboard] Runners check: every ${RUNNERS_CHECK_EVERY_MS / 3600000} h${runnersCheckState.lastRunAt ? `, last run ${runnersCheckState.lastRunAt}` : ', first run in a minute'}`);
 });

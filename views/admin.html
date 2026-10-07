@@ -71,7 +71,7 @@
           <label class="adm-check"><input type="checkbox" class="newPerm" value="activity"> User Activity</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="health"> System Health</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="changes"> Data Changes</label>
-          <label class="adm-check"><input type="checkbox" class="newPerm" value="missing"> Missing Meetings</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="missing"> Missing Data</label>
           <label class="adm-check adm-check-admin"><input type="checkbox" id="newAdmin"> Admin (all three + add / delete users)</label>
         </fieldset>
         <p class="adm-msg" id="addUserMsg" hidden></p>
@@ -141,8 +141,9 @@
       'view-meetings-list': ['Opened meetings list', 'view', 'view'],
       'view-admin': ['Opened admin page', 'view', 'view'],
       'view-changes': ['Opened data changes', 'view', 'view'],
-      'view-missing-meetings': ['Opened missing meetings', 'view', 'view'],
-      'missing-countries': ['Changed missing-meeting countries', 'admin', 'admin'],
+      'view-missing-meetings': ['Opened missing data', 'view', 'view'],
+      'missing-countries': ['Changed missing-data countries', 'admin', 'admin'],
+      'runners-check': ['Ran the runners check', 'view', 'view'],
       'download': ['Downloaded', 'download', 'download'],
       'confirm': ['Confirmed', 'confirm', 'confirm'],
       'undo-confirm': ['Undid a confirm', 'confirm', 'confirm'],
@@ -190,7 +191,7 @@
       return d;
     }
 
-    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Meetings']];
+    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Data']];
     var COLS = 10;
     function accessChips(u) {
       if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';

@@ -25,3 +25,5 @@ npm-debug.log*
 # Ignore / settings data the server writes (live data, not code)
 *-ignores.json
 missing-meeting-countries.json
+runners-check-state.json
+jockey-check-state.json
