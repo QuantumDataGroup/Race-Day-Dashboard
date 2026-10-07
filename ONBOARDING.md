@@ -197,7 +197,7 @@ reflects it without delay.
 ### Admin area access
 The Admin link opens four section buttons: **User Activity** (`/admin`,
 the default), **System Health** (`/system-health`), **Data Changes**
-(`/changes`) and **Missing Meetings** (`/missing-meetings`). Admins get all
+(`/changes`) and **Missing Data** (`/missing-meetings`). Admins get all
 four plus user management. Anyone else gets
 only the sections an admin ticked for them when adding the user (or later
 with "Access"), stored as `permissions` on the user; with none ticked they
@@ -215,8 +215,13 @@ yesterday..today+2 and compares them with a snapshot
 date entering the window for the first time is recorded silently. Odds
 are not tracked.
 
-### Missing Meetings (`/missing-meetings`)
-Thoroughbred meetings the Scratchings feed (`getScratchingsGrey`, which
+### Missing Data (`/missing-meetings`)
+Two sub-tabs: **Missing Meetings** (below) and **Missing / Mismatched Runners**
+(`#runners`, `/api/missing-runners`): every race where the last runners
+check (see Runners check) found a Runner Missing / Runner Mismatched /
+Runner Count Mismatched that is still true in our DB, with filters.
+
+Missing Meetings: Thoroughbred meetings the Scratchings feed (`getScratchingsGrey`, which
 lists every meeting of the day) has for UAE, KOR, MAL, MUS, ARG, BRZ, CHI,
 GER, DEN, ITY, SAU, SWE and CAN, for today to 2 days ahead, compared with
 our `meetings` collection (`missing-meetings.js`). Matched on the feed's
@@ -236,6 +241,55 @@ missing-meetings.js until first changed. Countries with thoroughbred
 meetings in the feed that aren't checked are offered as quick-add chips.
 An earlier version used RAS `GetMeetingsByCountry` on
 nextdc.racingandsports.com.au:8813, which production can't reach.
+
+### Runners check (`runners-check.js`)
+Every 8 hours the server compares runners with ours, for today to 2 days
+ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing
+Data countries (thoroughbred). Two sources take turns -- one run the RAS
+API (`http://nextdc.racingandsports.com:9542/api/v1/neds/meetings?date=`,
+one request per day), the next the nedsform.com.au website (one page per
+day + one per race we have, two at a time, ~2-3 min) -- and if the one
+whose turn it is fails, the other is used in the same run. "Check now" on
+Missing Data > Missing / Mismatched Runners runs it at once (at most once
+every 10 minutes). Races already resulted are skipped.
+Flags: Runner Missing (in the source, not ours), Runner Mismatched (cut-off
+name / not in the field / scratched there), Runner Count Mismatched, and a
+whole field that doesn't match. Runners are matched by name (the API's tab
+numbers can be shifted); its scratched flag lags, so "running there,
+scratched in ours" is not flagged. Neds dates overseas meetings by the AUS
+day, so for overseas Neds meetings the day is picked by start times (median
+gap within 6 h), then races pair by number; AUS/NZ go by date + race
+number. A track listed twice for one day (Neds had two "Globe Derby"
+meetings on 7 Oct 2026, the second with its own R3 and a later R4) is
+merged into one; when two source races share a number, ours pairs with the
+one starting closest to it, and one over 3 h away is not ours and is
+skipped. "Vacant Box" (an empty greyhound box, RAS only) is not a runner: left out
+of every comparison and count on both sides (`isVacantBox`). On the Neds
+website a runner of ours that isn't listed is not an issue (Neds leaves
+runners off its pages), so from Neds only extra runners, a Neds count
+higher than ours, and a field that doesn't match are flagged -- "not in
+field" and "Neds has fewer" come from RAS only. Shown in the runner's Issue column, the
+grid flag/Issues filter, popup lines, the Runners column of Missing
+Meetings and its own sub-tab. Result in `runners-check-state.json` in the
+logs folder (restarts don't add runs; a run where both sources fail retries
+hourly); System Health shows the source used and the next one.
+**Ignore** on an issue in the runners list hides it from the grid, popup and
+Runners column (saved in `runner-check-ignores.json` next to the other
+ignore files, `RUNNER_CHECK_IGNORE_PATH`; keyed by race + kind + runner +
+text, so a changed count/name shows again; Undo brings it back; entries
+over a week old are dropped). Logged in User Activity as a confirm.
+
+### Jockey check + Neds politeness (server.js)
+When the Neds website is the source, jockeys (blank in ours / different)
+give "Jockey Missing (name)" when ours is blank. Jockey names that differ
+and weights are not compared (Dinesh, 6 Oct 2026). The RAS API has no
+jockeys. A separate **jockey check** runs every
+`JOCKEY_CHECK_EVERY_MS` (3 h; Dinesh may ask for 2 h): only races starting
+in the next 24 h that still have a running horse with no jockey, one Neds
+page a second, updating those races' result. Every Neds request goes through
+`fetchNeds()`: gaps between requests, and on a 429/403 all Neds requests
+pause for 6 hours (`jockey-check-state.json`); the runners check then uses
+RAS. System Health shows a "Jockey check (Neds)" row and any pause.
 
 ### System Health (`/system-health`, admins only)
 Live checks, refreshed every 60 s (cached 60 s server-side): server uptime,
@@ -307,6 +361,26 @@ actual pace data), **Race Card** (raw `racecards` documents, debug view),
 **Data Dump** (raw `datadumps` documents, debug view). Plus "Watch race
 video" (in-page overlay, not a new tab) when a video exists, and a
 per-race Export Data menu.
+
+**Spotlights** tab (only when the race has them): the 3 "horses to watch"
+the company pipeline writes in `llmContent` (`contentType:
+"RACE_CARD_COMMENTS"`, matched by `raceId`, one doc per style AU/UK/US,
+newest `updatedAt` wins) — read in server.js's `attachSpotlights`, style
+picked by race country in raceView.js's `pickSpotlights` (USA/CAN/MEX → US,
+GB/IRE/Europe → UK, else AU). `llmContent` has no `raceId` index, so the
+lookup is a ~0.4 s collection scan per popup. (A V1/V2 comments switch was
+built and removed on 6 Oct 2026 at Dinesh's request.)
+
+**Comments V2** tab (Thoroughbred only): race overview, 3 spotlights and a
+comment per running horse, written by `comments-v2.js` from the race's
+`racecards` doc (AU style preferred) — no AI, no API key, no cost; a few ms
+on each popup load (server.js's `attachCommentsV2`), nothing saved. Facts
+only: last run (position, field, distance, margin, winner, going), distance
+change, spell, barrier, weight, track/distance record, past clashes between
+runners, odds (for the order). AU/UK/US switch (units and terms only),
+opening on the race country's style (`commentStyleFor` in raceView.js).
+Runners scratched in ours are left out. Dinesh chose free over a paid AI
+model on 7 Oct 2026.
 
 ### Standalone full-screen race view
 Right-click (or ctrl/cmd/middle-click) any race time to open it in a new

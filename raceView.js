@@ -16,13 +16,13 @@ const fs = require('fs');
 const path = require('path');
 
 const MISSING_JOCKEY_BORDER_THRESHOLD = 0; // strictly more than this -> red border (any missing jockey at all triggers it)
-// 4 Sep 2026, per Dinesh -- a race with just 1-3 runners missing form lines
-// is treated as normal noise (often genuine first-starters), not worth
-// flagging; only 4+ missing on the same race is treated as a real problem.
-// Deliberately much higher than MISSING_JOCKEY_BORDER_THRESHOLD (0) since
-// jockey/trainer data is reliably populated so ANY gap is suspicious, while
-// "no form yet" is routine for individual runners.
-const MISSING_FORM_BORDER_THRESHOLD = 3; // strictly more than this -> flagged
+// 4 Sep 2026, per Dinesh, only 4+ runners missing form lines on one race
+// were flagged (1-3 treated as first-starter noise). Changed 2 Oct 2026, per
+// Dinesh (PERAK R3 / HIPODROMO CHILE R5 each had one runner missing form and
+// no grid warning: "Warning missing aagin irukku"): any runner missing form
+// lines flags the race. A runner confirmed with "Confirm no form" no longer
+// counts (applyFormLineIgnores in server.js).
+const MISSING_FORM_BORDER_THRESHOLD = 0; // strictly more than this -> flagged
 const GAP_THRESHOLD_MIN = 15; // race scheduled less than this many minutes after the previous race at the same meeting -> highlighted
 // 4 Sep 2026, per Dinesh -- flags an unusually old horse as a likely data
 // error. Thoroughbred only: most TB careers end by 8-10, but Harness horses
@@ -322,6 +322,9 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   // marked isScratched yet. All disciplines (the feed covers Thoroughbred/
   // Harness/Greyhound), unlike the T-only checks above.
   if (runner.missingScratching) parts.push('Scratching not updated');
+  // Runner Missing / Mismatched (2 Oct 2026, per Dinesh) -- from the RAS
+  // runner check, attached server-side by attachRunnersCheck, AUS + NZ.
+  if (Array.isArray(runner.runnerCheckDiffs)) parts.push(...runner.runnerCheckDiffs);
   return parts.join(' | ');
 }
 
@@ -442,6 +445,11 @@ function buildSchedule(docs, dateStr) {
       // doesn't yet have marked isScratched (21 Sep 2026, per Dinesh).
       missingScratching: Boolean(doc.missingScratching),
       missingScratchingNames: Array.isArray(doc.missingScratchingNames) ? doc.missingScratchingNames : [],
+      // Runners check (server.js attachRunnersCheck): runners whose details
+      // differ, plus race-level lines (a runner absent/scratched on one side).
+      runnerMismatch: Boolean(doc.runnerMismatch),
+      runnerMismatchCount: (doc.runners || []).filter((r) => Array.isArray(r.runnerCheckDiffs) && !r.isScratched).length,
+      runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
     });
   }
 
@@ -464,7 +472,7 @@ function buildSchedule(docs, dateStr) {
       const {
         id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
         missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
-        missingScratching, missingScratchingNames,
+        missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -513,6 +521,9 @@ function buildSchedule(docs, dateStr) {
             missingSpeedMap,
             missingScratching,
             missingScratchingNames,
+            runnerMismatch,
+            runnerMismatchCount,
+            runnerCheckLines,
           }
         : null;
       if (clock) prevMinutes = clock.minutes;
@@ -556,6 +567,7 @@ function buildSchedule(docs, dateStr) {
     let hasMissingVideo = false;
     let hasMissingSpeedMap = false;
     let hasMissingScratching = false;
+    let hasRunnerMismatch = false;
     let hasMissingResults = false;
     let hasMissingRaceComment = false;
     let hasScheduleIssue = false;
@@ -573,16 +585,17 @@ function buildSchedule(docs, dateStr) {
       if (race.missingVideo) hasMissingVideo = true;
       if (race.missingSpeedMap) hasMissingSpeedMap = true;
       if (race.missingScratching) hasMissingScratching = true;
+      if (race.runnerMismatch) hasRunnerMismatch = true;
       if (race.missingResult) hasMissingResults = true;
       if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasMissingResults || hasMissingRaceComment || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasMissingRaceComment || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasMissingResults, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
       races,
     });
   }
@@ -710,6 +723,20 @@ function buildExternalCheckUrl(doc) {
   return GENERAL_CHECK_SITE_BY_COUNTRY[country] || null;
 }
 
+// The comment style (AU / UK / US) written for that country's punters;
+// everyone else gets AU, the company's home style.
+function commentStyleFor(country) {
+  const c = String(country || '').toUpperCase();
+  if (['USA', 'US', 'CAN', 'MEX', 'PR'].includes(c)) return 'US';
+  if (['GB', 'GBR', 'UK', 'IRE', 'IRL', 'FR', 'GER', 'ITY', 'SPA', 'SWE'].includes(c)) return 'UK';
+  return 'AU';
+}
+
+function pickSpotlights(byStyle, country) {
+  if (!byStyle) return [];
+  return byStyle[commentStyleFor(country)] || byStyle.AU || Object.values(byStyle)[0] || [];
+}
+
 // Builds the click-through detail payload for one race document (full runners).
 // When the race has finished (resultString and/or per-runner finish position
 // "fp" present), runners are sorted by finishing position instead of tab
@@ -779,6 +806,8 @@ function buildRaceDetail(doc) {
       formFigures: r.formFigures || null,
       isScratched: Boolean(r.isScratched),
       issue: issueForRunner(r, doc.rDiscipline, counts, tabCounts),
+      // Runner check issues with their keys (popup Ignore buttons).
+      runnerCheckItems: Array.isArray(r.runnerCheckItems) && !r.isScratched ? r.runnerCheckItems : [],
     }));
 
   // Marks the single lowest-priced non-scratched runner as the market
@@ -818,11 +847,25 @@ function buildRaceDetail(doc) {
     // today's races (videos only ever get uploaded same-day).
     missingVideo: doc.hasVideo === false && doc.rDate === todayStr(),
     videoUrl: doc.videoUrl || null,
+    // Race-level runners check differences (a runner absent or scratched on one
+    // side); per-runner ones are in each runner's issue text.
+    runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
+    runnerCheckLineItems: Array.isArray(doc.runnerCheckLineItems) ? doc.runnerCheckLineItems : [],
+    runnersCheckedAt: doc.runnersCheckedAt || null,
     // Race-level preview commentary from the racecards join (Thoroughbred
     // only -- see server.js's attachFormLineStatus). `hasRaceComment` is
     // null (not false) for non-T races, so this stays false for them too.
     raceComment: doc.raceComment || null,
     missingRaceComment: doc.hasRaceComment === false,
+    // Spotlights from `llmContent` (server.js's attachSpotlights), in the
+    // race country's style, falling back to any style the race has:
+    // [{ horse, name, explanation }].
+    spotlights: pickSpotlights(doc.llmSpotlights, doc.rCountry),
+    // Comments V2 (comments-v2.js via server.js's attachCommentsV2):
+    // { AU|UK|US: { overview, runners: { tab: text }, spotlights } }, and the
+    // style the Comments V2 tab opens with.
+    commentsV2: doc.commentsV2 || null,
+    commentStyle: commentStyleFor(doc.rCountry),
     // Sex restriction (e.g. "Fillies", "Colts & Geldings") -- same
     // racecards join as raceComment above, same "Thoroughbred only" scope.
     sexRestriction: doc.sexRestriction || null,
@@ -1226,13 +1269,13 @@ function renderUserBlock(username, access) {
   return `${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
 }
 
-// User Activity | System Health | Data Changes | Missing Meetings buttons
+// User Activity | System Health | Data Changes | Missing Data buttons
 // across the admin-area pages, only the sections this user has.
 const ADMIN_SECTIONS = [
   { key: 'activity', href: '/admin', icon: 'fa-users', label: 'User Activity' },
   { key: 'health', href: '/system-health', icon: 'fa-heart-pulse', label: 'System Health' },
   { key: 'changes', href: '/changes', icon: 'fa-clock-rotate-left', label: 'Data Changes' },
-  { key: 'missing', href: '/missing-meetings', icon: 'fa-triangle-exclamation', label: 'Missing Meetings' },
+  { key: 'missing', href: '/missing-meetings', icon: 'fa-triangle-exclamation', label: 'Missing Data' },
 ];
 function renderAdminTabs(active, access) {
   return `<nav class="adm-tabs" aria-label="Admin sections">${ADMIN_SECTIONS.filter((s) => access && access[s.key]).map((s) =>
@@ -1301,6 +1344,10 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingVideo) raceIssueLines.push('Missing Video');
           if (race.missingSpeedMap) raceIssueLines.push('Missing Speed Map');
           if (race.missingScratching) raceIssueLines.push(`Scratching Not Updated (${race.missingScratchingNames.join(', ')})`);
+          if (race.runnerMismatch) {
+            raceIssueLines.push(...race.runnerCheckLines);
+            if (race.runnerMismatchCount) raceIssueLines.push(`Runner Mismatched (${race.runnerMismatchCount} runner${race.runnerMismatchCount === 1 ? '' : 's'})`);
+          }
           if (race.missingResult) raceIssueLines.push('Results Missing');
           if (race.missingRaceComment) raceIssueLines.push('Missing Race Comment');
           if (race.badTime) raceIssueLines.push(`Schedule Issue (${race.badTimeReason})`);
@@ -1322,6 +1369,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingVideo) otherIssueFlags.push('missing-video');
           if (race.missingSpeedMap) otherIssueFlags.push('missing-speed-map');
           if (race.missingScratching) otherIssueFlags.push('missing-scratching');
+          if (race.runnerMismatch) otherIssueFlags.push('runner-mismatch');
           if (race.missingResult) otherIssueFlags.push('missing-results');
           if (race.ageIssueFlagged) otherIssueFlags.push('horse-age-issue');
           if (race.missingRunnerCommentFlagged) otherIssueFlags.push('missing-runner-comment');
@@ -1389,6 +1437,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingVideo) issueCodes.push('missingvideo');
         if (m.hasMissingSpeedMap) issueCodes.push('missingspeedmap');
         if (m.hasMissingScratching) issueCodes.push('missingscratching');
+        if (m.hasRunnerMismatch) issueCodes.push('runnermismatch');
         if (m.hasMissingResults) issueCodes.push('missingresults');
         if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
@@ -1409,6 +1458,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingVideo) issueReasons.push('Missing Video');
         if (m.hasMissingSpeedMap) issueReasons.push('Missing Speed Map');
         if (m.hasMissingScratching) issueReasons.push('Scratching Not Updated');
+        if (m.hasRunnerMismatch) issueReasons.push('Runner Missing / Mismatched');
         if (m.hasMissingResults) issueReasons.push('Results Missing');
         if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');

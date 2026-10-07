@@ -34,12 +34,39 @@ function isThoroughbred(m) {
 }
 
 // Feed meetings worth checking: thoroughbred, one of the checked
-// countries (a Set of codes), minus the excluded courses.
+// countries (a Set of codes), minus the excluded courses, with surface
+// splits merged back into one meeting.
 function pickSourceMeetings(feedMeetings, countryCodes) {
-  return (feedMeetings || []).filter((m) => {
+  return mergeSurfaceSplits((feedMeetings || []).filter((m) => {
     if (!isThoroughbred(m)) return false;
     const country = String(m.Country || '').toUpperCase();
     return countryCodes.has(country) && !isExcluded(country, m.Course);
+  }));
+}
+
+// The feed splits one meeting by surface -- SHA TIN + SHA TIN AW (4 Oct
+// 2026), WOODBINE + WOODBINE AW, PALERMO + PALERMO TURF -- where our DB has
+// one meeting with every race (2 Oct 2026, per Dinesh: "rendu ore meeting
+// da"). Same date, country and course name once surface words are dropped
+// (NAME_IGNORE) = one meeting: the plainest name, races combined, and every
+// feed MeetingID kept for matching.
+function mergeSurfaceSplits(meetings) {
+  const groups = new Map();
+  for (const m of meetings) {
+    const key = `${m.Date}|${String(m.Country || '').toUpperCase()}|${nameTokens(m.Course).join(' ')}`;
+    const group = groups.get(key);
+    if (group) group.push(m);
+    else groups.set(key, [m]);
+  }
+  return [...groups.values()].map((group) => {
+    if (group.length === 1) return { ...group[0], MeetingIDs: [group[0].MeetingID], splitNames: [] };
+    const sorted = group.slice().sort((a, b) => String(a.Course).length - String(b.Course).length || String(a.Course).localeCompare(String(b.Course)));
+    return {
+      ...sorted[0],
+      races: Object.assign({}, ...sorted.map((m) => m.races || {})),
+      MeetingIDs: sorted.map((m) => m.MeetingID),
+      splitNames: sorted.map((m) => m.Course),
+    };
   });
 }
 
@@ -79,7 +106,8 @@ function compareMeetings(sourceMeetings, dbMeetings, visibleRaceCounts) {
   for (const m of dbMeetings) if (m.tabMeetingId) byTabId.set(String(m.tabMeetingId), m);
   const rows = sourceMeetings.map((s) => {
     const country = String(s.Country || '').toUpperCase();
-    const m = byTabId.get(String(s.MeetingID))
+    const ids = s.MeetingIDs || [s.MeetingID];
+    const m = ids.map((id) => byTabId.get(String(id))).find(Boolean)
       || dbMeetings.find((d) => d.mDate === s.Date && d.mCountry === country && sameCourse(d.mCourseDisplayName, s.Course));
     let status = 'ok';
     let note = '';
@@ -97,10 +125,13 @@ function compareMeetings(sourceMeetings, dbMeetings, visibleRaceCounts) {
       country,
       course: s.Course,
       sourceMeetingId: s.MeetingID,
+      sourceMeetingIds: ids,
+      splitNames: s.splitNames || [],
       races: Object.keys(s.races || {}).length,
       status,
       note,
       dashboardMeeting: m ? m.mCourseDisplayName : null,
+      dbMeetingId: m ? m._id : null,
     };
   });
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.country.localeCompare(b.country) || a.course.localeCompare(b.course));
