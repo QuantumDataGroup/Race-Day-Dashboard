@@ -160,7 +160,9 @@ function norm(s) {
     .replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 // Harness names can end in the country ("Blackjack Nz").
-const NAME_COUNTRY_SUFFIX = new Set(['nz', 'aus', 'usa', 'us', 'ire', 'gb', 'fr', 'can', 'swe', 'ger', 'jpn', 'arg', 'chi', 'brz', 'saf', 'ity']);
+// Country suffixes, plus "AA" (Anglo-Arab -- Italian sources add it: our
+// "GIUBILO" is "Giubilo Aa" there, Florence 8 Oct 2026).
+const NAME_COUNTRY_SUFFIX = new Set(['nz', 'aus', 'usa', 'us', 'ire', 'gb', 'fr', 'can', 'swe', 'ger', 'jpn', 'arg', 'chi', 'brz', 'saf', 'ity', 'aa']);
 function horseKey(name) {
   const t = norm(name).split(' ').filter(Boolean);
   while (t.length > 1 && NAME_COUNTRY_SUFFIX.has(t[t.length - 1])) t.pop();
@@ -170,9 +172,15 @@ function horseKey(name) {
 // "Vacant Box" is an empty greyhound box, not a runner -- left out of every
 // comparison and count, on both sides (6 Oct 2026, per Dinesh: "Vacant Box
 // vanda adu empty box so apdi vanda ada ignore pannunga").
+// Also not runners: a field not yet released ("TBD" / "TBA", Port Pirie
+// 8 Oct 2026) and a runner with no name at all (Busan R5).
 function isVacantBox(name) {
-  return /^vacant( box)?$/.test(norm(name).trim());
+  return /^(vacant( box)?|tbd|tba|tbc)?$/.test(norm(name).trim());
 }
+
+// Same horse when only the spacing differs: our "EMOZIONEDEFLORINAS" is
+// "Emozione De Florinas" in the source (Florence 8 Oct 2026).
+const sameKey = (a, b) => a === b || a.replace(/ /g, '') === b.replace(/ /g, '');
 const realRunners = (list, nameOf) => (list || []).filter((x) => !isVacantBox(nameOf(x)));
 
 // Our value of one compared field, as a string. Saved with each difference
@@ -275,7 +283,7 @@ function compareRunners(dbRace, allSourceRunners, { fromNeds = false } = {}) {
   for (const sameName of [true, false]) {
     for (const t of theirs) {
       if (pairs.some(([p]) => p === t)) continue;
-      const o = ours.find((x) => !matched.has(x) && (sameName ? x.key === t.key : truncatedName(x.key, t.key)));
+      const o = ours.find((x) => !matched.has(x) && (sameName ? sameKey(x.key, t.key) : truncatedName(x.key, t.key)));
       if (o) { matched.add(o); pairs.push([t, o]); }
     }
   }
@@ -298,7 +306,7 @@ function compareRunners(dbRace, allSourceRunners, { fromNeds = false } = {}) {
   for (const [t, o] of pairs) {
     if (o.r.isScratched) continue;
     if (t.n.scratched) add(o.r.tabNo, 'scratched', 'Runner Mismatched (scratched)');
-    if (t.key !== o.key) add(o.r.tabNo, 'name', `Runner Mismatched (${t.n.name})`);
+    if (!sameKey(t.key, o.key)) add(o.r.tabNo, 'name', `Runner Mismatched (${t.n.name})`);
     if (t.n.scratched) continue;
     // Jockey -- only when the source has it (Neds website), and only a
     // jockey MISSING in ours (6 Oct 2026, per Dinesh: weight not compared,
@@ -331,7 +339,7 @@ function countRunners(dbRace, sourceRunners) {
   const matched = new Set();
   const pairs = [];
   for (const t of theirs) {
-    const o = ours.find((x) => !matched.has(x) && x.key === t.key) || ours.find((x) => !matched.has(x) && truncatedName(x.key, t.key));
+    const o = ours.find((x) => !matched.has(x) && sameKey(x.key, t.key)) || ours.find((x) => !matched.has(x) && truncatedName(x.key, t.key));
     if (o) { matched.add(o); pairs.push([t, o]); }
   }
   return runnerCounts(ours, pairs, theirs);
@@ -349,7 +357,7 @@ function stillDiffers(dbRace, item, source) {
   // Weight and jockey-name checks were dropped 6 Oct 2026; hides any saved from before.
   if (item.field === 'weight' || /^Jockey Mismatched/.test(item.text || '')) return false;
   // Vacant Box flags saved before 6 Oct 2026 -- hidden at once, no re-check needed.
-  if (/vacant box/i.test(item.text || '')) return false;
+  if (/vacant box/i.test(item.text || '') || /^Runner Missing: *(tbd|tba|tbc)?$/i.test(item.text || '')) return false;
   return ourValue(dbRace, item.tab, item.field) === item.ours;
 }
 

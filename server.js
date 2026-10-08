@@ -731,11 +731,11 @@ async function runHealthChecks() {
   const runnersLast = runnersCheckState.lastRunAt ? Date.parse(runnersCheckState.lastRunAt) : null;
   const runnersLate = !runnersLast || now - runnersLast > RUNNERS_CHECK_EVERY_MS + 60 * 60 * 1000;
   const ns = runnersCheckState.stats;
-  const usedSource = RUNNERS_SOURCES[runnersCheckState.source];
+  const usedSource = runnersSourceLabel(runnersCheckState.source);
   add('runners', 'Runner check (RAS / Neds)', runnersCheckRunning ? 'ok' : (runnersCheckState.error || (runnersLate && uptimeMs > 5 * 60 * 1000) ? 'warn' : 'ok'),
     runnersCheckRunning ? 'Running now' : (runnersLast ? ageText(now - runnersLast) : 'Not run yet'),
     runnersCheckState.error ? `Last try failed (both sources): ${runnersCheckState.error} · retrying hourly${runnersLast ? ` · last good check ${ageText(now - runnersLast)}` : ''}`
-      : ns ? `Every 8 h · last with ${usedSource || '?'}${runnersCheckState.fallbackReason ? ` (other source failed: ${runnersCheckState.fallbackReason})` : ''} · ${ns.racesChecked} races in ${ns.meetings} meetings checked, ${ns.racesWithDifferences} with differences · next: ${RUNNERS_SOURCES[nextRunnersSource()]}`
+      : ns ? `Every 8 h, RAS + Neds together · last with ${usedSource || '?'}${runnersCheckState.fallbackReason ? ` (other source failed: ${runnersCheckState.fallbackReason})` : ''} · ${ns.racesChecked} races in ${ns.meetings} meetings checked${ns.bySource ? ` (RAS ${ns.bySource.ras == null ? '-' : ns.bySource.ras}, Neds ${ns.bySource.neds == null ? '-' : ns.bySource.neds})` : ''}, ${ns.racesWithDifferences} with differences`
         : 'First run starts a minute after the server starts');
   const jc = jockeyCheckState;
   const jockeyLast = jc.lastRunAt ? Date.parse(jc.lastRunAt) : null;
@@ -1102,11 +1102,10 @@ async function attachScratchingStatus(docs, dateStr) {
 // Runners from two sources compared with ours (see runners-check.js), for
 // today to 2 days ahead, every 8 hours ("Per day 3 times check panna podu 8
 // hours once"): AUS + NZ for every code, plus the Missing Meetings
-// countries for thoroughbred. The sources take turns -- one run the RAS
-// API, the next the Neds website -- and when the one whose turn it is
-// fails, the other is used in the same run ("Oru thadawa RAS Api check
-// pannunga next time NEDS Api check pannunga... RAS api work pannallanna
-// inda API use panni"). The RAS API is one request per day; the Neds
+// countries for thoroughbred. Both sources are read in every run, at the
+// same time, and RAS decides where it has the race (see mergeRunnerChecks;
+// 8 Oct 2026 -- before that they took turns). When one fails, the other's
+// result is used alone. The RAS API is one request per day; the Neds
 // website is one page per day plus one per race we have (two at a time).
 // Races already resulted are skipped. The result is kept in memory and in
 // runners-check-state.json (so a restart doesn't trigger an extra run), and
@@ -1208,9 +1207,42 @@ async function fetchNedsRaceRunners(jobs, { workers, gapMs, stats }) {
   if (stopped) throw stopped;
 }
 
-// Whose turn: the other source from the last run (RAS first).
-function nextRunnersSource() {
-  return runnersCheckState.source === 'ras' ? 'neds' : 'ras';
+// Both sources every run (8 Oct 2026, per Dinesh: "NEDS and RAS same time
+// check pannunga ... RAS data matched ha irunda Missmatched kaatta wena").
+// The two often list a race's runners differently, so RAS decides the runner
+// flags wherever it has the race: a race RAS matches shows none, even when
+// Neds differs. Neds' runner flags count only for races RAS doesn't have (or
+// every race, when RAS can't be reached). Jockey Missing always comes from
+// Neds -- RAS has no jockeys.
+function mergeRunnerChecks(ras, neds) {
+  const races = {};
+  const ids = new Set([...Object.keys(ras ? ras.races : {}), ...Object.keys(neds ? neds.races : {})]);
+  for (const id of ids) {
+    const r = ras && ras.races[id];
+    const n = neds && neds.races[id];
+    if (!r) { races[id] = n; continue; }
+    const jockeys = n ? n.items.filter((it) => it.field === 'jockey') : [];
+    races[id] = { ...r, items: [...r.items, ...jockeys], source: n ? 'ras+neds' : 'ras' };
+  }
+  const entries = Object.values(races);
+  const pick = (k) => [ras, neds].filter(Boolean).map((x) => x.stats[k]);
+  return {
+    races,
+    stats: {
+      meetings: Math.max(...pick('meetings')),
+      meetingsNotInDb: (ras || neds).stats.meetingsNotInDb,
+      racesChecked: entries.length,
+      racesWithDifferences: entries.filter((e) => e.items.length).length,
+      differences: entries.reduce((s, e) => s + e.items.length, 0),
+      pageErrors: neds ? neds.stats.pageErrors : 0,
+      bySource: { ras: ras ? ras.stats.racesChecked : null, neds: neds ? neds.stats.racesChecked : null },
+    },
+  };
+}
+
+// "RAS API + Neds website", or the one that answered.
+function runnersSourceLabel(source) {
+  return source === 'both' ? `${RUNNERS_SOURCES.ras} + ${RUNNERS_SOURCES.neds}` : (RUNNERS_SOURCES[source] || null);
 }
 
 // AUS + NZ for every code, plus the Missing Data countries for thoroughbred.
@@ -1357,27 +1389,24 @@ async function runRunnersCheck(trigger = 'schedule') {
   let summary = '';
   try {
     const dbRaces = await loadRunnersCheckRaces(countries);
-    const first = nextRunnersSource();
+    // Both at once (see mergeRunnerChecks); one failing still gives a result.
+    const [ras, neds] = await Promise.allSettled(['ras', 'neds'].map((source) => checkRunnersWith(source, dates, dbRaces, inScope)));
     const failures = [];
-    let result = null;
-    let used = null;
-    for (const source of [first, first === 'ras' ? 'neds' : 'ras']) {
-      try {
-        result = await checkRunnersWith(source, dates, dbRaces, inScope);
-        used = source;
-        break;
-      } catch (err) {
-        console.warn(`[race-dashboard] WARNING: Runners check with ${RUNNERS_SOURCES[source]} failed: ${err.message}`);
-        failures.push(err.message);
+    [['ras', ras], ['neds', neds]].forEach(([source, r]) => {
+      if (r.status === 'rejected') {
+        console.warn(`[race-dashboard] WARNING: Runners check with ${RUNNERS_SOURCES[source]} failed: ${r.reason.message}`);
+        failures.push(r.reason.message);
       }
-    }
-    if (!used) throw new Error(failures.join(' · '));
+    });
+    if (failures.length === 2) throw new Error(failures.join(' · '));
+    const used = failures.length ? (ras.status === 'fulfilled' ? 'ras' : 'neds') : 'both';
+    const result = mergeRunnerChecks(ras.status === 'fulfilled' ? ras.value : null, neds.status === 'fulfilled' ? neds.value : null);
     const now = new Date().toISOString();
     runnersCheckState = {
       lastRunAt: now, lastAttemptAt: now, durationMs: Date.now() - startedAt, dates, stats: result.stats, error: null, races: result.races,
       source: used, fallbackReason: failures.length ? failures[0] : null, trigger,
     };
-    summary = `${result.stats.racesChecked} races, ${result.stats.racesWithDifferences} with differences (${RUNNERS_SOURCES[used]}${failures.length ? ', fallback' : ''})`;
+    summary = `${result.stats.racesChecked} races, ${result.stats.racesWithDifferences} with differences (${runnersSourceLabel(used)}${failures.length ? '; the other failed' : ''})`;
     // The grid's cached race docs carry the previous result; reload them.
     for (const key of memoCache.keys()) if (dates.some((d) => key.startsWith(`docs|${d}|`) || key.startsWith('race|'))) memoCache.delete(key);
   } catch (err) {
@@ -1432,7 +1461,13 @@ async function runJockeyCheck() {
       await fetchNedsRaceRunners(jobs, { workers: 1, gapMs: 1000, stats });
       for (const { race, nr, date } of jobs) {
         if (!Array.isArray(nr.runners) || !nr.runners.length) continue;
-        const entry = runnersCheckEntry(race, date, nr.runners, 'neds-jockey');
+        let entry = runnersCheckEntry(race, date, nr.runners, 'neds-jockey');
+        // A race RAS checked keeps RAS' runner flags (see mergeRunnerChecks);
+        // only its jockey flags are refreshed from Neds.
+        const prev = runnersCheckState.races[race._id];
+        if (prev && /^ras/.test(prev.source || '')) {
+          entry = { ...prev, items: [...prev.items.filter((it) => it.field !== 'jockey'), ...entry.items.filter((it) => it.field === 'jockey')], source: 'ras+neds' };
+        }
         checked++;
         issues += entry.items.length;
         found += entry.items.filter((it) => it.field === 'jockey' && /^Jockey Missing/.test(it.text)).length;
@@ -2607,8 +2642,7 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
     const attempt = state.lastAttemptAt ? Date.parse(state.lastAttemptAt) : 0;
     res.json({
       lastRunAt: state.lastRunAt, lastAttemptAt: state.lastAttemptAt, error: state.error, running: runnersCheckRunning,
-      source: state.source, sourceLabel: RUNNERS_SOURCES[state.source] || null, fallbackReason: state.fallbackReason || null, trigger: state.trigger || null,
-      nextSourceLabel: RUNNERS_SOURCES[nextRunnersSource()],
+      source: state.source, sourceLabel: runnersSourceLabel(state.source), fallbackReason: state.fallbackReason || null, trigger: state.trigger || null,
       canCheckAt: attempt ? new Date(attempt + RUNNERS_CHECK_MANUAL_GAP_MS).toISOString() : null,
       everyHours: RUNNERS_CHECK_EVERY_MS / 3600000, dates: state.dates || [], stats: state.stats, races,
       jockeyCheck: {
@@ -2660,8 +2694,8 @@ app.post('/api/missing-runners/check', requirePermission('missing'), (req, res) 
   const attempt = runnersCheckState.lastAttemptAt ? Date.parse(runnersCheckState.lastAttemptAt) : 0;
   const waitMs = attempt + RUNNERS_CHECK_MANUAL_GAP_MS - Date.now();
   if (waitMs > 0) return res.status(429).json({ error: `Checked less than 10 minutes ago -- try again in ${Math.ceil(waitMs / 60000)} min`, retryInMs: waitMs });
-  const source = RUNNERS_SOURCES[nextRunnersSource()];
-  logActivity(req, 'runners-check', { detail: `Ran the runners check (${source} first)` });
+  const source = runnersSourceLabel('both');
+  logActivity(req, 'runners-check', { detail: `Ran the runners check (${source})` });
   runRunnersCheck('manual');
   res.status(202).json({ started: true, source });
 });

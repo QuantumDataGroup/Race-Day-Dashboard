@@ -245,11 +245,15 @@ nextdc.racingandsports.com.au:8813, which production can't reach.
 ### Runners check (`runners-check.js`)
 Every 8 hours the server compares runners with ours, for today to 2 days
 ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing
-Data countries (thoroughbred). Two sources take turns -- one run the RAS
-API (`http://nextdc.racingandsports.com:9542/api/v1/neds/meetings?date=`,
-one request per day), the next the nedsform.com.au website (one page per
-day + one per race we have, two at a time, ~2-3 min) -- and if the one
-whose turn it is fails, the other is used in the same run. "Check now" on
+Data countries (thoroughbred). Every run reads both sources at the same
+time (since 8 Oct 2026; they used to take turns): the RAS API
+(`http://nextdc.racingandsports.com:9542/api/v1/neds/meetings?date=`, one
+request per day) and the nedsform.com.au website (one page per day + one
+per race we have, two at a time, ~2-3 min). `mergeRunnerChecks`: where RAS
+has the race, RAS' runner flags decide (a race that matches RAS shows none,
+even if Neds differs); races RAS lacks use Neds' flags; Jockey Missing is
+always from Neds, and the 3-hourly jockey check only refreshes the jockey
+flags of a race RAS checked. If one source fails, the other is used alone. "Check now" on
 Missing Data > Missing / Mismatched Runners runs it at once (at most once
 every 10 minutes). Races already resulted are skipped.
 Flags: Runner Missing (in the source, not ours), Runner Mismatched (cut-off
@@ -263,8 +267,11 @@ number. A track listed twice for one day (Neds had two "Globe Derby"
 meetings on 7 Oct 2026, the second with its own R3 and a later R4) is
 merged into one; when two source races share a number, ours pairs with the
 one starting closest to it, and one over 3 h away is not ours and is
-skipped. "Vacant Box" (an empty greyhound box, RAS only) is not a runner: left out
-of every comparison and count on both sides (`isVacantBox`). On the Neds
+skipped. "Vacant Box" (an empty greyhound box, RAS only), "TBD"/"TBA" placeholders
+and nameless runners are not runners: left out of every comparison and
+count on both sides (`isVacantBox`). Names that differ only in spacing
+("EMOZIONEDEFLORINAS" / "Emozione De Florinas") or by an "AA" (Anglo-Arab)
+suffix count as the same horse. On the Neds
 website a runner of ours that isn't listed is not an issue (Neds leaves
 runners off its pages), so from Neds only extra runners, a Neds count
 higher than ours, and a field that doesn't match are flagged -- "not in
