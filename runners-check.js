@@ -358,6 +358,17 @@ function stillDiffers(dbRace, item, source) {
   if (item.field === 'weight' || /^Jockey Mismatched/.test(item.text || '')) return false;
   // Vacant Box flags saved before 6 Oct 2026 -- hidden at once, no re-check needed.
   if (/vacant box/i.test(item.text || '') || /^Runner Missing: *(tbd|tba|tbc)?$/i.test(item.text || '')) return false;
+  // Name flags are re-read with today's name matching, so a matching fix
+  // (e.g. the "AA" suffix and spacing, 8 Oct 2026) clears saved flags at
+  // once instead of at the next check.
+  const runners = realRunners(dbRace.runners, (x) => x.horseName);
+  const named = /^Runner Mismatched \((.+)\)$/.exec(item.text || '');
+  if (item.field === 'name' && named) {
+    const ours = runners.find((x) => x.tabNo === item.tab);
+    if (ours && sameKey(horseKey(ours.horseName), horseKey(named[1]))) return false;
+  }
+  const missing = /^Runner Missing: (.+)$/.exec(item.text || '');
+  if (item.field === 'present' && missing && runners.some((x) => sameKey(horseKey(x.horseName), horseKey(missing[1])))) return false;
   return ourValue(dbRace, item.tab, item.field) === item.ours;
 }
 
