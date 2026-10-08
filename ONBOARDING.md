@@ -249,11 +249,13 @@ Data countries (thoroughbred). Every run reads both sources at the same
 time (since 8 Oct 2026; they used to take turns): the RAS API
 (`http://nextdc.racingandsports.com:9542/api/v1/neds/meetings?date=`, one
 request per day) and the nedsform.com.au website (one page per day + one
-per race we have, two at a time, ~2-3 min). `mergeRunnerChecks`: where RAS
-has the race, RAS' runner flags decide (a race that matches RAS shows none,
-even if Neds differs); races RAS lacks use Neds' flags; Jockey Missing is
-always from Neds, and the 3-hourly jockey check only refreshes the jockey
-flags of a race RAS checked. If one source fails, the other is used alone. "Check now" on
+per race we have, two at a time, ~5 min). `mergeRunnerChecks` shows the
+differences from both, each tagged with its source (`src`: ras / neds /
+both; the same difference from both shows once) -- the two sometimes list
+a race differently, and Dinesh's team checks and Ignores the ones that are
+fine. Jockey Missing is always from Neds; the 3-hourly jockey check keeps a
+race's RAS flags and replaces its Neds ones. If one source fails, the other
+is used alone. "Check now" on
 Missing Data > Missing / Mismatched Runners runs it at once (at most once
 every 10 minutes). Races already resulted are skipped.
 Flags: Runner Missing (in the source, not ours), Runner Mismatched (cut-off

@@ -1103,8 +1103,8 @@ async function attachScratchingStatus(docs, dateStr) {
 // today to 2 days ahead, every 8 hours ("Per day 3 times check panna podu 8
 // hours once"): AUS + NZ for every code, plus the Missing Meetings
 // countries for thoroughbred. Both sources are read in every run, at the
-// same time, and RAS decides where it has the race (see mergeRunnerChecks;
-// 8 Oct 2026 -- before that they took turns). When one fails, the other's
+// same time, and the differences from both are shown, tagged by source (see
+// mergeRunnerChecks; 8 Oct 2026 -- before that they took turns). When one fails, the other's
 // result is used alone. The RAS API is one request per day; the Neds
 // website is one page per day plus one per race we have (two at a time).
 // Races already resulted are skipped. The result is kept in memory and in
@@ -1207,22 +1207,31 @@ async function fetchNedsRaceRunners(jobs, { workers, gapMs, stats }) {
   if (stopped) throw stopped;
 }
 
-// Both sources every run (8 Oct 2026, per Dinesh: "NEDS and RAS same time
-// check pannunga ... RAS data matched ha irunda Missmatched kaatta wena").
-// The two often list a race's runners differently, so RAS decides the runner
-// flags wherever it has the race: a race RAS matches shows none, even when
-// Neds differs. Neds' runner flags count only for races RAS doesn't have (or
-// every race, when RAS can't be reached). Jockey Missing always comes from
-// Neds -- RAS has no jockeys.
+// Both sources every run, at the same time (8 Oct 2026, per Dinesh: "NEDS
+// and RAS same time check pannunga"). Every difference from either source is
+// shown, tagged with where it came from (item.src: ras / neds / both) -- "NEDS
+// mismatches irundalu kaattunga, Ignore option irukku": a Neds-only one that
+// turns out fine gets ignored. The same difference from both shows once.
+// Neds' own rules still apply (a runner of ours it doesn't list is not an
+// issue -- see compareRunners' fromNeds).
+function unionRunnerItems(a, b) {
+  const out = a.map((it) => ({ ...it }));
+  for (const it of b) {
+    const same = out.find((x) => x.field === it.field && x.tab === it.tab && x.text === it.text);
+    if (same) same.src = same.src === it.src ? same.src : 'both';
+    else out.push({ ...it });
+  }
+  return out;
+}
+
 function mergeRunnerChecks(ras, neds) {
   const races = {};
   const ids = new Set([...Object.keys(ras ? ras.races : {}), ...Object.keys(neds ? neds.races : {})]);
   for (const id of ids) {
     const r = ras && ras.races[id];
     const n = neds && neds.races[id];
-    if (!r) { races[id] = n; continue; }
-    const jockeys = n ? n.items.filter((it) => it.field === 'jockey') : [];
-    races[id] = { ...r, items: [...r.items, ...jockeys], source: n ? 'ras+neds' : 'ras' };
+    if (!r || !n) { races[id] = r || n; continue; }
+    races[id] = { ...r, items: unionRunnerItems(r.items, n.items), source: 'ras+neds' };
   }
   const entries = Object.values(races);
   const pick = (k) => [ras, neds].filter(Boolean).map((x) => x.stats[k]);
@@ -1350,8 +1359,9 @@ function matchSourceRaces(sourceMeetings, dbRaces, dates, stats) {
 }
 
 function runnersCheckEntry(race, date, sourceRunners, source) {
+  const src = /^neds/.test(source) ? 'neds' : 'ras';
   return {
-    date, items: compareRunners(race, sourceRunners, { fromNeds: /^neds/.test(source) }), source,
+    date, items: compareRunners(race, sourceRunners, { fromNeds: src === 'neds' }).map((it) => ({ ...it, src })), source,
     meeting: race.rCourseDisplayName, country: race.rCountry, discipline: race.rDiscipline, rNo: race.rNo,
     counts: countRunners(race, sourceRunners),
   };
@@ -1462,11 +1472,13 @@ async function runJockeyCheck() {
       for (const { race, nr, date } of jobs) {
         if (!Array.isArray(nr.runners) || !nr.runners.length) continue;
         let entry = runnersCheckEntry(race, date, nr.runners, 'neds-jockey');
-        // A race RAS checked keeps RAS' runner flags (see mergeRunnerChecks);
-        // only its jockey flags are refreshed from Neds.
+        // A race RAS checked keeps RAS' flags (see mergeRunnerChecks); the
+        // Neds ones are replaced by this fresher read.
         const prev = runnersCheckState.races[race._id];
         if (prev && /^ras/.test(prev.source || '')) {
-          entry = { ...prev, items: [...prev.items.filter((it) => it.field !== 'jockey'), ...entry.items.filter((it) => it.field === 'jockey')], source: 'ras+neds' };
+          // (Saved before items carried src: the jockey ones were Neds'.)
+          const rasItems = prev.items.filter((it) => (it.src ? it.src !== 'neds' : it.field !== 'jockey')).map((it) => ({ ...it, src: 'ras' }));
+          entry = { ...prev, items: unionRunnerItems(rasItems, entry.items), source: 'ras+neds' };
         }
         checked++;
         issues += entry.items.length;
@@ -2630,6 +2642,8 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
             tab: it.raceLevel ? null : it.tab,
             horse: it.raceLevel ? '' : horse(it.tab),
             text: it.text,
+            // Saved before items carried src: jockey flags were always Neds'.
+            src: it.src || (it.field === 'jockey' || /^neds/.test(entry.source || '') ? 'neds' : /^ras/.test(entry.source || '') ? 'ras' : null),
             key: runnerIssueKey(doc._id, it),
             ignored: Boolean(ignore),
             ignoredBy: ignore ? ignore.ignoredBy : null,
