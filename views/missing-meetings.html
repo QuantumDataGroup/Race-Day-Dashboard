@@ -74,7 +74,7 @@
           </table>
         </div>
       </section>
-      <p class="adm-foot">Runners are checked every <span id="rEvery">8</span> hours, for today to 2 days ahead (races already run are skipped). Every check reads the RAS API and the Neds website together. Where RAS has the race, its result decides: a race that matches RAS shows no runner difference even if Neds lists it differently. Races RAS doesn't have are checked against Neds; Jockey Missing always comes from Neds. If one source doesn't answer, the other is used alone. "Check now" runs it straight away (at most once every 10 minutes). A difference fixed in our database disappears straight away. Runners = running horses in the source / in ours.</p>
+      <p class="adm-foot">Runners are checked every <span id="rEvery">8</span> hours, for today to 2 days ahead (races already run are skipped). Every check reads the RAS API and the Neds website together and shows the differences from both, each tagged RAS, Neds or RAS + Neds (the two sometimes list a race differently -- check it and Ignore the ones that are fine). A runner of ours that Neds doesn't list is not shown; Jockey Missing always comes from Neds. If one source doesn't answer, the other is used alone. "Check now" runs it straight away (at most once every 10 minutes). A difference fixed in our database disappears straight away. Runners = running horses in the source / in ours.</p>
     </div>
 
     <div class="adm-pane" id="paneMeetings" role="tabpanel" aria-labelledby="subMeetings">
@@ -384,7 +384,9 @@
             ? '<button type="button" class="adm-btn mm-act" data-rkey="' + esc(i.key) + '" data-ract="undo">Undo</button>' +
               '<small class="mm-note-inline">by ' + esc(i.ignoredBy || '?') + (i.ignoredAt ? ', ' + esc(hhmm(i.ignoredAt)) : '') + '</small>'
             : '<button type="button" class="adm-btn mm-act" data-rkey="' + esc(i.key) + '" data-ract="ignore"><i class="fa-solid fa-eye-slash"></i> Ignore</button>';
-          return '<div class="mm-issue' + (i.ignored ? ' mm-issue-ignored' : '') + '"><span class="chg-tag ' + tag[0] + '">' + tag[1] + '</span> ' +
+          // Which source found it (8 Oct 2026): RAS, Neds or both.
+          var srcTag = i.src ? '<span class="mm-src mm-src-' + esc(i.src) + '">' + ({ ras: 'RAS', neds: 'Neds', both: 'RAS + Neds' }[i.src] || esc(i.src)) + '</span> ' : '';
+          return '<div class="mm-issue' + (i.ignored ? ' mm-issue-ignored' : '') + '"><span class="chg-tag ' + tag[0] + '">' + tag[1] + '</span> ' + srcTag +
             (i.tab != null ? '<b>#' + esc(i.tab) + ' ' + esc(i.horse) + '</b> ' : '') +
             '<span class="mm-issue-text">' + esc(i.ignored ? i.text : i.text.replace(/^(Runner (Missing|Mismatched|Count Mismatched)|Jockey (Missing|Mismatched)|Weight Mismatched)[: ]*/, '')) + '</span>' + action + '</div>';
         }).join('');
@@ -409,13 +411,13 @@
         var err = document.getElementById('rError');
         err.hidden = !json.error;
         err.textContent = json.error ? 'The last runners check failed with both sources: ' + json.error + '. It tries again every hour; the list shows the last good check.' : '';
-        // Both sources every run; RAS decides where it has the race (8 Oct 2026).
+        // Both sources every run (8 Oct 2026).
         var bySrc = json.stats && json.stats.bySource;
         document.getElementById('rSource').innerHTML = json.sourceLabel
           ? 'Checked with <b>' + esc(json.sourceLabel) + '</b>' +
             (bySrc ? ' (RAS ' + esc(bySrc.ras == null ? '-' : bySrc.ras) + ' races, Neds ' + esc(bySrc.neds == null ? '-' : bySrc.neds) + ')' : '') +
             (json.fallbackReason ? ' <span class="mm-fallback" title="' + esc(json.fallbackReason) + '">(other source failed)</span>' : '') +
-            ' &middot; RAS decides where it has the race'
+            ' &middot; differences from both are shown, tagged RAS / Neds'
           : 'Checks RAS API + Neds website together';
         var jc = json.jockeyCheck || {};
         document.getElementById('rJockeyCheck').innerHTML = jc.nedsPausedUntil
