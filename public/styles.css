@@ -222,6 +222,17 @@ td.time.clickable:hover { background: var(--hover-bg); }
 .login-card input[type="text"], .login-card input[type="password"] { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; font-size: 14px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); }
 .login-card button[type="submit"] { width: 100%; padding: 9px; font-size: 14px; font-weight: 600; border: none; border-radius: 4px; background: var(--header-bg); color: var(--header-fg); cursor: pointer; }
 .login-card button[type="submit"]:hover { background: var(--header-bg-hover); }
+/* Show / hide password eye button (8 Oct 2026, public/password-toggle.js),
+   inside every password box. */
+.pw-wrap { position: relative; display: inline-block; vertical-align: middle; }
+.pw-wrap.pw-block { display: block; width: 100%; }
+.pw-wrap input { padding-right: 36px !important; }
+.pw-wrap.pw-block input { width: 100%; box-sizing: border-box; }
+.pw-toggle { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.login-card .pw-wrap { margin-top: 4px; }
+.login-card .pw-wrap input { margin-top: 0; }
+.pw-toggle:hover { color: var(--fg); background: var(--hover-bg); }
+.pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .login-error { background: #3a1f1f; color: #ff9d95; border: 1px solid #5c2e2c; border-radius: 4px; padding: 8px 10px; font-size: 13px; margin-bottom: 16px; }
 .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
 .disc-section { margin-bottom: 28px; }
