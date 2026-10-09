@@ -756,12 +756,10 @@ async function runHealthChecks() {
   const cantCheck = (why) => `Race videos can't be checked right now -- ${why}. Today's Thoroughbred races in ${[...VIDEO_COUNTRIES].join('/')} show Missing Video until it works again, and video buttons won't show${videoFail ? ` (last failed check ${videoFail.at})` : ''}.`;
   if (!video.ok || videoFail) {
     add('video', 'Race video storage (S3)', 'bad', 'Not reachable', cantCheck(videoFail ? videoFail.error : `the video storage answered ${video.error}`));
-  } else if (video.value === 'list-denied') {
-    // Listing refused but files readable: checked race by race (9 Oct 2026).
-    add('video', 'Race video storage (S3)', 'warn', `${(video.ms / 1000).toFixed(1)} s`,
-      'Folder listing refused (HTTP 403 Access Denied) -- videos are checked race by race instead, so the check is slower; the KEMPTON / KEMPTON PARK style name matching only covers "... PARK"');
   } else {
-    add('video', 'Race video storage (S3)', 'ok', `${(video.ms / 1000).toFixed(1)} s`, 'Video listing reachable');
+    // A refused folder listing isn't an issue -- videos are then checked race
+    // by race (9 Oct 2026, per Dinesh: "Issue edawadu irundu kaattunda podu").
+    add('video', 'Race video storage (S3)', 'ok', `${(video.ms / 1000).toFixed(1)} s`, 'Videos reachable');
   }
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
