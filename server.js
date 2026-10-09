@@ -708,7 +708,9 @@ async function runHealthChecks() {
       url.searchParams.set('list-type', '2');
       url.searchParams.set('max-keys', '1');
       const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
+      if (res.status === 403) return 'list-denied'; // files still checked one by one
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return 'listing';
     }),
   ]);
   add('db', 'Database (MongoDB)', db.ok ? (db.ms > 1500 ? 'warn' : 'ok') : 'bad', db.ok ? `${db.ms} ms` : 'Not reachable',
@@ -751,9 +753,16 @@ async function runHealthChecks() {
   // Dinesh: System Health, admins only) -- the dashboard just marks today's
   // races Missing Video as before.
   const videoFail = videoCheckErrors.get(today);
-  add('video', 'Race video storage (S3)', video.ok ? 'ok' : 'bad', video.ok ? `${(video.ms / 1000).toFixed(1)} s` : 'Not reachable',
-    video.ok ? 'Video listing reachable'
-      : `Race videos can't be checked right now -- the video storage answered ${/HTTP \d+/.test(video.error || '') ? video.error.replace(/^.*?(HTTP \d+.*)$/, '$1') : video.error}${/403/.test(video.error || '') ? ' (Access Denied)' : ''}. Today's Thoroughbred races in ${[...VIDEO_COUNTRIES].join('/')} show Missing Video until it works again, and video buttons won't show${videoFail ? ` (last failed check ${videoFail.at})` : ''}.`);
+  const cantCheck = (why) => `Race videos can't be checked right now -- ${why}. Today's Thoroughbred races in ${[...VIDEO_COUNTRIES].join('/')} show Missing Video until it works again, and video buttons won't show${videoFail ? ` (last failed check ${videoFail.at})` : ''}.`;
+  if (!video.ok || videoFail) {
+    add('video', 'Race video storage (S3)', 'bad', 'Not reachable', cantCheck(videoFail ? videoFail.error : `the video storage answered ${video.error}`));
+  } else if (video.value === 'list-denied') {
+    // Listing refused but files readable: checked race by race (9 Oct 2026).
+    add('video', 'Race video storage (S3)', 'warn', `${(video.ms / 1000).toFixed(1)} s`,
+      'Folder listing refused (HTTP 403 Access Denied) -- videos are checked race by race instead, so the check is slower; the KEMPTON / KEMPTON PARK style name matching only covers "... PARK"');
+  } else {
+    add('video', 'Race video storage (S3)', 'ok', `${(video.ms / 1000).toFixed(1)} s`, 'Video listing reachable');
+  }
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
@@ -896,7 +905,8 @@ async function loadVideoKeysForDate(dateStr) {
     url.searchParams.set('max-keys', '1000');
     if (continuationToken) url.searchParams.set('continuation-token', continuationToken);
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`the video storage answered HTTP ${res.status}${res.status === 403 ? ' (Access Denied)' : ''}`);
+    if (res.status === 403) throw Object.assign(new Error('the video storage answered HTTP 403 (Access Denied) to the folder listing'), { listDenied: true });
+    if (!res.ok) throw new Error(`the video storage answered HTTP ${res.status}`);
     const xml = await res.text();
     for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) keys.add(m[1]);
     const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
@@ -915,34 +925,108 @@ async function loadVideoKeysForDate(dateStr) {
 // video counts as a real problem (vs. just "hasn't run yet") is decided
 // downstream in raceView.js's buildSchedule, which only flags it once the
 // race also has a result -- this function itself doesn't gate on that.
-// When the video listing can't be read (9 Oct 2026, per Dinesh: "Videos
-// Missing But Dashboard-la error kaattudilla" -- the bucket had started
-// answering 403 Access Denied, and the check was skipped without a word),
-// the races are marked as having no video, so today's show Missing Video as
-// before ("Previous kaattuna madhiri wenu"); the reason is on System Health
-// only, kept here per date.
+// When videos can't be checked at all, the races are marked as having no
+// video, so today's show Missing Video as before (9 Oct 2026, per Dinesh:
+// "Previous kaattuna madhiri wenu"); the reason is on System Health only,
+// kept here per date.
 const videoCheckErrors = new Map(); // dateStr -> { error, at }
+
+// Folder listing refused (9 Oct 2026): the bucket started answering 403 to
+// the listing while every file stays publicly readable, so each race's own
+// file is checked with a HEAD request instead. A file found is remembered
+// for 12 hours; one not there yet is re-checked after 3 minutes for today
+// and later (it may be uploaded any moment), 6 hours for past days. The
+// listing is tried again every 10 minutes.
+const VIDEO_LIST_RETRY_MS = 10 * 60 * 1000;
+const VIDEO_FOUND_TTL_MS = 12 * 60 * 60 * 1000;
+const VIDEO_MISSING_TTL_MS = 3 * 60 * 1000;
+const VIDEO_MISSING_PAST_TTL_MS = 6 * 60 * 60 * 1000;
+let videoListDeniedUntil = 0;
+const videoFileCache = new Map(); // key -> { exists, at } | { pending }
+
+async function videoFileExists(key, dateStr) {
+  const hit = videoFileCache.get(key);
+  if (hit && hit.pending) return hit.pending;
+  const missingTtl = dateStr < todayStr() ? VIDEO_MISSING_PAST_TTL_MS : VIDEO_MISSING_TTL_MS;
+  if (hit && Date.now() - hit.at < (hit.exists ? VIDEO_FOUND_TTL_MS : missingTtl)) return hit.exists;
+  const pending = fetch(`${VIDEO_LIST_URL}${key}`, { method: 'HEAD', signal: AbortSignal.timeout(10000) }).then((res) => {
+    if (res.ok) return true;
+    // 404, or 403 for a file that isn't there when listing is refused.
+    if (res.status === 404 || res.status === 403) return false;
+    throw new Error(`the video storage answered HTTP ${res.status}`);
+  });
+  videoFileCache.set(key, { pending });
+  try {
+    const exists = await pending;
+    videoFileCache.set(key, { exists, at: Date.now() });
+    if (videoFileCache.size > 20000) {
+      for (const [k, v] of videoFileCache) if (v.at && Date.now() - v.at > VIDEO_FOUND_TTL_MS) videoFileCache.delete(k);
+    }
+    return exists;
+  } catch (err) {
+    if (hit) videoFileCache.set(key, hit); else videoFileCache.delete(key);
+    throw err;
+  }
+}
+
+// File names to try for a race when there's no listing to match against:
+// ours, then with " PARK" added for GB/IRE (ours KEMPTON, the file
+// GB_KEMPTON_PARK_... -- see similarVideoKey).
+function videoKeyCandidates(dateStr, doc) {
+  const keys = [buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo)];
+  if ((doc.rCountry === 'GB' || doc.rCountry === 'IRE') && !/\bPARK$/i.test(String(doc.rCourseDisplayName || '').trim())) {
+    keys.push(buildVideoKey(dateStr, doc.rCountry, `${doc.rCourseDisplayName} PARK`, doc.rNo));
+  }
+  return keys;
+}
+
+// The day's listing, or null when the storage refuses listings (then files
+// are checked one by one).
+async function videoKeysOrNull(dateStr) {
+  if (Date.now() < videoListDeniedUntil) return null;
+  try {
+    return await listVideoKeysForDate(dateStr);
+  } catch (err) {
+    if (!err.listDenied) throw err;
+    videoListDeniedUntil = Date.now() + VIDEO_LIST_RETRY_MS;
+    console.warn(`[race-dashboard] WARNING: race video listing refused (${err.message}) -- checking each race's file instead`);
+    return null;
+  }
+}
+
+// One race's video key, or null.
+async function findVideoKey(dateStr, doc, existingKeys) {
+  if (existingKeys) {
+    const exact = buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo);
+    return existingKeys.has(exact) ? exact : similarVideoKey(existingKeys, dateStr, doc);
+  }
+  for (const key of videoKeyCandidates(dateStr, doc)) {
+    if (await videoFileExists(key, dateStr)) return key;
+  }
+  return null;
+}
 
 async function attachVideoStatus(docs, dateStr) {
   const eligible = docs.filter((d) => d.rDiscipline === 'T' && VIDEO_COUNTRIES.has(d.rCountry) && !d.isTrail);
   if (!eligible.length) return;
 
-  let existingKeys;
   try {
-    existingKeys = await listVideoKeysForDate(dateStr);
+    const existingKeys = await videoKeysOrNull(dateStr);
+    // Up to 8 file checks at a time when there's no listing.
+    let next = 0;
+    await Promise.all(Array.from({ length: existingKeys ? 1 : 8 }, async () => {
+      while (next < eligible.length) {
+        const doc = eligible[next++];
+        const key = await findVideoKey(dateStr, doc, existingKeys);
+        doc.hasVideo = Boolean(key);
+        if (key) doc.videoUrl = `${VIDEO_LIST_URL}${key}`;
+      }
+    }));
     videoCheckErrors.delete(dateStr);
   } catch (err) {
-    console.warn(`[race-dashboard] WARNING: could not list race videos for ${dateStr}: ${err.message} -- skipping video check`);
+    console.warn(`[race-dashboard] WARNING: could not check race videos for ${dateStr}: ${err.message}`);
     videoCheckErrors.set(dateStr, { error: err.message, at: new Date().toISOString() });
-    for (const doc of eligible) doc.hasVideo = false;
-    return;
-  }
-
-  for (const doc of eligible) {
-    const exact = buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo);
-    const key = existingKeys.has(exact) ? exact : similarVideoKey(existingKeys, dateStr, doc);
-    doc.hasVideo = Boolean(key);
-    if (key) doc.videoUrl = `${VIDEO_LIST_URL}${key}`;
+    for (const doc of eligible) if (doc.hasVideo !== true) doc.hasVideo = false;
   }
 }
 
@@ -3235,11 +3319,12 @@ app.post('/api/video-check', async (req, res) => {
       continue;
     }
     try {
-      if (!keysByDate.has(dateStr)) keysByDate.set(dateStr, await listVideoKeysForDate(dateStr));
+      // The listing, or file-by-file checks when listing is refused.
+      if (!keysByDate.has(dateStr)) keysByDate.set(dateStr, await videoKeysOrNull(dateStr));
       const existingKeys = keysByDate.get(dateStr);
-      const key = buildVideoKey(dateStr, country, course, raceNo);
-      const hasVideo = existingKeys.has(key);
-      results.push({ id, hasVideo, videoUrl: hasVideo ? `${VIDEO_LIST_URL}${key}` : undefined });
+      const exact = buildVideoKey(dateStr, country, course, raceNo);
+      const hasVideo = existingKeys ? existingKeys.has(exact) : await videoFileExists(exact, dateStr);
+      results.push({ id, hasVideo, videoUrl: hasVideo ? `${VIDEO_LIST_URL}${exact}` : undefined });
     } catch (err) {
       results.push({ id, hasVideo: false });
     }
