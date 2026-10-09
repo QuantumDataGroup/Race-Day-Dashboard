@@ -127,7 +127,6 @@
   </div>
 
   <main class="app-main">
-{{ALERT_BANNER_HTML}}
 {{SECTIONS}}
   </main>
   {{HEALTH_STRIP_HTML}}
@@ -1417,9 +1416,7 @@
           (race.rDistance ? ' | Distance: ' + escapeHtmlClient(String(race.rDistance)) + 'm' : '') +
           (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
           (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
-          (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +
-          (race.videoCheckFailed ? ' | <span class="novideo-tag" title="The video storage could not be read, so it is not known whether this race has a video">Video check not working</span>' : '') +
-          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
+          (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
         (race.raceComment ? '<p class="modal-race-comment">' + escapeHtmlClient(race.raceComment) + '</p>' : '') +
         resultLine +
         runnerCheckLine +
@@ -3312,7 +3309,7 @@
       var fmt = function (d) { return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
       var page = document.getElementById('pageUpdatedAt');
       if (page) page.textContent = fmt(new Date());
-      document.querySelectorAll('#healthStrip [data-local-time], .page-alert [data-local-time]').forEach(function (el) {
+      document.querySelectorAll('#healthStrip [data-local-time]').forEach(function (el) {
         el.textContent = new Date(el.getAttribute('data-local-time')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       });
       var pill = document.getElementById('healthPill');
