@@ -746,8 +746,13 @@ async function runHealthChecks() {
       : jc.error ? `Last run failed: ${jc.error}`
         : jockeyLast ? `Every ${JOCKEY_CHECK_EVERY_MS / 3600000} h · ${jc.racesWanted} races in the next 24 h missing a jockey, ${jc.racesChecked} checked on Neds, ${jc.jockeysFound} jockeys found`
           : 'First run starts two minutes after the server starts');
+  // The full "can't be checked" message lives here only (9 Oct 2026, per
+  // Dinesh: System Health, admins only) -- the dashboard just marks today's
+  // races Missing Video as before.
+  const videoFail = videoCheckErrors.get(today);
   add('video', 'Race video storage (S3)', video.ok ? 'ok' : 'bad', video.ok ? `${(video.ms / 1000).toFixed(1)} s` : 'Not reachable',
-    video.ok ? 'Video listing reachable' : video.error);
+    video.ok ? 'Video listing reachable'
+      : `Race videos can't be checked right now -- the video storage answered ${/HTTP \d+/.test(video.error || '') ? video.error.replace(/^.*?(HTTP \d+.*)$/, '$1') : video.error}${/403/.test(video.error || '') ? ' (Access Denied)' : ''}. Today's Thoroughbred races in ${[...VIDEO_COUNTRIES].join('/')} show Missing Video until it works again, and video buttons won't show${videoFail ? ` (last failed check ${videoFail.at})` : ''}.`);
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
@@ -909,10 +914,12 @@ async function loadVideoKeysForDate(dateStr) {
 // video counts as a real problem (vs. just "hasn't run yet") is decided
 // downstream in raceView.js's buildSchedule, which only flags it once the
 // race also has a result -- this function itself doesn't gate on that.
-// Dates whose video listing failed, so the dashboard can say so instead of
-// silently showing no Missing Video warnings (9 Oct 2026, per Dinesh: "Videos
+// When the video listing can't be read (9 Oct 2026, per Dinesh: "Videos
 // Missing But Dashboard-la error kaattudilla" -- the bucket had started
-// answering 403 Access Denied, and the check was skipped without a word).
+// answering 403 Access Denied, and the check was skipped without a word),
+// the races are marked as having no video, so today's show Missing Video as
+// before ("Previous kaattuna madhiri wenu"); the reason is on System Health
+// only, kept here per date.
 const videoCheckErrors = new Map(); // dateStr -> { error, at }
 
 async function attachVideoStatus(docs, dateStr) {
@@ -926,7 +933,7 @@ async function attachVideoStatus(docs, dateStr) {
   } catch (err) {
     console.warn(`[race-dashboard] WARNING: could not list race videos for ${dateStr}: ${err.message} -- skipping video check`);
     videoCheckErrors.set(dateStr, { error: err.message, at: new Date().toISOString() });
-    for (const doc of eligible) doc.videoCheckFailed = true;
+    for (const doc of eligible) doc.hasVideo = false;
     return;
   }
 
@@ -2985,8 +2992,6 @@ async function sendDashboard(req, res, { dateStr, includeTrials, discipline, ini
     res.send(renderHtml(dateStr, schedule, {
       includeTrials, discipline, initialRaceId, username: req.session.username, access: accessOf(req),
       lastScrapeSeenAt: tracker.lastScrapeSeenAt, lastChangeCheckAt: tracker.lastCheckAt, serverStartedAt: SERVER_STARTED_AT.toISOString(),
-      // Missing Video only counts for today, so only today's failure matters.
-      videoCheckError: dateStr === todayStr() ? (videoCheckErrors.get(dateStr) || null) : null,
     }));
   } catch (err) {
     res.status(500).send(`<h1>Error loading dashboard</h1><pre>${escapeHtml(err.message)}</pre>`);
