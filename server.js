@@ -890,7 +890,7 @@ async function loadVideoKeysForDate(dateStr) {
     url.searchParams.set('max-keys', '1000');
     if (continuationToken) url.searchParams.set('continuation-token', continuationToken);
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`Video listing request failed (${res.status})`);
+    if (!res.ok) throw new Error(`the video storage answered HTTP ${res.status}${res.status === 403 ? ' (Access Denied)' : ''}`);
     const xml = await res.text();
     for (const m of xml.matchAll(/<Key>([^<]+)<\/Key>/g)) keys.add(m[1]);
     const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
@@ -909,6 +909,12 @@ async function loadVideoKeysForDate(dateStr) {
 // video counts as a real problem (vs. just "hasn't run yet") is decided
 // downstream in raceView.js's buildSchedule, which only flags it once the
 // race also has a result -- this function itself doesn't gate on that.
+// Dates whose video listing failed, so the dashboard can say so instead of
+// silently showing no Missing Video warnings (9 Oct 2026, per Dinesh: "Videos
+// Missing But Dashboard-la error kaattudilla" -- the bucket had started
+// answering 403 Access Denied, and the check was skipped without a word).
+const videoCheckErrors = new Map(); // dateStr -> { error, at }
+
 async function attachVideoStatus(docs, dateStr) {
   const eligible = docs.filter((d) => d.rDiscipline === 'T' && VIDEO_COUNTRIES.has(d.rCountry) && !d.isTrail);
   if (!eligible.length) return;
@@ -916,8 +922,11 @@ async function attachVideoStatus(docs, dateStr) {
   let existingKeys;
   try {
     existingKeys = await listVideoKeysForDate(dateStr);
+    videoCheckErrors.delete(dateStr);
   } catch (err) {
     console.warn(`[race-dashboard] WARNING: could not list race videos for ${dateStr}: ${err.message} -- skipping video check`);
+    videoCheckErrors.set(dateStr, { error: err.message, at: new Date().toISOString() });
+    for (const doc of eligible) doc.videoCheckFailed = true;
     return;
   }
 
@@ -2976,6 +2985,8 @@ async function sendDashboard(req, res, { dateStr, includeTrials, discipline, ini
     res.send(renderHtml(dateStr, schedule, {
       includeTrials, discipline, initialRaceId, username: req.session.username, access: accessOf(req),
       lastScrapeSeenAt: tracker.lastScrapeSeenAt, lastChangeCheckAt: tracker.lastCheckAt, serverStartedAt: SERVER_STARTED_AT.toISOString(),
+      // Missing Video only counts for today, so only today's failure matters.
+      videoCheckError: dateStr === todayStr() ? (videoCheckErrors.get(dateStr) || null) : null,
     }));
   } catch (err) {
     res.status(500).send(`<h1>Error loading dashboard</h1><pre>${escapeHtml(err.message)}</pre>`);
