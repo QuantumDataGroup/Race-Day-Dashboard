@@ -149,10 +149,6 @@ h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.3px;
 body.hide-downloads .meeting-download:not(.export-data-menu) { display: none; }
 
 .app-main { padding: 24px; max-width: none; margin: 0; }
-/* Page-level warning when a check couldn't run (9 Oct 2026: video listing 403). */
-.page-alert { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--adm-warn); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--adm-warn-bg); color: var(--fg); font-size: 14px; line-height: 1.45; }
-.page-alert > i { color: var(--adm-warn); margin-top: 3px; }
-
 /* Card header row on each discipline's meeting table (calendar icon,
    title, meeting count) -- matches the reference's "Today's Race
    Schedule" panel header sitting above the grid. */
