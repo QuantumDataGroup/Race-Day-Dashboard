@@ -846,6 +846,8 @@ function buildRaceDetail(doc) {
     // Matches buildSchedule's rule: the "missing" warning only applies to
     // today's races (videos only ever get uploaded same-day).
     missingVideo: doc.hasVideo === false && doc.rDate === todayStr(),
+    // The video listing couldn't be read, so "no video" is unknown, not missing.
+    videoCheckFailed: Boolean(doc.videoCheckFailed),
     videoUrl: doc.videoUrl || null,
     // Race-level runners check differences (a runner absent or scratched on one
     // side); per-runner ones are in each runner's issue text.
@@ -1646,8 +1648,20 @@ function renderHtml(dateStr, schedule, options = {}) {
     INITIAL_RACE_ID: /^[A-Za-z0-9-]+$/.test(options.initialRaceId || '') ? options.initialRaceId : '',
     COUNTRY_OPTIONS: countryOptions,
     SECTIONS: sections,
+    ALERT_BANNER_HTML: renderAlertBanner(options),
     HEALTH_STRIP_HTML: renderHealthStrip(options),
   });
+}
+
+// Top-of-page warning when a check couldn't run at all (9 Oct 2026): today's
+// race-video listing failed, so no Missing Video warning can show -- said
+// out loud instead of looking like every video is there.
+function renderAlertBanner(options) {
+  const v = options.videoCheckError;
+  if (!v) return '';
+  return `<div class="page-alert" role="alert"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+    <span><b>Race videos can't be checked right now</b> &mdash; ${escapeHtml(v.error)}. Missing Video warnings and video buttons won't show until it works again (checked <b data-local-time="${escapeHtml(v.at)}">-</b>).</span>
+  </div>`;
 }
 
 // Bottom-of-dashboard strip (30 Sep 2026, per Dinesh): page update time and
