@@ -66,6 +66,7 @@
         <label>Username<input type="text" id="newUser" autocomplete="off" placeholder="e.g. kavin"></label>
         <label>Password<input type="password" id="newPass" autocomplete="new-password" placeholder="8+ characters"></label>
         <label>Confirm password<input type="password" id="newPass2" autocomplete="new-password"></label>
+        <label>ClickUp email (optional)<input type="email" id="newEmail" autocomplete="off" placeholder="name@troyendata.com"></label>
         <div class="adm-panel-actions"><button type="submit" class="adm-btn primary" id="addUserSubmit">Add user</button><button type="button" class="adm-btn" id="addUserCancel">Cancel</button></div>
         <fieldset class="adm-access">
           <legend>What this user can see besides the dashboard</legend>
@@ -73,7 +74,8 @@
           <label class="adm-check"><input type="checkbox" class="newPerm" value="health"> System Health</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="changes"> Data Changes</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="missing"> Missing Data</label>
-          <label class="adm-check adm-check-admin"><input type="checkbox" id="newAdmin"> Admin (all three + add / delete users)</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="overview"> Overview</label>
+          <label class="adm-check adm-check-admin"><input type="checkbox" id="newAdmin"> Admin (everything + add / delete users)</label>
         </fieldset>
         <p class="adm-msg" id="addUserMsg" hidden></p>
       </form>
@@ -145,6 +147,15 @@
       'view-missing-meetings': ['Opened missing data', 'view', 'view'],
       'missing-countries': ['Changed missing-data countries', 'admin', 'admin'],
       'runners-check': ['Ran the runners check', 'view', 'view'],
+      'view-overview': ['Opened overview', 'view', 'view'],
+      'issue-status': ['Changed an issue status', 'confirm', 'confirm'],
+      'view-tickets': ['Opened all tickets', 'view', 'view'],
+      'view-my-tickets': ['Opened my tickets', 'view', 'view'],
+      'ticket-create': ['Raised a ClickUp ticket', 'confirm', 'confirm'],
+      'ticket-developer': ['Added a developer to a ticket', 'confirm', 'confirm'],
+      'ticket-ignore': ['Ignored a ticket', 'confirm', 'confirm'],
+      'ticket-unignore': ['Un-ignored a ticket', 'confirm', 'confirm'],
+      'admin-change-email': ['Changed a user email', 'admin', 'admin'],
       'download': ['Downloaded', 'download', 'download'],
       'confirm': ['Confirmed', 'confirm', 'confirm'],
       'undo-confirm': ['Undid a confirm', 'confirm', 'confirm'],
@@ -192,7 +203,7 @@
       return d;
     }
 
-    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Data']];
+    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Data'], ['overview', 'Overview']];
     var COLS = 10;
     function accessChips(u) {
       if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';
@@ -205,6 +216,7 @@
       var n = esc(u.username);
       return '<div class="adm-row-actions">' +
         (self || u.role === 'admin' ? '' : '<button type="button" class="adm-btn" data-act="access" data-user="' + n + '">Access</button>') +
+        '<button type="button" class="adm-btn" data-act="email" data-user="' + n + '">Email</button>' +
         '<button type="button" class="adm-btn" data-act="reset" data-user="' + n + '">Reset password</button>' +
         (self ? '' : '<button type="button" class="adm-btn" data-act="role" data-user="' + n + '">' + (u.role === 'admin' ? 'Remove admin' : 'Make admin') + '</button>') +
         (self ? '' : '<button type="button" class="adm-btn danger" data-act="remove" data-user="' + n + '">Delete</button>') +
@@ -223,6 +235,14 @@
           SECTIONS.map(function (s) { return '<label class="adm-check"><input type="checkbox" class="editPerm" value="' + s[0] + '"' + (perms.indexOf(s[0]) !== -1 ? ' checked' : '') + '> ' + s[1] + '</label>'; }).join('') +
           '<button type="submit" class="adm-btn primary">Save access</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
           '<span class="adm-msg err" id="accessMsg"></span></form></td></tr>';
+      }
+      if (state.inline.act === 'email') {
+        return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><form class="adm-inline-form" data-form="email" data-user="' + n + '" novalidate>' +
+          '<b>ClickUp email for ' + n + ':</b>' +
+          '<input type="email" id="editEmail" autocomplete="off" placeholder="name@troyendata.com" aria-label="ClickUp email" value="' + esc(u.email || '') + '">' +
+          '<button type="submit" class="adm-btn primary">Save email</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
+          '<span class="adm-foot">Links their login to ClickUp for My tickets. Leave empty to remove.</span>' +
+          '<span class="adm-msg err" id="emailMsg"></span></form></td></tr>';
       }
       if (state.inline.act === 'reset') {
         return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><form class="adm-inline-form" data-form="reset" data-user="' + n + '" novalidate>' +
@@ -255,7 +275,8 @@
         var online = last && Date.now() - t(last) < 10 * 60000 && last.action !== 'logout';
         var inR = mine.filter(function (e) { return inRange(t(e)); });
         function count(fn) { return inR.filter(fn).length; }
-        return '<tr><td><button type="button" class="adm-user-link" data-user="' + esc(u.username) + '">' + esc(u.username) + '</button></td>' +
+        return '<tr><td><button type="button" class="adm-user-link" data-user="' + esc(u.username) + '">' + esc(u.username) + '</button>' +
+          (u.email ? '<div class="adm-foot">' + esc(u.email) + '</div>' : '') + '</td>' +
           '<td><span class="adm-role ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? 'ADMIN' : 'USER') + '</span></td>' +
           '<td>' + accessChips(u) + '</td>' +
           '<td><span class="adm-status ' + (online ? 'online' : 'offline') + '"><i></i>' + (online ? 'Online' : 'Offline') + '</span></td>' +
@@ -361,7 +382,7 @@
       if (act === 'cancel') {
         state.inline = null;
         render();
-      } else if (act === 'reset' || act === 'remove' || act === 'access') {
+      } else if (act === 'reset' || act === 'remove' || act === 'access' || act === 'email') {
         state.inline = { user: name, act: act };
         render();
         var first = usersBody.querySelector('.adm-inline-row input');
@@ -394,6 +415,14 @@
         api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/permissions', { permissions: perms })
           .then(function () { return afterChange(name, name + ' can now see: ' + (perms.length ? SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : 'the dashboard only') + '.'); })
           .catch(function (err) { form.querySelector('button[type="submit"]').disabled = false; document.getElementById('accessMsg').textContent = err.message; });
+        return;
+      }
+      if (form.dataset.form === 'email') {
+        var email = document.getElementById('editEmail').value.trim();
+        form.querySelector('button[type="submit"]').disabled = true;
+        api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/email', { email: email })
+          .then(function () { return afterChange(name, email ? 'ClickUp email for ' + name + ' is now ' + email + '.' : 'Removed the ClickUp email for ' + name + '.'); })
+          .catch(function (err) { form.querySelector('button[type="submit"]').disabled = false; document.getElementById('emailMsg').textContent = err.message; });
         return;
       }
       var p1 = document.getElementById('resetPass').value;
@@ -442,7 +471,7 @@
       if (p1 !== p2) return showAddMsg('Passwords do not match.', false);
       var submit = document.getElementById('addUserSubmit');
       submit.disabled = true;
-      api('POST', '/api/admin/users', { username: name, password: p1, role: admin ? 'admin' : 'user', permissions: admin ? [] : perms })
+      api('POST', '/api/admin/users', { username: name, password: p1, role: admin ? 'admin' : 'user', permissions: admin ? [] : perms, email: document.getElementById('newEmail').value.trim() })
         .then(function () {
           addForm.reset();
           resetAccessBoxes();

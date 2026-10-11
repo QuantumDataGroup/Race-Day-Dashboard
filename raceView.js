@@ -412,6 +412,7 @@ function buildSchedule(docs, dateStr) {
       createdAt: doc.createdAt || null,
       clock: parseClock(doc.rScheduleTime),
       rScheduleTime: doc.rScheduleTime || null,
+      startUtc: doc.rScheduleTimeUTC || null, // Overview countdown (Oct 2026)
       rClass: doc.rClass || '',
       rPrizeMoney: doc.rPrizeMoney || '',
       missingJockeyCount: countMissingJockeys(doc.runners, doc.rDiscipline),
@@ -477,7 +478,7 @@ function buildSchedule(docs, dateStr) {
 
     for (const rNo of raceNos) {
       const {
-        id, clock, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
+        id, clock, startUtc, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
         missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
         missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines,
       } = g.races.get(rNo);
@@ -513,6 +514,7 @@ function buildSchedule(docs, dateStr) {
         ? {
             id,
             label: clock.label,
+            startUtc,
             rClass,
             rPrizeMoney,
             gapMinutes,
@@ -869,6 +871,7 @@ function buildRaceDetail(doc) {
     rDistance: doc.rDistance || '',
     rPrizeMoney: doc.rPrizeMoney || '',
     timeLabel: clock ? clock.label : null,
+    startUtc: doc.rScheduleTimeUTC || null, // ticket priority (Oct 2026)
     resultString: doc.resultString || null,
     hasResult,
     isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
@@ -1276,6 +1279,8 @@ const ADMIN_DENIED_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'adm
 const CHANGES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'changes.html'), 'utf8');
 const SYSTEM_HEALTH_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'system-health.html'), 'utf8');
 const MISSING_MEETINGS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'missing-meetings.html'), 'utf8');
+const OVERVIEW_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'overview.html'), 'utf8');
+const TICKETS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'tickets.html'), 'utf8');
 
 // styles.css is served with a long cache lifetime in production, so the
 // pages link it as /styles.css?v=<file mtime>: a new upload gets a new URL
@@ -1293,8 +1298,14 @@ function stylesVersion() {
 // one admin-area section (see accessOf in server.js).
 function renderUserBlock(username, access) {
   if (!username) return '';
+  // Overview for whoever has it; Tickets for admins (every ticket), My
+  // tickets for everyone else (Oct 2026).
+  const overviewLink = access && access.overview ? `<a class="meetings-list-link" href="/overview"><i class="fa-solid fa-gauge-high"></i> Overview</a>` : '';
+  const ticketsLink = access && access.admin
+    ? `<a class="meetings-list-link" href="/tickets"><i class="fa-solid fa-ticket"></i> Tickets</a>`
+    : `<a class="meetings-list-link" href="/my-tickets"><i class="fa-solid fa-ticket"></i> My tickets</a>`;
   const adminLink = access && access.any ? `<a class="meetings-list-link admin-link" href="/admin"><i class="fa-solid fa-user-shield"></i> Admin</a>` : '';
-  return `${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
+  return `${overviewLink}${ticketsLink}${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
 }
 
 // User Activity | System Health | Data Changes | Missing Data buttons
@@ -1330,9 +1341,88 @@ function renderMissingMeetingsPage(options = {}) {
   return renderTemplate(MISSING_MEETINGS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('missing', options.access) });
 }
 
+function renderOverviewPage(options = {}) {
+  return renderTemplate(OVERVIEW_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access) });
+}
+
+// mode "all" (admins: every ticket assigned to them) or "mine" (the tickets
+// this user raised).
+function renderTicketsPage(options = {}) {
+  const all = options.mode === 'all';
+  return renderTemplate(TICKETS_TEMPLATE, {
+    USERNAME_BLOCK: renderUserBlock(options.username, options.access),
+    TICKETS_MODE: all ? 'all' : 'mine',
+    TICKETS_TITLE: all ? 'All tickets' : 'My tickets',
+  });
+}
+
 function renderTemplate(template, vars) {
   const allVars = { STYLES_VERSION: stylesVersion(), ...vars };
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in allVars ? allVars[key] : match));
+}
+
+// One race's data issues as { code, text } -- the grid's issue icon/tooltip
+// and the Overview page / issue workflow / tickets (Oct 2026) all use this,
+// so they always agree. `code` is stable per kind of issue (it keys the
+// workflow status and ClickUp tickets: `${raceId}|${code}`).
+function raceIssueList(race) {
+  const out = [];
+  const add = (code, text) => out.push({ code, text });
+  if (race.missingJockeyCount > 0) add('missing-jockey', `Missing Jockey (${race.missingJockeyCount})`);
+  if (race.duplicateJockeyCount > 0) add('duplicate-jockey', `Duplicate Jockey (${race.duplicateJockeyCount})`);
+  if (race.tabIssueCount > 0) add('tab-issue', `Missing/Duplicate TAB number (${race.tabIssueCount})`);
+  if (race.missingTrainerCount > 0) add('missing-trainer', `Missing Trainer (${race.missingTrainerCount})`);
+  if (race.missingFormFlagged) add('missing-form', `Missing Form Lines (${race.missingFormCount})`);
+  if (race.ageIssueFlagged) add('age-issue', `Horse Age Issue (${race.ageIssueCount})`);
+  if (race.missingRunnerCommentFlagged) add('missing-runner-comment', `Missing Runner Comment (${race.missingRunnerCommentCount})`);
+  if (race.missingVideo) add('missing-video', 'Missing Video');
+  if (race.missingSpeedMap) add('missing-speed-map', 'Missing Speed Map');
+  if (race.missingScratching) add('missing-scratching', `Scratching Not Updated (${race.missingScratchingNames.join(', ')})`);
+  if (race.runnerMismatch) {
+    const lines = [...(race.runnerCheckLines || [])];
+    if (race.runnerMismatchCount) lines.push(`Runner Mismatched (${race.runnerMismatchCount} runner${race.runnerMismatchCount === 1 ? '' : 's'})`);
+    lines.forEach((line) => add('runner-mismatch', line));
+  }
+  if (race.missingResult) add('missing-results', 'Results Missing');
+  if (race.missingRaceComment) add('missing-race-comment', 'Missing Race Comment');
+  if (race.badTime) add('schedule-issue', `Schedule Issue (${race.badTimeReason})`);
+  else if (race.highlighted) add('schedule-issue', `Schedule Issue (${race.gapMinutes} min after the previous race)`);
+  return out;
+}
+
+// Friendly names for the issue codes (Overview, tickets).
+const ISSUE_LABELS = {
+  'missing-jockey': 'Missing jockey', 'duplicate-jockey': 'Duplicate jockey', 'tab-issue': 'Missing/duplicate TAB number',
+  'missing-trainer': 'Missing trainer', 'missing-form': 'Missing form lines', 'age-issue': 'Horse age issue',
+  'missing-runner-comment': 'Missing runner comment', 'missing-video': 'Missing video', 'missing-speed-map': 'Missing speed map',
+  'missing-scratching': 'Scratching not updated', 'runner-mismatch': 'Runner missing / mismatched', 'missing-results': 'Results missing',
+  'missing-race-comment': 'Missing race comment', 'schedule-issue': 'Schedule issue',
+};
+
+// Every issue on a day's schedule, one entry per race + kind (several
+// runner-check lines of one race are one entry with all of them as detail).
+function collectIssues(schedule) {
+  const out = [];
+  for (const disc of Object.keys(schedule.byDiscipline)) {
+    for (const m of schedule.byDiscipline[disc].meetings) {
+      for (const [rNo, race] of Object.entries(m.races)) {
+        if (!race) continue;
+        const byCode = new Map();
+        for (const i of raceIssueList(race)) {
+          if (!byCode.has(i.code)) byCode.set(i.code, []);
+          byCode.get(i.code).push(i.text);
+        }
+        for (const [code, texts] of byCode) {
+          out.push({
+            key: `${race.id}|${code}`, raceId: race.id, code, label: ISSUE_LABELS[code] || code, detail: texts.join(' · '),
+            meeting: m.meeting, country: m.country, discipline: m.discipline, rNo: Number(rNo),
+            time: race.label, startUtc: race.startUtc || null, status: race.status, resulted: Boolean(race.resultString),
+          });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
@@ -1362,25 +1452,8 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.isTrial) cls += ' trial-race';
           if (race.badTime) cls += ' bad-time-cell'; // time shown in red (11 Oct 2026)
 
-          const raceIssueLines = [];
-          if (race.missingJockeyCount > 0) raceIssueLines.push(`Missing Jockey (${race.missingJockeyCount})`);
-          if (race.duplicateJockeyCount > 0) raceIssueLines.push(`Duplicate Jockey (${race.duplicateJockeyCount})`);
-          if (race.tabIssueCount > 0) raceIssueLines.push(`Missing/Duplicate TAB number (${race.tabIssueCount})`);
-          if (race.missingTrainerCount > 0) raceIssueLines.push(`Missing Trainer (${race.missingTrainerCount})`);
-          if (race.missingFormFlagged) raceIssueLines.push(`Missing Form Lines (${race.missingFormCount})`);
-          if (race.ageIssueFlagged) raceIssueLines.push(`Horse Age Issue (${race.ageIssueCount})`);
-          if (race.missingRunnerCommentFlagged) raceIssueLines.push(`Missing Runner Comment (${race.missingRunnerCommentCount})`);
-          if (race.missingVideo) raceIssueLines.push('Missing Video');
-          if (race.missingSpeedMap) raceIssueLines.push('Missing Speed Map');
-          if (race.missingScratching) raceIssueLines.push(`Scratching Not Updated (${race.missingScratchingNames.join(', ')})`);
-          if (race.runnerMismatch) {
-            raceIssueLines.push(...race.runnerCheckLines);
-            if (race.runnerMismatchCount) raceIssueLines.push(`Runner Mismatched (${race.runnerMismatchCount} runner${race.runnerMismatchCount === 1 ? '' : 's'})`);
-          }
-          if (race.missingResult) raceIssueLines.push('Results Missing');
-          if (race.missingRaceComment) raceIssueLines.push('Missing Race Comment');
-          if (race.badTime) raceIssueLines.push(`Schedule Issue (${race.badTimeReason})`);
-          else if (race.highlighted) raceIssueLines.push(`Schedule Issue (${race.gapMinutes} min after the previous race)`);
+          const raceIssues = raceIssueList(race);
+          const raceIssueLines = raceIssues.map((i) => i.text);
           if (raceIssueLines.length) meetingRaceIssues.push({ rNo: n, lines: raceIssueLines });
 
           // These used to be readable straight off the cell's CSS classes
@@ -1443,7 +1516,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           // case; modifier-clicks/right-click bypass it entirely, same as
           // any other link.
           const raceHref = raceUrl({ discipline: m.discipline, country: m.country, meeting: m.meeting, date: dateStr, rNo: n });
-          return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" data-formissue="${Boolean(race.missingFormFlagged)}" data-otherissue-flags="${otherIssueFlags.join(' ')}" title="${escapeHtml(titleParts.join(' | '))}"><a class="race-cell-link" href="${escapeHtml(raceHref)}" target="_blank" onclick="return handleRaceCellClick(event, '${escapeHtml(race.id)}', this)">${raceNoLabel}${timeLabel}${cellIssueIcon}${trialLine}${resultLine}${abandonedLine}</a></td>`;
+          return `<td class="${cls}" data-status="${race.status}" data-rno="${n}" data-race-id="${escapeHtml(race.id)}" data-formissue="${Boolean(race.missingFormFlagged)}" data-otherissue-flags="${otherIssueFlags.join(' ')}"${raceIssues.length ? ` data-issues="${escapeHtml(JSON.stringify(raceIssues))}"` : ''} title="${escapeHtml(titleParts.join(' | '))}"><a class="race-cell-link" href="${escapeHtml(raceHref)}" target="_blank" onclick="return handleRaceCellClick(event, '${escapeHtml(race.id)}', this)">${raceNoLabel}${timeLabel}${cellIssueIcon}${trialLine}${resultLine}${abandonedLine}</a></td>`;
         }).join('');
 
         let countryHeaderRow = '';
@@ -1828,5 +1901,6 @@ module.exports = {
   buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
   buildMeetingsListReport, meetingsListReportToCsv,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
+  renderOverviewPage, renderTicketsPage, raceIssueList, collectIssues, ISSUE_LABELS,
   MISSING_JOCKEY_BORDER_THRESHOLD, MISSING_FORM_BORDER_THRESHOLD, MAX_EXPECTED_HORSE_AGE, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };
