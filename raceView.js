@@ -24,6 +24,7 @@ const MISSING_JOCKEY_BORDER_THRESHOLD = 0; // strictly more than this -> red bor
 // counts (applyFormLineIgnores in server.js).
 const MISSING_FORM_BORDER_THRESHOLD = 0; // strictly more than this -> flagged
 const GAP_THRESHOLD_MIN = 15; // race scheduled less than this many minutes after the previous race at the same meeting -> highlighted
+const LONG_GAP_MIN = 3 * 60; // 3 hours or more between consecutive races -> Schedule Issue (11 Oct 2026)
 // 4 Sep 2026, per Dinesh -- flags an unusually old horse as a likely data
 // error. Thoroughbred only: most TB careers end by 8-10, but Harness horses
 // routinely race well into their teens, so this threshold would be wrong
@@ -471,6 +472,8 @@ function buildSchedule(docs, dateStr) {
 
     const races = {};
     let prevMinutes = null;
+    let prevLabel = null;
+    let prevRNo = null;
 
     for (const rNo of raceNos) {
       const {
@@ -481,18 +484,29 @@ function buildSchedule(docs, dateStr) {
 
       let gapMinutes = null;
       let highlighted = false;
+      // Uncommon schedules (11 Oct 2026, per Dinesh: "edawadu uncommen ha
+      // irunda ada indicate pannunga"): a race starting before the one
+      // numbered before it -- previously folded into a 23-hour "gap" and
+      // missed -- and a gap of 3 hours or more between races.
+      let startsEarly = false;
       if (clock && prevMinutes !== null) {
-        gapMinutes = clock.minutes - prevMinutes;
-        if (gapMinutes < 0) gapMinutes += 24 * 60; // guard against a rare midnight rollover
-        highlighted = gapMinutes < GAP_THRESHOLD_MIN;
+        const raw = clock.minutes - prevMinutes;
+        // A real midnight rollover is late evening -> early morning.
+        startsEarly = raw < 0 && !(prevMinutes >= 20 * 60 && clock.minutes < 6 * 60);
+        gapMinutes = raw < 0 ? raw + 24 * 60 : raw;
+        highlighted = !startsEarly && gapMinutes < GAP_THRESHOLD_MIN;
       }
 
       let badTimeReason = null;
       if (clock) {
         const isDuplicateTime = labelCounts.get(clock.label) > 1;
         const isPlaceholderTime = clock.label === '00:00';
-        if (isPlaceholderTime) badTimeReason = 'Placeholder/unset time (00:00)';
+        if (isPlaceholderTime) badTimeReason = 'Time not set (00:00)';
         else if (isDuplicateTime) badTimeReason = `Same time as another race at this meeting (${clock.label})`;
+        else if (startsEarly) badTimeReason = `Starts before R${prevRNo} (${prevLabel})`;
+        else if (gapMinutes != null && gapMinutes >= LONG_GAP_MIN) {
+          badTimeReason = `${Math.floor(gapMinutes / 60)}h ${String(gapMinutes % 60).padStart(2, '0')}m after R${prevRNo} (${prevLabel})`;
+        }
       }
 
       races[rNo] = clock
@@ -530,8 +544,18 @@ function buildSchedule(docs, dateStr) {
             runnerCheckLines,
           }
         : null;
-      if (clock) prevMinutes = clock.minutes;
+      if (clock) {
+        prevMinutes = clock.minutes;
+        prevLabel = clock.label;
+        prevRNo = rNo;
+      }
     }
+
+    // Whole-meeting time problems, shown as a tag on the meeting name.
+    const timed = raceNos.map((n) => races[n]).filter(Boolean);
+    let scheduleNote = null;
+    if (timed.length >= 2 && timed.every((r) => r.label === '00:00')) scheduleNote = 'Times not set';
+    else if (timed.length >= 3 && timed.every((r) => r.label === timed[0].label)) scheduleNote = `All races at ${timed[0].label}`;
 
     // Missing Results gap detection (24 Sep 2026, per Dinesh, re: ANKARA --
     // "R1 and R3 Results update aagi irukku, R2 results missing" -- flags a
@@ -600,6 +624,7 @@ function buildSchedule(docs, dateStr) {
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
       hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasMissingRaceComment, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      scheduleNote,
       races,
     });
   }
@@ -1335,6 +1360,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.resultString) cls += ' has-result';
           if (race.status === 'abandoned') cls += ' abandoned-race';
           if (race.isTrial) cls += ' trial-race';
+          if (race.badTime) cls += ' bad-time-cell'; // time shown in red (11 Oct 2026)
 
           const raceIssueLines = [];
           if (race.missingJockeyCount > 0) raceIssueLines.push(`Missing Jockey (${race.missingJockeyCount})`);
@@ -1499,8 +1525,12 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         // Meeting cell (15 Sep 2026, per Dinesh, a reference mockup) --
         // name+country on the left, TAB/Non-TAB pill on the right, flexed
         // apart rather than all run together on one line.
+        // Whole-meeting time problem (11 Oct 2026): "Times not set" / "All races at HH:MM".
+        const scheduleNoteTag = m.scheduleNote
+          ? ` <span class="schedule-note-tag" title="Schedule Issue: ${escapeHtml(m.scheduleNote)} -- the scheduled times look wrong"><i class="fa-solid fa-clock" aria-hidden="true"></i> ${escapeHtml(m.scheduleNote)}</span>`
+          : '';
         const meetingCell = `<td class="meeting"><div class="meeting-cell-inner">` +
-          `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span></span>` +
+          `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span>${scheduleNoteTag}</span>` +
           `<span class="meeting-tags-group">${tabMeetingTag}${abandonedTag}${downloadWidget}</span>` +
           `</div></td>`;
 
