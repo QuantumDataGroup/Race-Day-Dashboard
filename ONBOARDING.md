@@ -336,6 +336,21 @@ while a ticket is To Do, then daily (checked every 10 min).
 `tickets.json` (data folder) links tickets to issues, raisers, reminders,
 ignores. Statuses expected: To Do, In Progress, Review, Done.
 
+### Race alerts (bell + browser pop-ups, Oct 2026)
+For users with the **Overview** permission. `renderUserBlock` adds a bell
+and `public/alerts.js`, which polls `/api/alerts` every 60 s. The API lists
+races (today + tomorrow, Sri Lanka day) that jump within 3 h and still have
+an issue not marked fixed, plus any late scratching not yet updated
+(`missing-scratching`) whatever the time. Missing jockeys carry a source
+hint from the Runners check state ("Source (Neds) has: …" / "Not on the
+source (Neds) either"). Pop-ups fire once per race at **3 h, 2 h, 1 h,
+30 min, 10 min** before the jump and once straight away for a late
+scratching; more than 3 at once become one summary pop-up. Each race in the
+panel has **Updated** (issue → fixed) and **Not at source yet** (new status
+`waiting_source`; it then alerts only at 30 and 10 min). Per-browser
+settings (localStorage): pop-ups (off until ticked; asks the browser for
+permission) and sound (on). Pop-ups only work while a dashboard tab is open.
+
 ### System Health (`/system-health`, admins only)
 Live checks, refreshed every 60 s (cached 60 s server-side): server uptime,
 MongoDB ping, when a scrape was last seen (from the Data Changes tracker,

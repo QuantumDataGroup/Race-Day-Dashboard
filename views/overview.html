@@ -113,7 +113,7 @@
     }
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
-    var STATUS = { open: 'Open', in_progress: 'In progress', fixed: 'Fixed' };
+    var STATUS = { open: 'Open', in_progress: 'In progress', waiting_source: 'Not at source yet', fixed: 'Fixed' };
     var PRIORITY = { critical: 'Critical', high: 'High', normal: 'Normal' };
     var data = null;
     var shift = 0;
@@ -149,7 +149,8 @@
       var btns = '<a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener">Open race</a>';
       if (i.ticketId) btns += '<a class="adm-btn" href="https://app.clickup.com/t/' + esc(i.ticketId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket</a>';
       if (i.workflow === 'open') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="in_progress">Start fixing</button>';
-      if (i.workflow === 'in_progress') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="fixed">Mark fixed</button>';
+      if (i.workflow === 'in_progress' || i.workflow === 'waiting_source') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="fixed">Mark fixed</button>';
+      if (i.workflow === 'open' || i.workflow === 'in_progress') btns += '<button type="button" class="adm-btn" data-key="' + key + '" data-to="waiting_source" title="The source does not have it yet either">Not at source</button>';
       if (i.workflow === 'fixed') btns += '<button type="button" class="adm-btn" data-key="' + key + '" data-to="open">Reopen</button>';
       btns += '<button type="button" class="adm-btn" data-key="' + key + '" data-note="1" aria-label="Add a note"><i class="fa-regular fa-note-sticky"></i></button>';
       return btns;

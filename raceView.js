@@ -1305,7 +1305,11 @@ function renderUserBlock(username, access) {
     ? `<a class="meetings-list-link" href="/tickets"><i class="fa-solid fa-ticket"></i> Tickets</a>`
     : `<a class="meetings-list-link" href="/my-tickets"><i class="fa-solid fa-ticket"></i> My tickets</a>`;
   const adminLink = access && access.any ? `<a class="meetings-list-link admin-link" href="/admin"><i class="fa-solid fa-user-shield"></i> Admin</a>` : '';
-  return `${overviewLink}${ticketsLink}${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
+  // Race alerts bell + browser pop-ups (public/alerts.js), same people as Overview.
+  const alertsBell = access && access.overview
+    ? `<button type="button" class="alerts-bell" id="alertsBell" aria-label="Race alerts" aria-expanded="false" aria-controls="alertsPanel" hidden><i class="fa-solid fa-bell" aria-hidden="true"></i><span class="alerts-count" hidden>0</span></button><script src="/alerts.js?v=${stylesVersion()}" defer></script>`
+    : '';
+  return `${alertsBell}${overviewLink}${ticketsLink}${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
 }
 
 // User Activity | System Health | Data Changes | Missing Data buttons
