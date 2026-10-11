@@ -63,11 +63,15 @@ function deriveRaceStatus(doc) {
   return 'upcoming';
 }
 
+// The dashboard's "today", in Sri Lanka time whatever the server's own
+// timezone (11 Oct 2026, per Dinesh: "ella tomorrow meetings da kaattudu" --
+// the Docker server runs on Australia/Sydney, so from 6:30 PM Sri Lanka time
+// "today" had already become tomorrow). DASHBOARD_TIMEZONE overrides it.
+const DASHBOARD_TIMEZONE = process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo';
+const dayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: DASHBOARD_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+
 function todayStr(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return dayFormatter.format(date); // en-CA gives YYYY-MM-DD
 }
 
 // rScheduleTime looks like "2026-08-06T13:33:00" or "...+05:30" / "...+00:00".
