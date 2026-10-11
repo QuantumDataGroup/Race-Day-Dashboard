@@ -16,7 +16,9 @@ const fs = require('fs');
 const path = require('path');
 
 const KEEP_HISTORY_DAYS = 40;
-const STATUSES = ['open', 'in_progress', 'fixed'];
+// waiting_source (Oct 2026, per Dinesh): "Not available at source yet" -- the
+// data isn't on the source either; still open, alerts only near the jump.
+const STATUSES = ['open', 'in_progress', 'waiting_source', 'fixed'];
 
 function createIssueTracker({ dir, now = () => new Date() }) {
   const workflowPath = path.join(dir, 'issue-workflow.json');
@@ -99,7 +101,7 @@ function createIssueTracker({ dir, now = () => new Date() }) {
     } else {
       workflow[key] = {
         status,
-        owner: status === 'in_progress' ? username : (prev.owner || username),
+        owner: status === 'in_progress' || status === 'waiting_source' ? username : (prev.owner || username),
         note: note != null ? String(note).slice(0, 500) : (prev.note || ''),
         startedAt: status === 'in_progress' ? (prev.startedAt || at) : prev.startedAt || null,
         fixedAt: status === 'fixed' ? at : null,

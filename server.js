@@ -1015,6 +1015,10 @@ async function findVideoKey(dateStr, doc, existingKeys) {
 }
 
 async function attachVideoStatus(docs, dateStr) {
+  // A future day's races have no videos yet (and Missing Video is today
+  // only), so there is nothing to look up -- the alerts bell loads tomorrow
+  // every minute (Oct 2026).
+  if (dateStr > todayStr()) return;
   const eligible = docs.filter((d) => d.rDiscipline === 'T' && VIDEO_COUNTRIES.has(d.rCountry) && !d.isTrail);
   if (!eligible.length) return;
 
@@ -3855,11 +3859,72 @@ app.get('/api/overview', requirePermission('overview'), async (req, res) => {
   }
 });
 
+// --- Race alerts (Oct 2026, per Dinesh: "Race start aguradukku modalla
+// missing edawadu irunda engalukku notification") -------------------------
+// What the bell / browser pop-ups show: races starting in the next 3 hours
+// with an open issue (the browser pops up at 3h, 2h, 1h, 30 and 10 minutes
+// to the jump -- see public/alerts.js), plus any late scratching not yet
+// updated in ours, straight away. For a missing jockey it says whether the
+// source (the Neds website, via the jockey check) has one: then it just
+// needs updating; if the source has none either, it's "not at source".
+const ALERT_WINDOW_MIN = 180;
+function jockeySourceHint(raceId) {
+  const entry = runnersCheckState.races && runnersCheckState.races[raceId];
+  if (!entry) return null;
+  const found = (entry.items || [])
+    .filter((it) => it.field === 'jockey' && /^Jockey Missing \((.+)\)$/.test(it.text || ''))
+    .map((it) => `#${it.tab} ${it.text.replace(/^Jockey Missing \((.+)\)$/, '$1')}`);
+  if (found.length) return { available: true, text: `Source (Neds) has: ${found.join(', ')}` };
+  if (/neds/.test(entry.source || '')) return { available: false, text: 'Not on the source (Neds) either' };
+  return null;
+}
+
+app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
+  try {
+    const nowMs = Date.now();
+    const today = todayStr();
+    // A race 3 hours away can be on tomorrow's date (Australia, early morning here).
+    const dates = [today, shiftDate(today, 1)];
+    const byRace = new Map();
+    for (const dateStr of dates) {
+      const { issues } = await currentIssues(dateStr);
+      for (const i of issues) {
+        if (i.resulted) continue;
+        const start = Date.parse(i.startUtc || '');
+        if (!Number.isFinite(start)) continue;
+        const mins = (start - nowMs) / 60000;
+        const lateScratching = i.code === 'missing-scratching';
+        if (mins < -5 || (mins > ALERT_WINDOW_MIN && !lateScratching)) continue;
+        const w = issueTracker.statusOf(i.key);
+        if (w.status === 'fixed') continue;
+        const race = byRace.get(i.raceId) || {
+          raceId: i.raceId, date: dateStr, meeting: i.meeting, country: i.country, discipline: i.discipline, rNo: i.rNo,
+          time: i.time, startUtc: i.startUtc, startsInMin: Math.round(mins),
+          raceUrl: raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: dateStr, rNo: i.rNo }),
+          issues: [],
+        };
+        race.issues.push({
+          key: i.key, code: i.code, label: i.label, detail: i.detail, lateScratching,
+          workflow: w.status, owner: w.owner || null, note: w.note || '', updatedBy: w.updatedBy || null,
+          source: i.code === 'missing-jockey' ? jockeySourceHint(i.raceId) : null,
+        });
+        byRace.set(i.raceId, race);
+      }
+    }
+    res.json({
+      generatedAt: new Date(nowMs).toISOString(), windowMin: ALERT_WINDOW_MIN, milestones: [180, 120, 60, 30, 10],
+      races: [...byRace.values()].sort((a, b) => a.startsInMin - b.startsInMin),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Open / In progress (you become the owner) / Fixed, with an optional note.
 app.post('/api/issues/status', requirePermission('overview'), (req, res) => {
   const { key, status, note } = req.body || {};
   if (typeof key !== 'string' || !/^[^|]{1,100}\|[a-z-]{2,40}$/.test(key)) return res.status(400).json({ error: 'Bad issue key' });
-  if (!issueTracker.STATUSES.includes(status)) return res.status(400).json({ error: 'Status must be open, in_progress or fixed' });
+  if (!issueTracker.STATUSES.includes(status)) return res.status(400).json({ error: `Status must be one of ${issueTracker.STATUSES.join(', ')}` });
   try {
     const result = issueTracker.setStatus(key, status, req.session.username, note);
     logActivity(req, 'issue-status', { detail: `${key} -> ${status}${note ? ` (${String(note).slice(0, 80)})` : ''}` });
