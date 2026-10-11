@@ -98,7 +98,10 @@ const {
   buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
   renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
+  renderOverviewPage, renderTicketsPage, collectIssues, ISSUE_LABELS,
 } = require('./raceView');
+const { createIssueTracker, priorityFor } = require('./issue-tracker');
+const { createClickUp } = require('./clickup');
 
 // Default config-file location changed 9 Sep 2026, per Dinesh: production's
 // WinSW service actually runs out of `C:\Thilina\Dinesh project\project - 1`
@@ -423,14 +426,17 @@ function isAdmin(req) {
 
 // Admin-area sections (30 Sep 2026, per Dinesh): admins get all of them
 // plus user management; anyone else only the ones an admin ticked for them.
-const PERMISSIONS = ['activity', 'health', 'changes', 'missing'];
+// 'overview' (Oct 2026): the Overview page and its issue workflow -- a
+// top-level page, not an admin-area section, so it doesn't add the Admin link.
+const PERMISSIONS = ['activity', 'health', 'changes', 'missing', 'overview'];
+const ADMIN_AREA_PERMISSIONS = ['activity', 'health', 'changes', 'missing'];
 function accessOf(req) {
   const user = findUser(req.session && req.session.username);
   const admin = Boolean(user && user.role === 'admin');
   const granted = new Set(user && Array.isArray(user.permissions) ? user.permissions : []);
   const access = { admin };
   PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
-  access.any = PERMISSIONS.some((p) => access[p]);
+  access.any = ADMIN_AREA_PERMISSIONS.some((p) => access[p]);
   return access;
 }
 function cleanPermissions(list) {
@@ -760,6 +766,11 @@ async function runHealthChecks() {
     // by race (9 Oct 2026, per Dinesh: "Issue edawadu irundu kaattunda podu").
     add('video', 'Race video storage (S3)', 'ok', `${(video.ms / 1000).toFixed(1)} s`, 'Videos reachable');
   }
+
+  // ClickUp tickets (Oct 2026): a warning only when connected and failing.
+  const cu = clickup.status();
+  if (!cu.enabled) add('clickup', 'ClickUp tickets', 'ok', 'Not connected', 'Add CLICKUP_API_TOKEN and CLICKUP_LIST_ID to the server settings to turn tickets on');
+  else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `List ${cu.listId} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
@@ -1942,7 +1953,7 @@ async function loadRaceDocs(dateStr, includeTrials) {
     .find(filter)
     .project({
       _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1,
-      meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1,
+      meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1, rScheduleTimeUTC: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
       'runners.trainer': 1, 'runners.horseName': 1, 'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1,
       'runners.weight': 1, // runners check weight issues (attachRunnersCheck)
@@ -1986,7 +1997,7 @@ async function loadRaceById(id) {
     {
       projection: {
         rCourseDisplayName: 1, rCourse: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1, resultString: 1,
-        rName: 1, rDisplayName: 1, isTrail: 1,
+        rName: 1, rDisplayName: 1, isTrail: 1, rScheduleTimeUTC: 1,
         rDate: 1, createdAt: 1, meetingId: 1,
         'runners.tabNo': 1, 'runners.horseName': 1, 'runners.jockey': 1, 'runners.trainer': 1, 'runners.isScratched': 1, 'runners.fp': 1,
         'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1, 'runners.colors': 1, 'runners.bp': 1, 'runners.weight': 1,
@@ -2892,9 +2903,17 @@ function readRecentActivity() {
 
 function adminUserList() {
   return authConfig.users.map((u) => ({
-    username: u.username, role: u.role, createdAt: u.createdAt || null,
+    username: u.username, role: u.role, createdAt: u.createdAt || null, email: u.email || '',
     permissions: u.role === 'admin' ? PERMISSIONS.slice() : cleanPermissions(u.permissions),
   }));
+}
+
+// A user's ClickUp email (Oct 2026): links their dashboard login to their
+// ClickUp account, for My tickets.
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+function cleanEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+  return email && EMAIL_RE.test(email) ? email : (email ? null : '');
 }
 
 // The Admin link opens User Activity; someone given only System Health or
@@ -2956,14 +2975,28 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
   const username = String((req.body && req.body.username) || '').trim();
   const { password, role } = req.body || {};
   const permissions = cleanPermissions(req.body && req.body.permissions);
+  const email = cleanEmail(req.body && req.body.email);
   const accessText = role === 'admin' ? 'admin' : (permissions.join(', ') || 'dashboard only');
   changeUsers(req, res, 'admin-add-user', `${username} (${accessText})`, (config) => {
     if (!USERNAME_RE.test(username)) return 'Username must be 2-40 characters: letters, numbers, dot, dash or underscore.';
     if (findUserIndex(config, username) !== -1) return `"${username}" already exists.`;
     if (!validPassword(password)) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    if (email === null) return 'That email address does not look right.';
     config.users.push({
-      username, passwordHash: bcrypt.hashSync(password, 10), role: role === 'admin' ? 'admin' : 'user', permissions, createdAt: new Date().toISOString(),
+      username, passwordHash: bcrypt.hashSync(password, 10), role: role === 'admin' ? 'admin' : 'user', permissions, email, createdAt: new Date().toISOString(),
     });
+    return null;
+  });
+});
+
+app.post('/api/admin/users/:username/email', requireAdmin, (req, res) => {
+  const email = cleanEmail(req.body && req.body.email);
+  changeUsers(req, res, 'admin-change-email', `${req.params.username}: ${email || '(none)'}`, (config) => {
+    const idx = findUserIndex(config, req.params.username);
+    if (idx === -1) return 'No such user.';
+    if (email === null) return 'That email address does not look right.';
+    if (email && config.users.some((u, i) => i !== idx && String(u.email || '').toLowerCase() === email)) return `${email} is already used by another user.`;
+    config.users[idx].email = email;
     return null;
   });
 });
@@ -3699,6 +3732,253 @@ app.get('/meetings-list-range.pdf', async (req, res) => {
   } catch (err) {
     res.status(500).send(`Error generating meetings list: ${err.message}`);
   }
+});
+
+// --- Overview, issue workflow and ClickUp tickets (Oct 2026, per Dinesh) ---
+// Overview: today's data quality at a glance -- KPIs, the races starting in
+// the next 60 minutes that still have an open issue, quality by country,
+// open issues by type and a 7-day trend -- for admins and anyone given the
+// Overview section. Each issue can be marked In progress / Fixed with a note
+// (issue-tracker.js). Tickets: a ClickUp ticket can be raised from any issue;
+// admins see every ticket assigned to them, everyone sees the ones they
+// raised (clickup.js). All state lives in the data folder.
+const issueTracker = createIssueTracker({ dir: ACTIVITY_LOG_DIR });
+const clickup = createClickUp({ dir: ACTIVITY_LOG_DIR });
+const ISSUE_RECORD_EVERY_MS = 5 * 60 * 1000;
+const TICKET_REMINDER_EVERY_MS = 10 * 60 * 1000;
+
+function shiftDate(dateStr, days) {
+  return new Date(Date.parse(`${dateStr}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
+async function currentIssues(dateStr) {
+  const docs = await fetchRaceDocs(dateStr, false);
+  const schedule = buildSchedule(docs, dateStr);
+  const meetings = Object.values(schedule.byDiscipline).flatMap((x) => x.meetings);
+  const races = meetings.flatMap((m) => Object.values(m.races).filter(Boolean).map((r) => ({ ...r, meeting: m.meeting, country: m.country })));
+  return { issues: collectIssues(schedule), races, meetings };
+}
+
+async function recordTodayIssues() {
+  const dateStr = todayStr();
+  try {
+    const { issues, races } = await currentIssues(dateStr);
+    issueTracker.recordIssues(dateStr, issues, races.length);
+  } catch (err) {
+    console.warn(`[race-dashboard] WARNING: recording today's issues failed: ${err.message}`);
+  }
+}
+setTimeout(recordTodayIssues, 90 * 1000);
+setInterval(recordTodayIssues, ISSUE_RECORD_EVERY_MS);
+
+setInterval(() => {
+  if (!clickup.enabled) return;
+  clickup.sendReminders()
+    .then((n) => { if (n) console.log(`[race-dashboard] ClickUp: ${n} ticket reminder${n === 1 ? '' : 's'} sent`); })
+    .catch((err) => console.warn(`[race-dashboard] WARNING: ClickUp reminders failed: ${err.message}`));
+}, TICKET_REMINDER_EVERY_MS);
+
+app.get('/overview', requirePermission('overview'), (req, res) => {
+  logActivity(req, 'view-overview', {}, { key: 'overview', ms: 30 * 60 * 1000 });
+  res.send(renderOverviewPage({ username: req.session.username, access: accessOf(req) }));
+});
+
+app.get('/api/overview', requirePermission('overview'), async (req, res) => {
+  try {
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : todayStr();
+    const { issues, races, meetings } = await currentIssues(dateStr);
+    const nowMs = Date.now();
+    const ticketsByIssue = clickup.store().byIssue || {};
+    const minsTo = (startUtc) => {
+      const t = Date.parse(startUtc || '');
+      return Number.isFinite(t) ? Math.round((t - nowMs) / 60000) : null;
+    };
+    const all = issues.map((i) => {
+      const w = issueTracker.statusOf(i.key);
+      const startsInMin = minsTo(i.startUtc);
+      return {
+        ...i,
+        workflow: w.status, owner: w.owner || null, note: w.note || '', updatedBy: w.updatedBy || null, updatedAt: w.updatedAt || null,
+        firstSeen: issueTracker.firstSeen(dateStr, i.key),
+        startsInMin,
+        priority: i.resulted ? 'normal' : priorityFor(i.startUtc, nowMs),
+        ticketId: ticketsByIssue[i.key] || null,
+        raceUrl: raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: dateStr, rNo: i.rNo }),
+      };
+    });
+    const open = all.filter((i) => i.workflow !== 'fixed');
+    const openRaceIds = new Set(open.map((i) => i.raceId));
+    const upcoming = (i) => !i.resulted && i.startsInMin != null && i.startsInMin >= -5 && i.startsInMin <= 60;
+    const queue = open.filter(upcoming).sort((a, b) => a.startsInMin - b.startsInMin || a.meeting.localeCompare(b.meeting));
+    const nextRaces = races.filter((r) => !r.resultString && minsTo(r.startUtc) != null && minsTo(r.startUtc) >= -5 && minsTo(r.startUtc) <= 60);
+
+    const countries = new Map();
+    for (const r of races) {
+      const c = countries.get(r.country) || { code: r.country, races: 0, openRaces: 0, open: 0 };
+      c.races++;
+      if (openRaceIds.has(r.id)) c.openRaces++;
+      countries.set(r.country, c);
+    }
+    for (const i of open) { const c = countries.get(i.country); if (c) c.open++; }
+    const byCountry = [...countries.values()]
+      .map((c) => ({ ...c, pct: c.races ? Math.round(((c.races - c.openRaces) / c.races) * 100) : 100 }))
+      .sort((a, b) => b.races - a.races);
+
+    const typeCounts = new Map();
+    for (const i of open) typeCounts.set(i.code, (typeCounts.get(i.code) || 0) + 1);
+    const byType = [...typeCounts.entries()].map(([code, count]) => ({ code, label: ISSUE_LABELS[code] || code, count })).sort((a, b) => b.count - a.count);
+
+    const today = issueTracker.dayStats(dateStr);
+    const yesterday = issueTracker.dayStats(shiftDate(dateStr, -1));
+    const trend = [];
+    for (let d = -6; d <= 0; d++) trend.push(issueTracker.dayStats(shiftDate(dateStr, d)));
+    const score = races.length ? Math.round(((races.length - openRaceIds.size) / races.length) * 100) : null;
+
+    res.json({
+      date: dateStr, isToday: dateStr === todayStr(), generatedAt: new Date(nowMs).toISOString(),
+      kpis: {
+        score, yesterdayScore: yesterday.score,
+        races: races.length, meetings: meetings.length, resulted: races.filter((r) => r.resultString).length,
+        openIssues: open.length,
+        critical: open.filter((i) => upcoming(i) && i.priority === 'critical').length,
+        inProgress: open.filter((i) => i.workflow === 'in_progress').length,
+        fixedToday: today.fixed, avgFixMinutes: today.avgFixMinutes,
+        next60Races: nextRaces.length, next60WithIssues: new Set(queue.map((i) => i.raceId)).size,
+      },
+      queue, open: open.sort((a, b) => (a.startsInMin ?? 1e9) - (b.startsInMin ?? 1e9)),
+      fixed: all.filter((i) => i.workflow === 'fixed'),
+      byCountry, byType, trend,
+      ticketsEnabled: clickup.enabled,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Open / In progress (you become the owner) / Fixed, with an optional note.
+app.post('/api/issues/status', requirePermission('overview'), (req, res) => {
+  const { key, status, note } = req.body || {};
+  if (typeof key !== 'string' || !/^[^|]{1,100}\|[a-z-]{2,40}$/.test(key)) return res.status(400).json({ error: 'Bad issue key' });
+  if (!issueTracker.STATUSES.includes(status)) return res.status(400).json({ error: 'Status must be open, in_progress or fixed' });
+  try {
+    const result = issueTracker.setStatus(key, status, req.session.username, note);
+    logActivity(req, 'issue-status', { detail: `${key} -> ${status}${note ? ` (${String(note).slice(0, 80)})` : ''}` });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+});
+
+// Tickets pages: admins see every ticket assigned to them; everyone sees the
+// tickets they raised.
+app.get('/tickets', requireAdmin, (req, res) => {
+  logActivity(req, 'view-tickets', {}, { key: 'tickets', ms: 30 * 60 * 1000 });
+  res.send(renderTicketsPage({ mode: 'all', username: req.session.username, access: accessOf(req) }));
+});
+app.get('/my-tickets', (req, res) => {
+  logActivity(req, 'view-my-tickets', {}, { key: 'my-tickets', ms: 30 * 60 * 1000 });
+  res.send(renderTicketsPage({ mode: 'mine', username: req.session.username, access: accessOf(req) }));
+});
+
+// New tickets go to the first admin with a ClickUp email (Dinesh), unless
+// CLICKUP_OWNER_EMAIL says otherwise.
+function ticketOwnerEmail() {
+  if (process.env.CLICKUP_OWNER_EMAIL) return process.env.CLICKUP_OWNER_EMAIL;
+  const admin = (authConfig.users || []).find((u) => u.role === 'admin' && u.email);
+  return admin ? admin.email : null;
+}
+
+function notConnected(res) {
+  return res.json({ enabled: false, reason: 'ClickUp is not connected yet: an admin needs to add CLICKUP_API_TOKEN and CLICKUP_LIST_ID to the server settings (Portainer).' });
+}
+
+app.get('/api/tickets', async (req, res) => {
+  if (!clickup.enabled) return notConnected(res);
+  try {
+    const mode = req.query.mode === 'all' && isAdmin(req) ? 'all' : 'mine';
+    const me = findUser(req.session.username);
+    const myEmail = String((me && me.email) || '').toLowerCase();
+    const views = (await clickup.tasks(req.query.fresh === '1')).map((t) => {
+      const v = clickup.view(t);
+      v.dataNow = v.issueKey ? issueTracker.dataNow(v.raceDate, v.issueKey) : null;
+      return v;
+    });
+    let list;
+    if (mode === 'all') list = myEmail ? views.filter((v) => v.assignees.some((a) => a.email === myEmail)) : views;
+    else list = views.filter((v) => (v.raisedBy && v.raisedBy.toLowerCase() === String(req.session.username).toLowerCase()) || (!v.raisedBy && myEmail && v.creatorEmail === myEmail));
+    res.json({
+      enabled: true, mode, me: req.session.username, hasEmail: Boolean(myEmail),
+      assignedToMeOnly: mode === 'all' && Boolean(myEmail),
+      tickets: list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
+      members: mode === 'all' ? await clickup.members().catch(() => []) : [],
+      reminderHours: [1, 2, 3, 6, 12, 24],
+    });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Tickets already raised for a race's issues (race popup), and who can be
+// picked as the developer.
+app.get('/api/tickets/for-race/:raceId', async (req, res) => {
+  if (!clickup.enabled) return notConnected(res);
+  try {
+    const byIssue = clickup.store().byIssue || {};
+    const prefix = `${req.params.raceId}|`;
+    const out = {};
+    for (const [key] of Object.entries(byIssue)) {
+      if (!key.startsWith(prefix)) continue;
+      const t = await clickup.ticketForIssue(key);
+      if (t) out[key.slice(prefix.length)] = t;
+    }
+    res.json({ enabled: true, tickets: out, members: await clickup.members().catch(() => []) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/tickets', async (req, res) => {
+  if (!clickup.enabled) return notConnected(res);
+  const b = req.body || {};
+  const code = String(b.code || '');
+  const raceId = String(b.raceId || '');
+  const title = String(b.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'A title is needed' });
+  if (raceId && !/^[A-Za-z0-9-]{8,80}$/.test(raceId)) return res.status(400).json({ error: 'Bad race id' });
+  if (code && !/^[a-z-]{2,40}$/.test(code)) return res.status(400).json({ error: 'Bad issue code' });
+  try {
+    const result = await clickup.createTicket({
+      issueKey: raceId && code ? `${raceId}|${code}` : null,
+      raceDate: /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : null,
+      raceUrl: typeof b.raceUrl === 'string' ? b.raceUrl.slice(0, 300) : null,
+      title, details: b.details, priority: b.priority, developerId: b.developerId || null,
+      raisedBy: req.session.username, ownerEmail: ticketOwnerEmail(),
+      tags: ['data-issue', code, String(b.country || '').toLowerCase()].filter(Boolean),
+    });
+    if (!result.duplicate) logActivity(req, 'ticket-create', { detail: `${result.ticket.id}: ${title}` });
+    res.status(result.duplicate ? 409 : 201).json(result);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/tickets/:id/developer', requireAdmin, async (req, res) => {
+  if (!clickup.enabled) return notConnected(res);
+  try {
+    const dev = await clickup.addDeveloper(req.params.id, req.body && req.body.developerId, req.session.username);
+    logActivity(req, 'ticket-developer', { detail: `${req.params.id}: ${dev.name}` });
+    res.json({ ok: true, developer: dev });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/tickets/:id/ignore', requireAdmin, (req, res) => {
+  if (!/^[A-Za-z0-9]{3,40}$/.test(req.params.id)) return res.status(400).json({ error: 'Bad ticket id' });
+  const ignored = Boolean(req.body && req.body.ignored);
+  clickup.setIgnored(req.params.id, ignored, req.session.username);
+  logActivity(req, ignored ? 'ticket-ignore' : 'ticket-unignore', { detail: req.params.id });
+  res.json({ ok: true, ignored });
 });
 
 app.get('/health', async (req, res) => {

@@ -300,6 +300,42 @@ page a second, updating those races' result. Every Neds request goes through
 pause for 6 hours (`jockey-check-state.json`); the runners check then uses
 RAS. System Health shows a "Jockey check (Neds)" row and any pause.
 
+### Overview (`/overview`) + issue workflow (Oct 2026)
+For admins and users given the **Overview** permission (Admin → Users →
+Access; it does not add the Admin link). `/api/overview` builds today's
+schedule (`fetchRaceDocs` + `buildSchedule`) and lists every issue with
+raceView.js `collectIssues` — one entry per race + kind, keyed
+`${raceId}|${code}`, the same `raceIssueList` the grid's warning icon uses.
+Shows KPIs (quality % = races with no open issue, races, open / critical /
+in progress, fixed today + average fix time, next 60 min), the **Next 60
+minutes** queue (Critical ≤ 30 min, High ≤ 60 min, countdown), quality by
+country, open issues by type, a 7-day trend and all open issues with
+filters. Each issue can be **Start fixing** (In progress, you become the
+owner) / **Mark fixed** / Reopen, with a note (`POST /api/issues/status`).
+`issue-tracker.js` keeps it in the data folder: `issue-workflow.json`
+(statuses) and `issue-history/<date>.json` (when each issue was first/last
+seen and when it went away), recorded every 5 min for today — the trend
+and fix times start the day this went live. Kept 40 days.
+
+### Tickets (`/tickets` admins, `/my-tickets` everyone) — ClickUp (Oct 2026)
+`clickup.js`. Off until the server has `CLICKUP_API_TOKEN` and
+`CLICKUP_LIST_ID` (Portainer env; never in code/chat) — pages and the
+popup then say "not connected". Race popup: a **ClickUp ticket** bar lists
+the race's issues (from the grid cell's `data-issues`); a button opens a
+prefilled form (title, race + issue details + link, priority from the start
+time, optional developer) → `POST /api/tickets`, assigned to the first admin
+with a ClickUp email (or `CLICKUP_OWNER_EMAIL`), tags data-issue / issue /
+country. One open ticket per issue (duplicates link to the existing one).
+**All tickets** (admin): tickets in the list assigned to them, To Do / In
+Progress / Review / Done / Ignored, developer dropdown (adds the assignee in
+ClickUp + a comment), Ignore (dashboard only), "Data now" (issue still in
+the data or fixed). **My tickets**: tickets the user raised (dashboard) or
+created in ClickUp (matched by the user's ClickUp email — Admin → Users →
+Email). Reminders: a ClickUp comment (notify all) at 1, 2, 3, 6, 12, 24 h
+while a ticket is To Do, then daily (checked every 10 min).
+`tickets.json` (data folder) links tickets to issues, raisers, reminders,
+ignores. Statuses expected: To Do, In Progress, Review, Done.
+
 ### System Health (`/system-health`, admins only)
 Live checks, refreshed every 60 s (cached 60 s server-side): server uptime,
 MongoDB ping, when a scrape was last seen (from the Data Changes tracker,

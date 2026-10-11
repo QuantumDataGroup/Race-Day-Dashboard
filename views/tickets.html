@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - {{TICKETS_TITLE}}</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Tickets</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-table-cells"></i> Race grid</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main ov-main" data-mode="{{TICKETS_MODE}}">
+    <div class="adm-page-head">
+      <div>
+        <h1>{{TICKETS_TITLE}}</h1>
+        <p id="tkIntro">Loading tickets from ClickUp...</p>
+      </div>
+      <button type="button" class="adm-btn" id="tkRefresh"><i class="fa-solid fa-rotate"></i> Refresh</button>
+    </div>
+    <p class="adm-error" id="tkError" hidden></p>
+    <div class="tk-notice" id="tkNotice" hidden></div>
+
+    <section class="ov-tiles" id="tkTiles" aria-label="Tickets in numbers" hidden></section>
+
+    <div class="tk-tabs" role="tablist" aria-label="Ticket status" id="tkTabs" hidden></div>
+    <div class="ov-filters tk-filters" id="tkFilters" hidden>
+      <label>Search<input type="search" id="tkText" placeholder="Ticket, race, horse..."></label>
+      <label id="tkByWrap">Raised by<select id="tkBy"><option value="">Everyone</option></select></label>
+    </div>
+
+    <section class="ov-card" id="tkCard" hidden>
+      <div class="ov-table-wrap"><table class="ov-table">
+        <thead><tr><th scope="col">Ticket</th><th scope="col">Raised</th><th scope="col">Waiting</th><th scope="col">Developer</th><th scope="col">Data now</th><th scope="col" class="ov-right">Action</th></tr></thead>
+        <tbody id="tkRows"></tbody>
+      </table></div>
+      <div class="ov-card-foot" id="tkFoot"></div>
+    </section>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+    var MODE = document.querySelector('main').getAttribute('data-mode');
+    var TABS = [['todo', 'To Do'], ['in_progress', 'In Progress'], ['review', 'Review'], ['done', 'Done'], ['ignored', 'Ignored']];
+    var tab = 'todo';
+    var data = null;
+
+    function ago(hours) {
+      if (hours == null) return '-';
+      if (hours < 1) return Math.max(1, Math.round(hours * 60)) + ' min';
+      if (hours < 48) return Math.floor(hours) + ' h';
+      return Math.floor(hours / 24) + ' days';
+    }
+    function ageTone(h) { return h >= 12 ? 'bad' : h >= 3 ? 'warn' : 'info'; }
+    function inTab(t, key) {
+      if (key === 'ignored') return t.ignored;
+      return !t.ignored && t.status === key;
+    }
+
+    function renderTabs() {
+      var tabs = MODE === 'all' ? TABS : TABS.slice(0, 4);
+      document.getElementById('tkTabs').innerHTML = tabs.map(function (t) {
+        var n = data.tickets.filter(function (x) { return inTab(x, t[0]); }).length;
+        return '<button type="button" role="tab" class="tk-tab' + (t[0] === tab ? ' on' : '') + '" aria-selected="' + (t[0] === tab) + '" data-tab="' + t[0] + '">' + t[1] + ' · ' + n + '</button>';
+      }).join('');
+    }
+
+    function renderTiles() {
+      var count = function (k) { return data.tickets.filter(function (x) { return !x.ignored && x.status === k; }).length; };
+      var waiting = data.tickets.filter(function (x) { return !x.ignored && x.status === 'todo' && x.ageHours >= 12; }).length;
+      var tiles = [
+        ['To Do', count('todo'), waiting ? waiting + ' waiting over 12 h' : 'none waiting long', waiting ? 'ov-bad' : 'ov-good'],
+        ['In Progress', count('in_progress'), 'with a developer', ''],
+        ['Review', count('review'), 'needs a check', ''],
+        ['Done', count('done'), 'in the last 14 days', 'ov-good'],
+      ];
+      document.getElementById('tkTiles').innerHTML = tiles.map(function (t) {
+        return '<div class="ov-tile"><span class="ov-tile-label">' + t[0] + '</span><b class="ov-tile-num">' + t[1] + '</b><span class="ov-tile-sub ' + t[3] + '">' + t[2] + '</span></div>';
+      }).join('');
+    }
+
+    function devCell(t) {
+      var names = t.assignees.map(function (a) { return a.name; }).join(', ') || '—';
+      if (MODE !== 'all') return esc(names);
+      var opts = '<option value="">Pick a developer</option>' + data.members.map(function (m) {
+        return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>';
+      }).join('');
+      return '<div class="ov-mini">' + esc(names) + '</div><label class="tk-sr" for="dev-' + esc(t.id) + '">Developer for ' + esc(t.name) + '</label>' +
+        '<select id="dev-' + esc(t.id) + '" class="tk-dev" data-id="' + esc(t.id) + '">' + opts + '</select>';
+    }
+
+    function dataNow(t) {
+      if (t.dataNow === 'fixed') return '<span class="ov-good"><b>Looks fixed</b></span><div class="ov-mini">close it?</div>';
+      if (t.dataNow === 'still') return '<span class="ov-bad"><b>Still wrong</b></span>';
+      return '<span class="ov-mini">-</span>';
+    }
+
+    function renderRows() {
+      var text = document.getElementById('tkText').value.trim().toLowerCase();
+      var by = document.getElementById('tkBy').value;
+      var list = data.tickets.filter(function (t) {
+        return inTab(t, tab) && (!by || (t.raisedBy || t.creatorEmail) === by) &&
+          (!text || (t.name + ' ' + t.id).toLowerCase().indexOf(text) !== -1);
+      });
+      document.getElementById('tkRows').innerHTML = list.map(function (t) {
+        var tone = t.status === 'todo' ? ageTone(t.ageHours) : 'info';
+        var reminder = t.status === 'todo'
+          ? (t.remindersSent ? 'Reminded ' + t.remindersSent + '× · next at ' + t.nextReminderHours + 'h' : 'First reminder at ' + t.nextReminderHours + 'h')
+          : esc(t.statusLabel);
+        var actions = (t.url ? '<a class="adm-btn" href="' + esc(t.url) + '" target="_blank" rel="noopener">ClickUp</a>' : '') +
+          (t.raceUrl ? '<a class="adm-btn" href="' + esc(t.raceUrl) + '" target="_blank" rel="noopener">Race</a>' : '') +
+          (MODE === 'all' ? '<button type="button" class="adm-btn" data-ignore="' + esc(t.id) + '" data-to="' + (t.ignored ? '0' : '1') + '">' + (t.ignored ? 'Undo ignore' : 'Ignore') + '</button>' : '');
+        return '<tr><td class="tk-name"><a class="ov-race" href="' + esc(t.url || '#') + '" target="_blank" rel="noopener">' + esc(t.name) + '</a>' +
+          '<div class="ov-mini">#' + esc(t.id) + ' · ' + (t.raisedOnDashboard ? 'raised on the dashboard' : 'raised in ClickUp') + '</div></td>' +
+          '<td class="ov-nowrap">' + esc(t.raisedBy || t.creatorEmail || '-') + '<div class="ov-mini">' + ago(t.ageHours) + ' ago</div></td>' +
+          '<td class="ov-nowrap"><span class="ov-status tk-age-' + tone + '">' + ago(t.ageHours) + '</span><div class="ov-mini">' + reminder + '</div></td>' +
+          '<td>' + devCell(t) + '</td><td class="ov-nowrap">' + dataNow(t) + '</td>' +
+          '<td class="ov-right ov-actions">' + actions + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="ov-empty">No tickets here.</td></tr>';
+    }
+
+    function render() {
+      document.getElementById('tkIntro').textContent = MODE === 'all'
+        ? (data.assignedToMeOnly ? 'Every data-issue ticket assigned to you, raised here or straight in ClickUp.' : 'Every ticket in the ClickUp list (add your email on the Admin page to see only the ones assigned to you).')
+        : (data.hasEmail ? 'The tickets you raised, here or in ClickUp.' : 'The tickets you raised from the dashboard. Ask an admin to add your ClickUp email to also see the ones you raise in ClickUp.');
+      ['tkTiles', 'tkTabs', 'tkFilters', 'tkCard'].forEach(function (id) { document.getElementById(id).hidden = false; });
+      document.getElementById('tkTiles').hidden = MODE === 'all';
+      document.getElementById('tkByWrap').hidden = MODE !== 'all';
+      var by = document.getElementById('tkBy');
+      var keep = by.value;
+      var people = [];
+      data.tickets.forEach(function (t) { var p = t.raisedBy || t.creatorEmail; if (p && people.indexOf(p) === -1) people.push(p); });
+      by.innerHTML = '<option value="">Everyone</option>' + people.sort().map(function (p) { return '<option>' + esc(p) + '</option>'; }).join('');
+      by.value = keep;
+      document.getElementById('tkFoot').textContent = MODE === 'all'
+        ? 'Ignore hides a ticket here only (it stays in ClickUp). Picking a developer adds them as an assignee in ClickUp with a comment. Reminders go out as ClickUp comments at ' + data.reminderHours.join(', ') + ' h while a ticket is in To Do, then daily.'
+        : 'Raise a ticket from any issue in a race popup on the race grid.';
+      renderTiles();
+      renderTabs();
+      renderRows();
+    }
+
+    function load(fresh) {
+      fetch('/api/tickets?mode=' + MODE + (fresh ? '&fresh=1' : '')).then(function (res) {
+        return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || ('Request failed (' + res.status + ')')); return j; });
+      }).then(function (j) {
+        document.getElementById('tkError').hidden = true;
+        if (!j.enabled) {
+          var n = document.getElementById('tkNotice');
+          n.innerHTML = '<i class="fa-solid fa-plug-circle-xmark"></i> <span>' + esc(j.reason) + '</span>';
+          n.hidden = false;
+          document.getElementById('tkIntro').textContent = 'Tickets come from ClickUp.';
+          return;
+        }
+        data = j;
+        render();
+      }).catch(function (err) {
+        var el = document.getElementById('tkError');
+        el.textContent = 'Could not load tickets: ' + err.message;
+        el.hidden = false;
+      });
+    }
+
+    document.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-tab]');
+      if (t) { tab = t.getAttribute('data-tab'); renderTabs(); renderRows(); return; }
+      var ig = e.target.closest('[data-ignore]');
+      if (ig) {
+        ig.disabled = true;
+        fetch('/api/tickets/' + encodeURIComponent(ig.getAttribute('data-ignore')) + '/ignore', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored: ig.getAttribute('data-to') === '1' }),
+        }).then(function () { load(false); });
+      }
+    });
+    document.addEventListener('change', function (e) {
+      if (!e.target.classList.contains('tk-dev') || !e.target.value) return;
+      var sel = e.target;
+      sel.disabled = true;
+      fetch('/api/tickets/' + encodeURIComponent(sel.getAttribute('data-id')) + '/developer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ developerId: sel.value }),
+      }).then(function (res) { return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || 'Failed'); }); })
+        .then(function () { load(true); })
+        .catch(function (err) { alert('Could not add the developer: ' + err.message); sel.disabled = false; });
+    });
+    ['tkText', 'tkBy'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { if (data) renderRows(); }); });
+    document.getElementById('tkRefresh').addEventListener('click', function () { load(true); });
+    setInterval(function () { load(false); }, 2 * 60 * 1000);
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load(false);
+    })();
+  </script>
+</body>
+</html>

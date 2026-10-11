@@ -1108,3 +1108,106 @@ body.race-standalone-view .health-strip { display: none; }
   .adm-main { padding: 16px; }
   .adm-panel { grid-template-columns: 1fr; }
 }
+
+/* --- Overview + Tickets pages (Oct 2026) ---------------------------------
+   Same tokens as the admin pages; ov-* is the Overview, tk-* the Tickets
+   page. Priority/status colours reuse the admin status tokens. */
+.ov-main { max-width: 1360px; }
+.ov-days { display: flex; gap: 6px; }
+.ov-day { font: inherit; font-size: 13px; font-weight: 600; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--input-border); background: var(--card-bg); color: var(--fg); cursor: pointer; }
+.ov-day.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.ov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.ov-tile { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; }
+.ov-tile-accent { border-color: var(--accent); }
+.ov-tile-label { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.ov-tile-num { font-size: 36px; font-weight: 800; line-height: 1.05; color: var(--fg); font-variant-numeric: tabular-nums; }
+.ov-tile-sub { font-size: 13px; color: var(--muted); }
+.ov-good { color: var(--adm-ok); }
+.ov-bad { color: var(--adm-warn); }
+.ov-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.ov-pad { padding: 16px 18px; }
+.ov-card h2 { margin: 0; font-size: 17px; color: var(--fg); }
+.ov-card-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.ov-card-head.ov-flush { padding: 0 0 12px; border-bottom: 0; }
+.ov-card-head p, .ov-sub { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.ov-pad .ov-sub { margin-bottom: 12px; }
+.ov-card-foot { padding: 12px 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.ov-count { font-weight: 600; color: var(--muted); font-size: 14px; }
+.ov-key, .ov-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+.ov-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ov-p-critical { color: var(--adm-warn); }
+.ov-p-high { color: var(--adm-dl); }
+.ov-p-normal { color: var(--adm-info); }
+.ov-table-wrap { overflow-x: auto; }
+.ov-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px; }
+.ov-table th { text-align: left; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--header-bg); padding: 10px 12px; }
+.ov-table td { padding: 11px 12px; border-top: 1px solid var(--border); vertical-align: top; color: var(--fg); text-align: left; white-space: normal; }
+.ov-table td.ov-right { text-align: right; }
+.ov-table th:first-child, .ov-table td:first-child { padding-left: 18px; }
+.ov-table th:last-child, .ov-table td:last-child { padding-right: 18px; }
+.ov-right { text-align: right; }
+.ov-nowrap { white-space: nowrap; }
+.ov-actions { white-space: nowrap; }
+.ov-actions .adm-btn { margin-left: 4px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; min-height: 32px; }
+.ov-empty { text-align: center; color: var(--muted); padding: 22px 12px; }
+.ov-empty .fa-circle-check { color: var(--adm-ok); }
+.ov-mini { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.ov-note { color: var(--fg); font-style: italic; max-width: 32ch; }
+.ov-race { font-weight: 700; color: var(--fg); text-decoration: none; }
+.ov-race span { color: var(--accent); }
+.ov-race:hover { text-decoration: underline; }
+.ov-countdown { font-family: Consolas, "SFMono-Regular", monospace; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ov-prio { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; margin-left: 6px; vertical-align: 2px; }
+.ov-status { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.ov-st-open { background: var(--adm-warn-bg); color: var(--adm-warn); }
+.ov-st-in_progress { background: var(--adm-dl-bg); color: var(--adm-dl); }
+.ov-st-fixed { background: var(--adm-ok-bg); color: var(--adm-ok); }
+.ov-two { display: flex; flex-wrap: wrap; gap: 20px; }
+.ov-two > .ov-card { flex: 1 1 380px; min-width: 0; }
+.ov-bars { display: flex; flex-direction: column; gap: 10px; }
+.ov-bar-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 46px 64px; align-items: center; gap: 10px; font-size: 14px; }
+.ov-type-row { grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) 34px; }
+.ov-type-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-bar { height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.ov-bar i { display: block; height: 100%; border-radius: 999px; background: var(--adm-info); }
+.ov-bar-amber { background: transparent; }
+.ov-bar-amber i { background: var(--accent); border-radius: 0 4px 4px 0; }
+.ov-num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.ov-trend { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
+.ov-trend-day { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.ov-trend-bars { height: 160px; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; border-bottom: 1px solid var(--input-border); }
+.ov-trend-bars i { width: 20px; border-radius: 4px 4px 0 0; min-height: 2px; }
+.ov-trend-none { align-items: center; font-style: italic; }
+.ov-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.ov-sw-found { background: var(--adm-info); }
+.ov-sw-fixed { background: var(--accent); }
+.ov-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.ov-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.ov-filters input, .ov-filters select, .tk-dev { font: inherit; font-size: 13px; color: var(--fg); background: var(--sub-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 7px 10px; }
+.ov-filters input[type="search"] { width: 200px; max-width: 100%; }
+.tk-tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.tk-tab { font: inherit; font-size: 14px; font-weight: 600; min-height: 40px; padding: 0 16px; border-radius: var(--radius-sm); border: 1px solid var(--input-border); background: var(--card-bg); color: var(--fg); cursor: pointer; }
+.tk-tab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 700; }
+.tk-name { max-width: 380px; }
+.tk-dev { margin-top: 6px; min-width: 160px; }
+.tk-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tk-age-info { background: var(--adm-info-bg); color: var(--adm-info); }
+.tk-age-warn { background: var(--adm-dl-bg); color: var(--adm-dl); }
+.tk-age-bad { background: var(--adm-warn-bg); color: var(--adm-warn); }
+.tk-notice { display: flex; gap: 10px; align-items: center; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid var(--input-border); background: var(--card-bg); color: var(--fg); font-size: 14px; }
+.tk-notice i { color: var(--adm-dl); font-size: 18px; }
+/* Race popup: raise a ClickUp ticket from an issue. */
+.tk-raise { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; font-size: 13px; }
+.tk-raise .adm-btn { display: inline-flex; align-items: center; gap: 5px; }
+.tk-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--adm-info); text-decoration: none; }
+.tk-dialog { position: fixed; inset: 0; z-index: 3000; background: var(--modal-overlay); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; overflow-y: auto; }
+.tk-dialog-box { width: 100%; max-width: 680px; background: var(--modal-bg); border: 1px solid var(--input-border); border-radius: var(--radius); box-shadow: 0 20px 50px var(--modal-shadow); }
+.tk-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.tk-dialog-head h2 { margin: 0; font-size: 18px; color: var(--fg); }
+.tk-dialog-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.tk-dialog-body label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.tk-dialog-body input, .tk-dialog-body textarea, .tk-dialog-body select { font: inherit; font-size: 14px; color: var(--fg); background: var(--sub-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 9px 11px; }
+.tk-dialog-body textarea { resize: vertical; line-height: 1.5; }
+.tk-dialog-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.tk-dialog-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.tk-dialog-msg { margin: 0; font-size: 13px; }
