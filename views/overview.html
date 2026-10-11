@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Overview</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Overview</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-table-cells"></i> Race grid</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main ov-main">
+    <div class="adm-page-head">
+      <div>
+        <h1 id="ovTitle">Today</h1>
+        <p>Data quality right now. Updates every minute · last update <b id="ovUpdated">-</b></p>
+      </div>
+      <div class="ov-days" role="group" aria-label="Day">
+        <button type="button" class="ov-day" data-shift="-1">Yesterday</button>
+        <button type="button" class="ov-day on" data-shift="0" aria-pressed="true">Today</button>
+        <button type="button" class="ov-day" data-shift="1">Tomorrow</button>
+      </div>
+    </div>
+    <p class="adm-error" id="ovError" hidden></p>
+
+    <section class="ov-tiles" aria-label="Today in numbers">
+      <div class="ov-tile"><span class="ov-tile-label">Data quality</span><b class="ov-tile-num" id="kScore">-</b><span class="ov-tile-sub" id="kScoreSub">races with no open issue</span></div>
+      <div class="ov-tile"><span class="ov-tile-label">Races</span><b class="ov-tile-num" id="kRaces">-</b><span class="ov-tile-sub" id="kRacesSub">-</span></div>
+      <div class="ov-tile"><span class="ov-tile-label">Open issues</span><b class="ov-tile-num" id="kOpen">-</b><span class="ov-tile-sub ov-bad" id="kOpenSub">-</span></div>
+      <div class="ov-tile"><span class="ov-tile-label">Fixed today</span><b class="ov-tile-num" id="kFixed">-</b><span class="ov-tile-sub" id="kFixedSub">-</span></div>
+      <div class="ov-tile ov-tile-accent"><span class="ov-tile-label">Next 60 min</span><b class="ov-tile-num" id="kNext">-</b><span class="ov-tile-sub" id="kNextSub">-</span></div>
+    </section>
+
+    <section class="ov-card" aria-labelledby="queueHead">
+      <div class="ov-card-head">
+        <div><h2 id="queueHead">Next 60 minutes</h2><p>Races starting soon with an open issue, closest first</p></div>
+        <div class="ov-key" aria-label="Priority key">
+          <span><b class="ov-p-critical">● Critical</b> starts in 30 min or less</span>
+          <span><b class="ov-p-high">● High</b> 30–60 min</span>
+        </div>
+      </div>
+      <div class="ov-table-wrap"><table class="ov-table">
+        <thead><tr><th scope="col">Starts in</th><th scope="col">Race</th><th scope="col">Issue</th><th scope="col">Status</th><th scope="col">Owner</th><th scope="col" class="ov-right">Action</th></tr></thead>
+        <tbody id="queueRows"><tr><td colspan="6" class="ov-empty">Loading...</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <div class="ov-two">
+      <section class="ov-card ov-pad" aria-labelledby="countryHead">
+        <h2 id="countryHead">Data quality by country</h2>
+        <p class="ov-sub">Share of races with no open issue</p>
+        <div id="countryRows" class="ov-bars"></div>
+      </section>
+      <section class="ov-card ov-pad" aria-labelledby="typesHead">
+        <h2 id="typesHead">Open issues by type</h2>
+        <p class="ov-sub">All countries</p>
+        <div id="typeRows" class="ov-bars"></div>
+      </section>
+    </div>
+
+    <section class="ov-card ov-pad" aria-labelledby="trendHead">
+      <div class="ov-card-head ov-flush">
+        <div><h2 id="trendHead">Last 7 days</h2><p class="ov-sub">Issues found and fixed per day · history starts the day the Overview went live</p></div>
+        <div class="ov-legend"><span><i class="ov-sw ov-sw-found"></i>Found</span><span><i class="ov-sw ov-sw-fixed"></i>Fixed</span></div>
+      </div>
+      <div class="ov-trend" id="trend" role="img" aria-label="Issues found and fixed, last 7 days"></div>
+    </section>
+
+    <section class="ov-card" aria-labelledby="allHead">
+      <div class="ov-card-head">
+        <div><h2 id="allHead">All open issues <span id="allCount" class="ov-count"></span></h2><p>Mark one In progress to own it, or Fixed once it's done</p></div>
+        <div class="ov-filters">
+          <label>Search<input type="search" id="fText" placeholder="Meeting or issue"></label>
+          <label>Issue<select id="fType"><option value="">All issues</option></select></label>
+          <label>Country<select id="fCountry"><option value="">All countries</option></select></label>
+          <label>Show<select id="fShow"><option value="open">Open + in progress</option><option value="mine">Mine</option><option value="fixed">Fixed</option></select></label>
+        </div>
+      </div>
+      <div class="ov-table-wrap"><table class="ov-table">
+        <thead><tr><th scope="col">Starts</th><th scope="col">Race</th><th scope="col">Issue</th><th scope="col">Status</th><th scope="col">Owner / note</th><th scope="col" class="ov-right">Action</th></tr></thead>
+        <tbody id="allRows"></tbody>
+      </table></div>
+    </section>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+    var STATUS = { open: 'Open', in_progress: 'In progress', fixed: 'Fixed' };
+    var PRIORITY = { critical: 'Critical', high: 'High', normal: 'Normal' };
+    var data = null;
+    var shift = 0;
+    var me = (document.querySelector('.session-info strong') || {}).textContent || '';
+
+    function dateFor(s) {
+      var d = new Date(); d.setDate(d.getDate() + s);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function hhmm(iso) { return iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'; }
+    function countdown(startUtc) {
+      var ms = Date.parse(startUtc || '') - Date.now();
+      if (!isFinite(ms)) return '-';
+      if (ms < 0) return 'Started';
+      var s = Math.floor(ms / 1000);
+      return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    }
+    function liveMins(startUtc) { var t = Date.parse(startUtc || ''); return isFinite(t) ? (t - Date.now()) / 60000 : null; }
+    function livePriority(i) {
+      var m = liveMins(i.startUtc);
+      if (i.resulted || m == null) return 'normal';
+      return m <= 30 ? 'critical' : m <= 60 ? 'high' : 'normal';
+    }
+    function minsText(m) {
+      if (m == null) return '';
+      if (m < 0) return 'started';
+      if (m < 60) return Math.round(m) + ' min';
+      var h = Math.floor(m / 60);
+      return h + ' h ' + String(Math.round(m % 60)).padStart(2, '0') + ' m';
+    }
+    function actionButtons(i) {
+      var key = esc(i.key);
+      var btns = '<a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener">Open race</a>';
+      if (i.ticketId) btns += '<a class="adm-btn" href="https://app.clickup.com/t/' + esc(i.ticketId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket</a>';
+      if (i.workflow === 'open') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="in_progress">Start fixing</button>';
+      if (i.workflow === 'in_progress') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="fixed">Mark fixed</button>';
+      if (i.workflow === 'fixed') btns += '<button type="button" class="adm-btn" data-key="' + key + '" data-to="open">Reopen</button>';
+      btns += '<button type="button" class="adm-btn" data-key="' + key + '" data-note="1" aria-label="Add a note"><i class="fa-regular fa-note-sticky"></i></button>';
+      return btns;
+    }
+    function statusPill(i) {
+      return '<span class="ov-status ov-st-' + i.workflow + '">' + STATUS[i.workflow] + '</span>' +
+        (i.updatedAt ? '<div class="ov-mini">' + esc(i.updatedBy || '') + ' · ' + hhmm(i.updatedAt) + '</div>' : (i.firstSeen ? '<div class="ov-mini">found ' + hhmm(i.firstSeen) + '</div>' : ''));
+    }
+    function raceCell(i) {
+      return '<a class="ov-race" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener">' + esc(i.meeting) + ' <span>R' + esc(i.rNo) + '</span></a>' +
+        '<div class="ov-mini">' + esc(i.country) + ' · ' + esc({ T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' }[i.discipline] || i.discipline) + '</div>';
+    }
+    function issueCell(i) {
+      return '<b>' + esc(i.label) + '</b><div class="ov-mini">' + esc(i.detail) + '</div>';
+    }
+
+    function renderQueue() {
+      var rows = data.queue.map(function (i) {
+        var p = livePriority(i);
+        return '<tr><td class="ov-nowrap"><span class="ov-countdown ov-p-' + p + '" data-start="' + esc(i.startUtc) + '">' + countdown(i.startUtc) + '</span> ' +
+          '<span class="ov-prio ov-p-' + p + '">' + PRIORITY[p] + '</span><div class="ov-mini">Jump ' + esc(i.time) + '</div></td>' +
+          '<td>' + raceCell(i) + '</td><td>' + issueCell(i) + '</td><td class="ov-nowrap">' + statusPill(i) + '</td>' +
+          '<td>' + esc(i.owner || '—') + '</td><td class="ov-right ov-actions">' + actionButtons(i) + '</td></tr>';
+      });
+      document.getElementById('queueRows').innerHTML = rows.join('') || '<tr><td colspan="6" class="ov-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races starting in the next 60 minutes.</td></tr>';
+    }
+
+    function renderBars() {
+      document.getElementById('countryRows').innerHTML = data.byCountry.map(function (c) {
+        return '<div class="ov-bar-row" title="' + esc(c.code + ': ' + c.pct + '% of ' + c.races + ' races with no open issue') + '"><b>' + esc(c.code) + '</b>' +
+          '<div class="ov-bar"><i style="width:' + c.pct + '%"></i></div><span class="ov-num">' + c.pct + '%</span>' +
+          '<span class="ov-mini ' + (c.open ? 'ov-bad' : 'ov-good') + '">' + c.open + ' open</span></div>';
+      }).join('') || '<p class="ov-empty">No races.</p>';
+      var max = Math.max.apply(null, data.byType.map(function (t) { return t.count; }).concat([1]));
+      document.getElementById('typeRows').innerHTML = data.byType.map(function (t) {
+        return '<div class="ov-bar-row ov-type-row" title="' + esc(t.label + ': ' + t.count + ' open') + '"><span>' + esc(t.label) + '</span>' +
+          '<div class="ov-bar ov-bar-amber"><i style="width:' + Math.round((t.count / max) * 100) + '%"></i></div><span class="ov-num">' + t.count + '</span></div>';
+      }).join('') || '<p class="ov-empty"><i class="fa-solid fa-circle-check"></i> No open issues.</p>';
+    }
+
+    function renderTrend() {
+      var max = Math.max.apply(null, data.trend.map(function (d) { return Math.max(d.found, d.fixed); }).concat([1]));
+      document.getElementById('trend').innerHTML = data.trend.map(function (d) {
+        var label = new Date(d.date + 'T12:00:00Z').toLocaleDateString([], { weekday: 'short', day: 'numeric' });
+        var body = d.recorded
+          ? '<div class="ov-trend-bars"><i class="ov-sw-found" style="height:' + Math.round((d.found / max) * 100) + '%" title="' + d.found + ' found"></i><i class="ov-sw-fixed" style="height:' + Math.round((d.fixed / max) * 100) + '%" title="' + d.fixed + ' fixed"></i></div>'
+          : '<div class="ov-trend-bars ov-trend-none">no data</div>';
+        return '<div class="ov-trend-day" title="' + esc(label + ': ' + d.found + ' found, ' + d.fixed + ' fixed' + (d.score != null ? ', ' + d.score + '% quality' : '')) + '">' + body +
+          '<span>' + esc(label) + '</span><span class="ov-mini">' + (d.recorded ? d.found + ' / ' + d.fixed : '') + '</span></div>';
+      }).join('');
+    }
+
+    function fillSelect(id, values, labelFn) {
+      var el = document.getElementById(id);
+      var keep = el.value;
+      el.innerHTML = el.options[0].outerHTML + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(labelFn ? labelFn(v) : v) + '</option>'; }).join('');
+      el.value = keep;
+    }
+
+    function renderAll() {
+      var text = document.getElementById('fText').value.trim().toLowerCase();
+      var type = document.getElementById('fType').value;
+      var country = document.getElementById('fCountry').value;
+      var show = document.getElementById('fShow').value;
+      var list = show === 'fixed' ? data.fixed : data.open;
+      if (show === 'mine') list = data.open.filter(function (i) { return i.owner === me; });
+      list = list.filter(function (i) {
+        return (!type || i.code === type) && (!country || i.country === country) &&
+          (!text || (i.meeting + ' ' + i.label + ' ' + i.detail).toLowerCase().indexOf(text) !== -1);
+      });
+      document.getElementById('allCount').textContent = '(' + list.length + ')';
+      document.getElementById('allRows').innerHTML = list.slice(0, 400).map(function (i) {
+        var m = liveMins(i.startUtc);
+        return '<tr><td class="ov-nowrap"><b>' + esc(i.time || '-') + '</b><div class="ov-mini">' + (i.resulted ? 'resulted' : esc(minsText(m))) + '</div></td>' +
+          '<td>' + raceCell(i) + '</td><td>' + issueCell(i) + '</td><td class="ov-nowrap">' + statusPill(i) + '</td>' +
+          '<td>' + esc(i.owner || '—') + (i.note ? '<div class="ov-mini ov-note">' + esc(i.note) + '</div>' : '') + '</td>' +
+          '<td class="ov-right ov-actions">' + actionButtons(i) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="ov-empty">Nothing here.</td></tr>';
+    }
+
+    function render() {
+      var k = data.kpis;
+      document.getElementById('ovTitle').textContent = (shift === 0 ? 'Today' : shift < 0 ? 'Yesterday' : 'Tomorrow') + ' · ' +
+        new Date(data.date + 'T12:00:00Z').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+      document.getElementById('kScore').textContent = k.score == null ? '-' : k.score + '%';
+      var delta = k.score != null && k.yesterdayScore != null ? k.score - k.yesterdayScore : null;
+      var sub = document.getElementById('kScoreSub');
+      sub.textContent = delta == null ? 'races with no open issue' : (delta >= 0 ? '▲ ' : '▼ ') + Math.abs(delta) + ' pts vs yesterday';
+      sub.className = 'ov-tile-sub ' + (delta == null ? '' : delta >= 0 ? 'ov-good' : 'ov-bad');
+      document.getElementById('kRaces').textContent = k.races;
+      document.getElementById('kRacesSub').textContent = k.meetings + ' meetings · ' + k.resulted + ' resulted';
+      document.getElementById('kOpen').textContent = k.openIssues;
+      document.getElementById('kOpenSub').textContent = k.critical + ' critical · ' + k.inProgress + ' in progress';
+      document.getElementById('kFixed').textContent = k.fixedToday;
+      document.getElementById('kFixedSub').textContent = k.avgFixMinutes == null ? 'average fix time: -' : 'average fix time ' + k.avgFixMinutes + ' min';
+      document.getElementById('kNext').textContent = k.next60Races + (k.next60Races === 1 ? ' race' : ' races');
+      document.getElementById('kNextSub').textContent = k.next60WithIssues + ' with open issues';
+      document.getElementById('ovUpdated').textContent = hhmm(data.generatedAt);
+      renderQueue();
+      renderBars();
+      renderTrend();
+      var codes = []; var countries = [];
+      data.open.concat(data.fixed).forEach(function (i) { if (codes.indexOf(i.code) === -1) codes.push(i.code); if (countries.indexOf(i.country) === -1) countries.push(i.country); });
+      var labels = {}; data.open.concat(data.fixed).forEach(function (i) { labels[i.code] = i.label; });
+      fillSelect('fType', codes.sort(), function (c) { return labels[c]; });
+      fillSelect('fCountry', countries.sort());
+      renderAll();
+    }
+
+    var loading = false;
+    function load() {
+      if (loading) return;
+      loading = true;
+      fetch('/api/overview?date=' + dateFor(shift)).then(function (res) {
+        return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || ('Request failed (' + res.status + ')')); return j; });
+      }).then(function (j) {
+        data = j;
+        document.getElementById('ovError').hidden = true;
+        render();
+      }).catch(function (err) {
+        var el = document.getElementById('ovError');
+        el.textContent = 'Could not load the overview: ' + err.message;
+        el.hidden = false;
+      }).then(function () { loading = false; });
+    }
+
+    function setStatus(key, to, note) {
+      return fetch('/api/issues/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, status: to, note: note }) })
+        .then(function (res) { return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || 'Failed'); return j; }); })
+        .then(load)
+        .catch(function (err) { alert('Could not save: ' + err.message); });
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-key]');
+      if (!btn) return;
+      var key = btn.getAttribute('data-key');
+      var issue = data && data.open.concat(data.fixed).filter(function (i) { return i.key === key; })[0];
+      if (btn.hasAttribute('data-note')) {
+        var note = prompt('Note for this issue (what you found / did):', (issue && issue.note) || '');
+        if (note === null) return;
+        setStatus(key, issue ? issue.workflow : 'open', note);
+        return;
+      }
+      btn.disabled = true;
+      setStatus(key, btn.getAttribute('data-to'));
+    });
+    ['fText', 'fType', 'fCountry', 'fShow'].forEach(function (id) {
+      document.getElementById(id).addEventListener('input', function () { if (data) renderAll(); });
+    });
+    document.querySelectorAll('.ov-day').forEach(function (b) {
+      b.addEventListener('click', function () {
+        shift = Number(b.getAttribute('data-shift'));
+        document.querySelectorAll('.ov-day').forEach(function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        load();
+      });
+    });
+    // Countdowns tick every second; the data reloads every minute.
+    setInterval(function () {
+      document.querySelectorAll('.ov-countdown[data-start]').forEach(function (el) { el.textContent = countdown(el.getAttribute('data-start')); });
+    }, 1000);
+    setInterval(load, 60 * 1000);
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load();
+    })();
+  </script>
+</body>
+</html>

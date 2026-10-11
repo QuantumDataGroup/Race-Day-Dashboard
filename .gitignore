@@ -27,3 +27,6 @@ npm-debug.log*
 missing-meeting-countries.json
 runners-check-state.json
 jockey-check-state.json
+issue-workflow.json
+issue-history/
+tickets.json
