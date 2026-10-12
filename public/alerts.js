@@ -30,6 +30,16 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
+  // Race type on every alert, the dashboard tabs' icon + name (12 Oct 2026, per Dinesh).
+  var DISCIPLINES = { T: ['Thoroughbred', 'thoroughbred'], H: ['Harness', 'harness'], G: ['Greyhound', 'greyhound'] };
+  function discName(race) { return (DISCIPLINES[race.discipline] || [race.discipline || ''])[0]; }
+  function raceTitle(race) { return race.meeting + ' R' + race.rNo + (discName(race) ? ' · ' + discName(race) : ''); }
+  function discTag(race) {
+    var d = DISCIPLINES[race.discipline];
+    if (!d) return '';
+    return '<span class="al-disc al-disc-' + race.discipline + '"><span class="disc-icon disc-icon-' + d[1] + '" aria-hidden="true"></span>' + d[0] + '</span>';
+  }
+
   function minsTo(race) {
     var t = Date.parse(race.startUtc || '');
     return isFinite(t) ? (t - Date.now()) / 60000 : null;
@@ -94,7 +104,7 @@
       race.issues.forEach(function (i) {
         if (i.lateScratching && i.workflow !== 'fixed' && !seen['ls|' + i.key]) {
           seen['ls|' + i.key] = Date.now();
-          due.push({ title: 'Late scratching not updated', body: race.meeting + ' R' + race.rNo + ' (' + race.country + ') ' + inText(m) + ': ' + i.detail, url: race.raceUrl, tag: 'ls-' + race.raceId });
+          due.push({ title: 'Late scratching not updated · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + inText(m) + ': ' + i.detail, url: race.raceUrl, tag: 'ls-' + race.raceId });
         }
       });
       var milestone = milestoneFor(m);
@@ -104,7 +114,7 @@
       if (!list.length || seen[key]) return;
       seen[key] = Date.now();
       var label = milestone >= 60 ? (milestone / 60) + ' h' : milestone + ' min';
-      due.push({ title: race.meeting + ' R' + race.rNo + ' — ' + label + ' to jump', body: issueSummary(list), url: race.raceUrl, tag: 'race-' + race.raceId });
+      due.push({ title: raceTitle(race) + ' — ' + label + ' to jump', body: issueSummary(list), url: race.raceUrl, tag: 'race-' + race.raceId });
     });
     // Forget what is over a day old.
     var cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -148,7 +158,7 @@
       var m = minsTo(race);
       var soon = m != null && m <= 30;
       return '<article class="al-race">' +
-        '<div class="al-race-head"><a href="' + esc(race.raceUrl) + '">' + esc(race.meeting) + ' <b>R' + esc(race.rNo) + '</b> <span class="al-cc">' + esc(race.country) + '</span></a>' +
+        '<div class="al-race-head"><a href="' + esc(race.raceUrl) + '">' + esc(race.meeting) + ' <b>R' + esc(race.rNo) + '</b> <span class="al-cc">' + esc(race.country) + '</span></a>' + discTag(race) +
         '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(race.time || '') + '</span></div>' +
         race.issues.map(function (i) {
           var src = i.source ? '<div class="al-src ' + (i.source.available ? 'al-src-yes' : 'al-src-no') + '">' + esc(i.source.text) + (i.source.available ? ' — update it' : '') + '</div>' : '';
