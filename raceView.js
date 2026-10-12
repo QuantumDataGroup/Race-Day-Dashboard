@@ -1299,11 +1299,11 @@ function stylesVersion() {
 function renderUserBlock(username, access) {
   if (!username) return '';
   // Overview for whoever has it; Tickets for admins (every ticket), My
-  // tickets for everyone else (Oct 2026).
+  // tickets for work users (Oct 2026); view users get neither.
   const overviewLink = access && access.overview ? `<a class="meetings-list-link" href="/overview"><i class="fa-solid fa-gauge-high"></i> Overview</a>` : '';
-  const ticketsLink = access && access.admin
-    ? `<a class="meetings-list-link" href="/tickets"><i class="fa-solid fa-ticket"></i> Tickets</a>`
-    : `<a class="meetings-list-link" href="/my-tickets"><i class="fa-solid fa-ticket"></i> My tickets</a>`;
+  let ticketsLink = '';
+  if (access && access.admin) ticketsLink = `<a class="meetings-list-link" href="/tickets"><i class="fa-solid fa-ticket"></i> Tickets</a>`;
+  else if (access && access.work) ticketsLink = `<a class="meetings-list-link" href="/my-tickets"><i class="fa-solid fa-ticket"></i> My tickets</a>`;
   const adminLink = access && access.any ? `<a class="meetings-list-link admin-link" href="/admin"><i class="fa-solid fa-user-shield"></i> Admin</a>` : '';
   // Race alerts bell + browser pop-ups (public/alerts.js), same people as Overview.
   const alertsBell = access && access.overview
