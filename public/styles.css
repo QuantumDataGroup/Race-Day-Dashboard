@@ -1224,6 +1224,11 @@ body.race-standalone-view .health-strip { display: none; }
 .al-race-head a { color: var(--fg); font-weight: 700; text-decoration: none; }
 .al-race-head a b { color: var(--accent); }
 .al-cc { font-size: 11px; color: var(--muted); font-weight: 600; }
+/* Race type tag: the dashboard tabs' icon + name, one colour each. */
+.al-disc { --al-disc: #22a06b; margin-right: auto; align-self: center; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--al-disc); background: color-mix(in srgb, var(--al-disc) 14%, transparent); border: 1px solid color-mix(in srgb, var(--al-disc) 45%, transparent); }
+.al-disc-H { --al-disc: #3b8ef0; }
+.al-disc-G { --al-disc: #b06ae8; }
+.al-disc .disc-icon { width: 18px; height: 18px; }
 .al-when { font-size: 12px; font-weight: 700; color: var(--adm-dl); }
 .al-when.al-soon { color: var(--adm-warn); }
 .al-issue { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
