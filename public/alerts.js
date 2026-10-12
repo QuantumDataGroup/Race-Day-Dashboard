@@ -40,6 +40,14 @@
     return '<span class="al-disc al-disc-' + race.discipline + '"><span class="disc-icon disc-icon-' + d[1] + '" aria-hidden="true"></span>' + d[0] + '</span>';
   }
 
+  // A race on another day than today says which ("Tue 13 Oct 14:30"); the
+  // time is the race's local time, as on the dashboard.
+  function dayLabel(race) {
+    if (!data || !data.today || !race.date || race.date === data.today) return '';
+    var d = new Date(race.date + 'T12:00:00Z');
+    return isNaN(d) ? '' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) + ' ';
+  }
+
   function minsTo(race) {
     var t = Date.parse(race.startUtc || '');
     return isFinite(t) ? (t - Date.now()) / 60000 : null;
@@ -159,7 +167,7 @@
       var soon = m != null && m <= 30;
       return '<article class="al-race">' +
         '<div class="al-race-head"><a href="' + esc(race.raceUrl) + '">' + esc(race.meeting) + ' <b>R' + esc(race.rNo) + '</b> <span class="al-cc">' + esc(race.country) + '</span></a>' + discTag(race) +
-        '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(race.time || '') + '</span></div>' +
+        '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(dayLabel(race)) + esc(race.time || '') + '</span></div>' +
         race.issues.map(function (i) {
           var src = i.source ? '<div class="al-src ' + (i.source.available ? 'al-src-yes' : 'al-src-no') + '">' + esc(i.source.text) + (i.source.available ? ' — update it' : '') + '</div>' : '';
           return '<div class="al-issue">' +

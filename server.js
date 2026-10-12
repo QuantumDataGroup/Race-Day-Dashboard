@@ -3919,7 +3919,11 @@ app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
         if (!Number.isFinite(start)) continue;
         const mins = (start - nowMs) / 60000;
         const lateScratching = i.code === 'missing-scratching';
-        if (mins < -5 || (mins > ALERT_WINDOW_MIN && !lateScratching)) continue;
+        // Late scratchings alert at any time on race day; tomorrow's only in
+        // the 3-hour window like the rest (12 Oct 2026: a race 19 h away
+        // looked like a wrong time).
+        const anyTime = lateScratching && dateStr === today;
+        if (mins < -5 || (mins > ALERT_WINDOW_MIN && !anyTime)) continue;
         const w = issueTracker.statusOf(i.key);
         if (w.status === 'fixed') continue;
         const race = byRace.get(i.raceId) || {
@@ -3937,7 +3941,7 @@ app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
       }
     }
     res.json({
-      generatedAt: new Date(nowMs).toISOString(), windowMin: ALERT_WINDOW_MIN, milestones: [180, 120, 60, 30, 10],
+      generatedAt: new Date(nowMs).toISOString(), today, windowMin: ALERT_WINDOW_MIN, milestones: [180, 120, 60, 30, 10],
       races: [...byRace.values()].sort((a, b) => a.startsInMin - b.startsInMin),
     });
   } catch (err) {
