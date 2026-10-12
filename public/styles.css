@@ -916,6 +916,11 @@ table.adm-table { width: 100%; border-collapse: collapse; font-size: 13px; box-s
 .adm-role.admin { background: var(--accent); color: var(--accent-fg); }
 .adm-role.user { background: var(--sub-bg); color: var(--muted); border: 1px solid var(--border); }
 .adm-role.work { background: var(--sub-bg); color: var(--fg); border: 1px solid var(--accent); }
+/* View logins: no change buttons anywhere (raceView.js renderUserBlock). */
+.view-only .form-ignore-btn, .view-only .age-ignore-btn, .view-only .dup-jockey-ignore-btn,
+.view-only .missing-jockey-ignore-btn, .view-only .form-ignore-all-line, .view-only #tkRaise,
+.view-only button[data-key], .view-only .mm-act[data-act], .view-only .mm-act[data-ract] { display: none !important; }
+.adm-type { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
 .adm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--muted); }
 .adm-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .adm-status.online { color: var(--adm-ok); }
