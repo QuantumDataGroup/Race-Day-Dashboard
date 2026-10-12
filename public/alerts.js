@@ -225,6 +225,12 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && panel && !panel.hidden) { panel.hidden = true; bell.setAttribute('aria-expanded', 'false'); bell.focus(); }
   });
+  // A click anywhere outside the panel and the bell closes it too.
+  document.addEventListener('click', function (e) {
+    if (!panel || panel.hidden || panel.contains(e.target) || bell.contains(e.target)) return;
+    panel.hidden = true;
+    bell.setAttribute('aria-expanded', 'false');
+  });
   load();
   setInterval(load, POLL_MS);
   // Milestones are crossed between polls too.
