@@ -438,6 +438,9 @@ function accessOf(req) {
   const access = { admin };
   PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
   access.any = ADMIN_AREA_PERMISSIONS.some((p) => access[p]);
+  // Work users (12 Oct 2026, per Dinesh): admins and anyone given at least one
+  // section get tickets too; a view user (nothing ticked) sees the dashboard only.
+  access.work = PERMISSIONS.some((p) => access[p]);
   return access;
 }
 function cleanPermissions(list) {
@@ -446,7 +449,7 @@ function cleanPermissions(list) {
 function requirePermission(permission) {
   return (req, res, next) => {
     if (accessOf(req)[permission]) return next();
-    if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'You do not have access to this' });
+    if (req.originalUrl.startsWith('/api/')) return res.status(403).json({ error: 'You do not have access to this' });
     return res.status(403).send(renderAdminDeniedPage());
   };
 }
@@ -3935,12 +3938,13 @@ app.post('/api/issues/status', requirePermission('overview'), (req, res) => {
   }
 });
 
-// Tickets pages: admins see every ticket assigned to them; everyone sees the
-// tickets they raised.
+// Tickets pages: admins see every ticket assigned to them; work users see the
+// tickets they raised. View users get no tickets at all.
 app.get('/tickets', requireAdmin, (req, res) => {
   logActivity(req, 'view-tickets', {}, { key: 'tickets', ms: 30 * 60 * 1000 });
   res.send(renderTicketsPage({ mode: 'all', username: req.session.username, access: accessOf(req) }));
 });
+app.use(['/my-tickets', '/api/tickets'], requirePermission('work'));
 app.get('/my-tickets', (req, res) => {
   logActivity(req, 'view-my-tickets', {}, { key: 'my-tickets', ms: 30 * 60 * 1000 });
   res.send(renderTicketsPage({ mode: 'mine', username: req.session.username, access: accessOf(req) }));

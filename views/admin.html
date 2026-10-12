@@ -208,8 +208,15 @@
     function accessChips(u) {
       if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';
       var perms = u.permissions || [];
-      if (!perms.length) return '<span class="adm-foot">Dashboard only</span>';
+      if (!perms.length) return '<span class="adm-foot">Dashboard only (view user)</span>';
       return SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return '<span class="adm-chip-tag">' + s[1] + '</span>'; }).join(' ');
+    }
+    // Admin / Work user (at least one section ticked: tickets, alerts...) /
+    // View user (nothing ticked: the dashboard only) -- 12 Oct 2026, per Dinesh.
+    function roleTag(u) {
+      if (u.role === 'admin') return '<span class="adm-role admin">ADMIN</span>';
+      if ((u.permissions || []).length) return '<span class="adm-role work">WORK</span>';
+      return '<span class="adm-role user">VIEW</span>';
     }
     function manageButtons(u) {
       var self = sameUser(u.username, data.me);
@@ -277,7 +284,7 @@
         function count(fn) { return inR.filter(fn).length; }
         return '<tr><td><button type="button" class="adm-user-link" data-user="' + esc(u.username) + '">' + esc(u.username) + '</button>' +
           (u.email ? '<div class="adm-foot">' + esc(u.email) + '</div>' : '') + '</td>' +
-          '<td><span class="adm-role ' + (u.role === 'admin' ? 'admin' : 'user') + '">' + (u.role === 'admin' ? 'ADMIN' : 'USER') + '</span></td>' +
+          '<td>' + roleTag(u) + '</td>' +
           '<td>' + accessChips(u) + '</td>' +
           '<td><span class="adm-status ' + (online ? 'online' : 'offline') + '"><i></i>' + (online ? 'Online' : 'Offline') + '</span></td>' +
           '<td class="adm-time">' + (lastLogin ? fmtTime(t(lastLogin), true) : '-') + '</td>' +

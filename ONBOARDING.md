@@ -202,6 +202,10 @@ four plus user management. Anyone else gets
 only the sections an admin ticked for them when adding the user (or later
 with "Access"), stored as `permissions` on the user; with none ticked they
 see just the dashboard. User Activity for a non-admin is read-only.
+The Users table tags each login **ADMIN**, **WORK** (at least one section
+ticked: also gets My tickets and the race popup's ticket bar, `access.work`)
+or **VIEW** (nothing ticked: the dashboard only; `/my-tickets` and
+`/api/tickets*` answer 403).
 
 ### Data Changes (`/changes`)
 What was added, removed or changed in meetings/races after each scrape
