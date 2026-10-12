@@ -1771,10 +1771,16 @@
         if (r.isScratched && r.runnerId) scratchedIds[r.runnerId] = true;
         if (r.runnerId) silkByRunnerId[r.runnerId] = r.silkDescription;
       });
-      var entries = race.speedMap.filter(function (p) { return !scratchedIds[p.runnerId]; });
-      if (!entries.length) return '<p class="modal-sub">No speed map data for the remaining (non-scratched) runners in this race.</p>';
-      var hasAnyData = entries.some(function (p) { return p.paceRating || (p.paceCategory && p.paceCategory !== 'Not Known'); });
-      if (!hasAnyData) return '<p class="modal-sub">No speed map data available for this race.</p>';
+      var entries = (race.speedMap || []).filter(function (p) { return !scratchedIds[p.runnerId]; });
+      // No pace data still shows the track view, every bar empty, instead
+      // of a "No speed map data" message (12 Oct 2026, per Dinesh: "Podadinga,
+      // Summa anda view mattu veinga"). No predictions left at all -> the
+      // race's own non-scratched runners fill the rows.
+      if (!entries.length) {
+        entries = race.runners.filter(function (r) { return !r.isScratched; }).map(function (r) {
+          return { runnerId: r.runnerId, runnerNumber: r.tabNo, runnerName: r.horseName, paceRating: null, paceCategory: null };
+        });
+      }
       entries = entries.slice().sort(function (a, b) { return (a.runnerNumber || 0) - (b.runnerNumber || 0); });
       // Running-gait GIF per discipline, named to match disciplineLabel()
       // exactly (14 Sep 2026, per Dinesh) -- e.g. "Thoroughbred.gif" --
