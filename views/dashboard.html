@@ -1462,15 +1462,16 @@
         }).join('');
         bar.hidden = false;
       };
-      draw();
-      fetch('/api/tickets/for-race/' + encodeURIComponent(race.id)).then(function (r) { return r.json(); }).then(function (j) {
-        if (!_ticketCtx || _ticketCtx.race.id !== race.id) return;
+      // Drawn once the server answers: a view user gets 403 and no ticket bar
+      // (12 Oct 2026, per Dinesh: view users see the dashboard only).
+      fetch('/api/tickets/for-race/' + encodeURIComponent(race.id)).then(function (r) { return r.status === 403 ? null : r.json(); }).then(function (j) {
+        if (!j || !_ticketCtx || _ticketCtx.race.id !== race.id) return;
         _ticketCtx.enabled = Boolean(j.enabled);
         _ticketCtx.reason = j.reason || '';
         _ticketCtx.tickets = j.tickets || {};
         _ticketCtx.members = j.members || [];
         draw();
-      }).catch(function () { /* the buttons still explain on click */ });
+      }).catch(function () { if (_ticketCtx && _ticketCtx.race.id === race.id) draw(); /* the buttons explain on click */ });
     }
     function ticketPriority(race) {
       var t = Date.parse(race.startUtc || '');

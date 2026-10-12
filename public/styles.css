@@ -915,6 +915,7 @@ table.adm-table { width: 100%; border-collapse: collapse; font-size: 13px; box-s
 .adm-role { font-size: 10px; font-weight: 800; letter-spacing: 1px; border-radius: 4px; padding: 2px 6px; }
 .adm-role.admin { background: var(--accent); color: var(--accent-fg); }
 .adm-role.user { background: var(--sub-bg); color: var(--muted); border: 1px solid var(--border); }
+.adm-role.work { background: var(--sub-bg); color: var(--fg); border: 1px solid var(--accent); }
 .adm-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--muted); }
 .adm-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .adm-status.online { color: var(--adm-ok); }
