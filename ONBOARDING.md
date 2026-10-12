@@ -202,10 +202,14 @@ four plus user management. Anyone else gets
 only the sections an admin ticked for them when adding the user (or later
 with "Access"), stored as `permissions` on the user; with none ticked they
 see just the dashboard. User Activity for a non-admin is read-only.
-The Users table tags each login **ADMIN**, **WORK** (at least one section
-ticked: also gets My tickets and the race popup's ticket bar, `access.work`)
-or **VIEW** (nothing ticked: the dashboard only; `/my-tickets` and
-`/api/tickets*` answer 403).
+Every non-admin also has a **type**, picked when adding the user (required)
+or later in "Access": **USER** (`type: 'work'`, `access.work`) can make
+dashboard changes — Confirm / Ignore buttons, runners-check and
+missing-meeting Ignore, issue status, tickets, the alerts bell — while
+**VIEW** looks only: pages get `html.view-only` (styles.css hides the change
+buttons) and those routes answer 403 (`requireWork`). The type is separate
+from the sections ticked. Users saved before 12 Oct 2026 without a type
+count as USER if they had a section ticked, VIEW otherwise (`userType`).
 
 ### Data Changes (`/changes`)
 What was added, removed or changed in meetings/races after each scrape

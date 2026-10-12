@@ -430,6 +430,18 @@ function isAdmin(req) {
 // top-level page, not an admin-area section, so it doesn't add the Admin link.
 const PERMISSIONS = ['activity', 'health', 'changes', 'missing', 'overview'];
 const ADMIN_AREA_PERMISSIONS = ['activity', 'health', 'changes', 'missing'];
+// User type (12 Oct 2026, per Dinesh): an admin picks User ('work': can make
+// dashboard changes -- Confirm / Ignore, issue status, tickets, alerts) or
+// View (looks only) for every non-admin, separate from the sections ticked.
+// Stored as `type`; a user saved before then counts as User when they had a
+// section ticked, View otherwise (what the dashboard did until that day).
+const USER_TYPES = ['work', 'view'];
+function userType(user) {
+  if (!user) return 'view';
+  if (user.role === 'admin') return 'admin';
+  if (USER_TYPES.includes(user.type)) return user.type;
+  return Array.isArray(user.permissions) && user.permissions.length ? 'work' : 'view';
+}
 function accessOf(req) {
   const user = findUser(req.session && req.session.username);
   const admin = Boolean(user && user.role === 'admin');
@@ -437,9 +449,7 @@ function accessOf(req) {
   const access = { admin };
   PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
   access.any = ADMIN_AREA_PERMISSIONS.some((p) => access[p]);
-  // Work users (12 Oct 2026, per Dinesh): admins and anyone given at least one
-  // section get tickets too; a view user (nothing ticked) sees the dashboard only.
-  access.work = PERMISSIONS.some((p) => access[p]);
+  access.work = userType(user) !== 'view';
   return access;
 }
 function cleanPermissions(list) {
@@ -452,6 +462,8 @@ function requirePermission(permission) {
     return res.status(403).send(renderAdminDeniedPage());
   };
 }
+// Every dashboard change (Confirm / Ignore, issue status, tickets) -- User and admin logins only.
+const requireWork = requirePermission('work');
 
 // First-admin setup without server (RDP) access: `node setup-auth.js
 // --bootstrap` on any PC writes admin-bootstrap.json (hashed password only)
@@ -2787,7 +2799,7 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
 });
 
 // Ignore / Undo for one runner check issue (see runnerIssueKey).
-app.post('/api/missing-runners/ignore', requirePermission('missing'), (req, res) => {
+app.post('/api/missing-runners/ignore', requireWork, (req, res) => {
   const { key, ignored } = req.body || {};
   if (typeof key !== 'string' || key.length > 500) return res.status(400).json({ error: 'key is required' });
   const raceId = key.split('|')[0];
@@ -2850,7 +2862,7 @@ app.post('/api/missing-meetings/countries', requireAdmin, (req, res) => {
   res.json({ ok: true, countries: missingMeetingCountries });
 });
 
-app.post('/api/missing-meetings/:meetingId/ignore', requirePermission('missing'), (req, res) => {
+app.post('/api/missing-meetings/:meetingId/ignore', requirePermission('missing'), requireWork, (req, res) => {
   const { meetingId } = req.params;
   if (!/^\d{1,12}$/.test(meetingId)) return res.status(400).json({ error: 'Bad meeting id' });
   const saved = missingMeetingIgnores[meetingId] || {};
@@ -2910,7 +2922,7 @@ function readRecentActivity() {
 
 function adminUserList() {
   return authConfig.users.map((u) => ({
-    username: u.username, role: u.role, createdAt: u.createdAt || null, email: u.email || '',
+    username: u.username, role: u.role, type: userType(u), createdAt: u.createdAt || null, email: u.email || '',
     permissions: u.role === 'admin' ? PERMISSIONS.slice() : cleanPermissions(u.permissions),
   }));
 }
@@ -2983,15 +2995,19 @@ app.post('/api/admin/users', requireAdmin, (req, res) => {
   const { password, role } = req.body || {};
   const permissions = cleanPermissions(req.body && req.body.permissions);
   const email = cleanEmail(req.body && req.body.email);
-  const accessText = role === 'admin' ? 'admin' : (permissions.join(', ') || 'dashboard only');
+  const type = req.body && req.body.type;
+  const accessText = role === 'admin' ? 'admin' : `${type === 'work' ? 'user' : 'view'}: ${permissions.join(', ') || 'dashboard only'}`;
   changeUsers(req, res, 'admin-add-user', `${username} (${accessText})`, (config) => {
     if (!USERNAME_RE.test(username)) return 'Username must be 2-40 characters: letters, numbers, dot, dash or underscore.';
     if (findUserIndex(config, username) !== -1) return `"${username}" already exists.`;
     if (!validPassword(password)) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
     if (email === null) return 'That email address does not look right.';
-    config.users.push({
+    if (role !== 'admin' && !USER_TYPES.includes(type)) return 'Pick User or View for this user.';
+    const user = {
       username, passwordHash: bcrypt.hashSync(password, 10), role: role === 'admin' ? 'admin' : 'user', permissions, email, createdAt: new Date().toISOString(),
-    });
+    };
+    if (role !== 'admin') user.type = type;
+    config.users.push(user);
     return null;
   });
 });
@@ -3010,11 +3026,14 @@ app.post('/api/admin/users/:username/email', requireAdmin, (req, res) => {
 
 app.post('/api/admin/users/:username/permissions', requireAdmin, (req, res) => {
   const permissions = cleanPermissions(req.body && req.body.permissions);
-  changeUsers(req, res, 'admin-change-access', `${req.params.username}: ${permissions.join(', ') || 'dashboard only'}`, (config) => {
+  const type = req.body && req.body.type;
+  changeUsers(req, res, 'admin-change-access', `${req.params.username}: ${type === 'work' ? 'user' : type === 'view' ? 'view' : ''} ${permissions.join(', ') || 'dashboard only'}`.trim(), (config) => {
     const idx = findUserIndex(config, req.params.username);
     if (idx === -1) return 'No such user.';
     if (config.users[idx].role === 'admin') return 'Admins already have every section.';
+    if (type !== undefined && !USER_TYPES.includes(type)) return 'Pick User or View for this user.';
     config.users[idx].permissions = permissions;
+    if (type) config.users[idx].type = type;
     return null;
   });
 });
@@ -3041,6 +3060,8 @@ app.post('/api/admin/users/:username/role', requireAdmin, (req, res) => {
     if (idx === -1) return 'No such user.';
     if (findUserIndex(config, req.session.username) === idx) return 'You cannot change your own role.';
     config.users[idx].role = role;
+    // An admin taken back to a normal login stays a User (can still make changes).
+    if (role === 'user' && !USER_TYPES.includes(config.users[idx].type)) config.users[idx].type = 'work';
     return null;
   });
 });
@@ -3231,7 +3252,7 @@ app.get('/api/race/:id/raw/:kind', async (req, res) => {
 // open reads above) since it's a write, not a read. Keyed by runnerId, not
 // per-race, since a horse's "no form yet" status doesn't depend on which
 // race it's currently entered in.
-app.post('/api/runner/:runnerId/form-ignore', (req, res) => {
+app.post('/api/runner/:runnerId/form-ignore', requireWork, (req, res) => {
   const { runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
   logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `No form lines: ${horseName || runnerId}` });
@@ -3256,7 +3277,7 @@ app.post('/api/runner/:runnerId/form-ignore', (req, res) => {
 // above, added 7 Sep 2026 per Dinesh: "Age checked no issue anda madhiri
 // check mark poda podunga". Keyed by runnerId (a horse's age doesn't
 // depend on which race it's entered in).
-app.post('/api/runner/:runnerId/age-ignore', (req, res) => {
+app.post('/api/runner/:runnerId/age-ignore', requireWork, (req, res) => {
   const { runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
   logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Age checked: ${horseName || runnerId}` });
@@ -3282,7 +3303,7 @@ app.post('/api/runner/:runnerId/age-ignore', (req, res) => {
 // podunga adau click panna checked podunga". Keyed by raceId + jockey name
 // (not runnerId -- see dupJockeyIgnoreKey/applyDupJockeyIgnores), so one
 // confirm clears every runner sharing that jockey in that race.
-app.post('/api/race/:raceId/jockey-ignore', (req, res) => {
+app.post('/api/race/:raceId/jockey-ignore', requireWork, (req, res) => {
   const { raceId } = req.params;
   const { ignored, jockey } = req.body || {};
   if (!jockey) return res.status(400).json({ error: 'Missing "jockey" in request body' });
@@ -3311,7 +3332,7 @@ app.post('/api/race/:raceId/jockey-ignore', (req, res) => {
 // aaganu". Keyed by raceId + runnerId (see missingJockeyIgnoreKey/
 // applyMissingJockeyIgnores) -- unlike duplicate jockey, this is per
 // RUNNER since it's not a shared-name group.
-app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', (req, res) => {
+app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', requireWork, (req, res) => {
   const { raceId, runnerId } = req.params;
   const { ignored, horseName } = req.body || {};
   logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Missing jockey checked: ${horseName || runnerId}` });
@@ -3924,7 +3945,7 @@ app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
 });
 
 // Open / In progress (you become the owner) / Fixed, with an optional note.
-app.post('/api/issues/status', requirePermission('overview'), (req, res) => {
+app.post('/api/issues/status', requirePermission('overview'), requireWork, (req, res) => {
   const { key, status, note } = req.body || {};
   if (typeof key !== 'string' || !/^[^|]{1,100}\|[a-z-]{2,40}$/.test(key)) return res.status(400).json({ error: 'Bad issue key' });
   if (!issueTracker.STATUSES.includes(status)) return res.status(400).json({ error: `Status must be one of ${issueTracker.STATUSES.join(', ')}` });
@@ -3943,7 +3964,7 @@ app.get('/tickets', requireAdmin, (req, res) => {
   logActivity(req, 'view-tickets', {}, { key: 'tickets', ms: 30 * 60 * 1000 });
   res.send(renderTicketsPage({ mode: 'all', username: req.session.username, access: accessOf(req) }));
 });
-app.use(['/my-tickets', '/api/tickets'], requirePermission('work'));
+app.use(['/my-tickets', '/api/tickets'], requireWork);
 app.get('/my-tickets', (req, res) => {
   logActivity(req, 'view-my-tickets', {}, { key: 'my-tickets', ms: 30 * 60 * 1000 });
   res.send(renderTicketsPage({ mode: 'mine', username: req.session.username, access: accessOf(req) }));
