@@ -68,6 +68,11 @@
         <label>Confirm password<input type="password" id="newPass2" autocomplete="new-password"></label>
         <label>ClickUp email (optional)<input type="email" id="newEmail" autocomplete="off" placeholder="name@troyendata.com"></label>
         <div class="adm-panel-actions"><button type="submit" class="adm-btn primary" id="addUserSubmit">Add user</button><button type="button" class="adm-btn" id="addUserCancel">Cancel</button></div>
+        <fieldset class="adm-access adm-type" id="newTypeBox">
+          <legend>User type (pick one)</legend>
+          <label class="adm-check"><input type="radio" name="newType" value="work"> <b>User</b> — can make dashboard changes (Confirm / Ignore, issues, tickets, alerts)</label>
+          <label class="adm-check"><input type="radio" name="newType" value="view"> <b>View</b> — looks only, no changes</label>
+        </fieldset>
         <fieldset class="adm-access">
           <legend>What this user can see besides the dashboard</legend>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="activity"> User Activity</label>
@@ -208,14 +213,14 @@
     function accessChips(u) {
       if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';
       var perms = u.permissions || [];
-      if (!perms.length) return '<span class="adm-foot">Dashboard only (view user)</span>';
+      if (!perms.length) return '<span class="adm-foot">Dashboard only</span>';
       return SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return '<span class="adm-chip-tag">' + s[1] + '</span>'; }).join(' ');
     }
-    // Admin / Work user (at least one section ticked: tickets, alerts...) /
-    // View user (nothing ticked: the dashboard only) -- 12 Oct 2026, per Dinesh.
+    // ADMIN / USER (can make dashboard changes) / VIEW (looks only) -- the
+    // type an admin picks, separate from the sections (12 Oct 2026, per Dinesh).
     function roleTag(u) {
       if (u.role === 'admin') return '<span class="adm-role admin">ADMIN</span>';
-      if ((u.permissions || []).length) return '<span class="adm-role work">WORK</span>';
+      if (u.type === 'work') return '<span class="adm-role work">USER</span>';
       return '<span class="adm-role user">VIEW</span>';
     }
     function manageButtons(u) {
@@ -238,7 +243,10 @@
       if (state.inline.act === 'access') {
         var perms = u.permissions || [];
         return '<tr class="adm-inline-row"><td colspan="' + COLS + '"><form class="adm-inline-form" data-form="access" data-user="' + n + '" novalidate>' +
-          '<b>' + n + ' can see:</b>' +
+          '<b>' + n + ' is:</b>' +
+          '<label class="adm-check"><input type="radio" name="editType" value="work"' + (u.type === 'work' ? ' checked' : '') + '> User (makes changes)</label>' +
+          '<label class="adm-check"><input type="radio" name="editType" value="view"' + (u.type !== 'work' ? ' checked' : '') + '> View (looks only)</label>' +
+          '<b>Can see:</b>' +
           SECTIONS.map(function (s) { return '<label class="adm-check"><input type="checkbox" class="editPerm" value="' + s[0] + '"' + (perms.indexOf(s[0]) !== -1 ? ' checked' : '') + '> ' + s[1] + '</label>'; }).join('') +
           '<button type="submit" class="adm-btn primary">Save access</button><button type="button" class="adm-btn" data-act="cancel">Cancel</button>' +
           '<span class="adm-msg err" id="accessMsg"></span></form></td></tr>';
@@ -399,7 +407,7 @@
         var nextRole = u.role === 'admin' ? 'user' : 'admin';
         btn.disabled = true;
         api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/role', { role: nextRole })
-          .then(function () { return afterChange(name, name + ' is now ' + (nextRole === 'admin' ? 'an ADMIN.' : 'a normal user.')); })
+          .then(function () { return afterChange(name, name + ' is now ' + (nextRole === 'admin' ? 'an ADMIN.' : 'a USER (change it with Access).')); })
           .catch(function (err) { state.notice = { user: name, text: err.message, ok: false }; render(); });
       } else if (act === 'confirm-remove') {
         btn.disabled = true;
@@ -418,9 +426,10 @@
       var name = form.dataset.user;
       if (form.dataset.form === 'access') {
         var perms = Array.prototype.filter.call(form.querySelectorAll('.editPerm'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+        var editType = form.querySelector('input[name="editType"]:checked').value;
         form.querySelector('button[type="submit"]').disabled = true;
-        api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/permissions', { permissions: perms })
-          .then(function () { return afterChange(name, name + ' can now see: ' + (perms.length ? SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : 'the dashboard only') + '.'); })
+        api('POST', '/api/admin/users/' + encodeURIComponent(name) + '/permissions', { permissions: perms, type: editType })
+          .then(function () { return afterChange(name, name + ' is ' + (editType === 'work' ? 'a USER' : 'VIEW only') + ' and can see: ' +(perms.length ? SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : 'the dashboard only') + '.'); })
           .catch(function (err) { form.querySelector('button[type="submit"]').disabled = false; document.getElementById('accessMsg').textContent = err.message; });
         return;
       }
@@ -454,6 +463,7 @@
     // was ticked before.
     function syncAdminBox() {
       var admin = document.getElementById('newAdmin').checked;
+      document.getElementById('newTypeBox').disabled = admin;
       document.querySelectorAll('.newPerm').forEach(function (c) {
         if (admin && !c.disabled) c.dataset.before = c.checked ? '1' : '';
         if (!admin && c.disabled) c.checked = c.dataset.before === '1';
@@ -463,6 +473,7 @@
     }
     function resetAccessBoxes() {
       document.querySelectorAll('.newPerm').forEach(function (c) { c.disabled = false; c.checked = false; c.dataset.before = ''; });
+      document.getElementById('newTypeBox').disabled = false;
     }
     document.getElementById('newAdmin').addEventListener('change', syncAdminBox);
     document.getElementById('addUserCancel').addEventListener('click', function () { addForm.hidden = true; addForm.reset(); resetAccessBoxes(); addMsg.hidden = true; });
@@ -476,13 +487,16 @@
       if (!/^[A-Za-z0-9._-]{2,40}$/.test(name)) return showAddMsg('Username: 2-40 characters, letters, numbers, dot, dash or underscore.', false);
       if (p1.length < 8) return showAddMsg('Password must be at least 8 characters.', false);
       if (p1 !== p2) return showAddMsg('Passwords do not match.', false);
+      var typeBox = addForm.querySelector('input[name="newType"]:checked');
+      var type = typeBox ? typeBox.value : '';
+      if (!admin && !type) return showAddMsg('Pick User or View for this user.', false);
       var submit = document.getElementById('addUserSubmit');
       submit.disabled = true;
-      api('POST', '/api/admin/users', { username: name, password: p1, role: admin ? 'admin' : 'user', permissions: admin ? [] : perms, email: document.getElementById('newEmail').value.trim() })
+      api('POST', '/api/admin/users', { username: name, password: p1, role: admin ? 'admin' : 'user', type: admin ? undefined : type, permissions: admin ? [] : perms, email: document.getElementById('newEmail').value.trim() })
         .then(function () {
           addForm.reset();
           resetAccessBoxes();
-          var what = admin ? ' as an ADMIN' : (perms.length ? ' with ' + SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : ' (dashboard only)');
+          var what = admin ? ' as an ADMIN' : ' as ' + (type === 'work' ? 'a USER' : 'VIEW only') + (perms.length ? ', with ' + SECTIONS.filter(function (s) { return perms.indexOf(s[0]) !== -1; }).map(function (s) { return s[1]; }).join(', ') : ' (dashboard only)');
           showAddMsg('Added ' + name + what + '. They can log in now.', true);
           return load();
         })
