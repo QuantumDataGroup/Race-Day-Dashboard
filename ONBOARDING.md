@@ -342,7 +342,11 @@ created in ClickUp (matched by the user's ClickUp email — Admin → Users →
 Email). Reminders: a ClickUp comment (notify all) at 1, 2, 3, 6, 12, 24 h
 while a ticket is To Do, then daily (checked every 10 min).
 `tickets.json` (data folder) links tickets to issues, raisers, reminders,
-ignores. Statuses expected: To Do, In Progress, Review, Done.
+ignores. The list (Quantum Data Group → Troyen Data → "Race Day Dashboard
+Issues") has Backlog, To Do, In Progress, Need Update, On Hold, Review, Done:
+new tickets start in To Do; Backlog/To Do count as To Do, Need Update/On
+Hold as In Progress, and only a closed status as Done (ClickUp files Review
+under its "done" group — `statusKey`).
 
 ### Race alerts (bell + browser pop-ups, Oct 2026)
 For users with the **Overview** permission. `renderUserBlock` adds a bell
