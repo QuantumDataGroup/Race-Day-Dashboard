@@ -33,15 +33,21 @@ function nextReminderHours(sent) {
   return 24 + (sent - REMINDER_HOURS.length + 1) * 24;
 }
 
-// "to do" / "in progress" / "review" / "done" (anything closed counts as done).
+// "to do" / "in progress" / "review" / "done". Only a closed status counts as
+// done: the team list (Race Day Dashboard Issues, Oct 2026) has Backlog, To
+// Do, In Progress, Need Update, On Hold, Review and Done, and ClickUp files
+// Review under its "done" group, so that type means review here.
+const IN_PROGRESS_STATUSES = ['in progress', 'need update', 'on hold'];
 function statusKey(task) {
   const s = String((task.status && task.status.status) || '').trim().toLowerCase();
-  if (task.status && (task.status.type === 'closed' || task.status.type === 'done')) return 'done';
-  if (s === 'in progress') return 'in_progress';
-  if (s === 'review') return 'review';
-  if (s === 'done' || s === 'complete' || s === 'closed') return 'done';
+  const type = task.status && task.status.type;
+  if (type === 'closed' || s === 'done' || s === 'complete' || s === 'closed') return 'done';
+  if (s === 'review' || s === 'in review' || type === 'done') return 'review';
+  if (IN_PROGRESS_STATUSES.includes(s)) return 'in_progress';
   return 'todo';
 }
+// New tickets start in To Do, not the list's first status (Backlog).
+const NEW_TICKET_STATUS = 'to do';
 
 function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => Date.now() }) {
   const token = env.CLICKUP_API_TOKEN || '';
@@ -170,13 +176,21 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     if (existing) return { duplicate: true, ticket: existing };
     const owner = await memberByEmail(ownerEmail);
     const assignees = [owner && owner.id, developerId ? Number(developerId) : null].filter(Boolean);
-    const task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, {
+    const body = {
       name: String(title).slice(0, 250),
       markdown_description: String(details || '').slice(0, 8000),
       assignees: [...new Set(assignees)],
       tags: (tags || []).slice(0, 8),
       priority: { urgent: 1, high: 2, normal: 3, low: 4 }[priority] || 3,
-    });
+    };
+    let task;
+    try {
+      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, { ...body, status: NEW_TICKET_STATUS });
+    } catch (err) {
+      // A list without a "to do" status: the list's own first status then.
+      if (!/status/i.test(err.message)) throw err;
+      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, body);
+    }
     store.byTask[task.id] = { issueKey: issueKey || null, raceDate: raceDate || null, raceUrl: raceUrl || null, raisedBy, raisedAt: new Date(now()).toISOString(), reminders: 0 };
     if (issueKey) store.byIssue[issueKey] = task.id;
     save();
