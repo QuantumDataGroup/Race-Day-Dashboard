@@ -805,7 +805,7 @@ async function runHealthChecks() {
   const rs = reports.status();
   add('reports', 'Reports to ClickUp', rs.lastError ? 'warn' : 'ok',
     rs.last ? `${rs.last.kind === 'weekly' ? 'Weekly' : 'Daily'} sent ${rs.last.at.slice(0, 10)}` : (rs.enabled ? 'None sent yet' : 'Not connected'),
-    rs.lastError || `Weekly every Monday ${rs.sendHour}:00 Sri Lanka time${rs.dailyOn ? ' · daily every day' : ''} · a ClickUp task with the PDF, assigned to ${ticketOwnerEmail() || 'the owner'}`);
+    rs.lastError || `Weekly every Monday ${rs.sendHour}:00 Sri Lanka time${rs.dailyOn ? ' · daily every day' : ''} · a ClickUp task with the PDF, assigned to ${ticketOwnerEmail() || 'the owner'}${rs.chat ? ' · PDF link in Chat "RDD - Weekly Update"' : ''}`);
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
