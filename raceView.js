@@ -1621,7 +1621,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
 
   const noMatchRow = `<tr class="no-match-row" hidden><td class="empty-state" colspan="${cols.length + 2}">No meetings match the selected filters.</td></tr>`;
 
-  return `<div class="table-scroll"><table>
+  return `<div class="table-scroll"><table style="--race-cols:${maxRaceNo}">
     <thead><tr><th style="text-align:left;">Meeting</th>${headerCells}</tr></thead>
     <tbody>
 ${rows}
