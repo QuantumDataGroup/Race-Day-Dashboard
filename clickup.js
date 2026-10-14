@@ -61,6 +61,10 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
   const workspaceId = env.CLICKUP_WORKSPACE_ID || '90161415163';
   const chatChannelId = env.CLICKUP_CHAT_CHANNEL_ID || '2kz0m0zv-12176';
   const chatEnabled = enabled && chatChannelId !== 'off';
+  // The weekly report's PDF link goes to Dinesh's "RDD - Weekly Update"
+  // channel (14 Oct 2026); CLICKUP_REPORT_CHANNEL_ID overrides, "off" stops it.
+  const reportChannelId = env.CLICKUP_REPORT_CHANNEL_ID || '2kz0m0zv-12216';
+  const reportChatEnabled = enabled && reportChannelId !== 'off';
   const v3Url = baseUrl.replace(/\/api\/v2$/, '/api/v3');
   const storePath = path.join(dir, 'tickets.json');
   let store = { byTask: {}, byIssue: {}, ignored: {}, reports: {} };
@@ -260,11 +264,12 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     return sent;
   }
 
-  // A message in the alerts Chat channel (markdown). ClickUp shows it as
-  // from the API token's owner.
-  async function postChat(text) {
-    if (!chatEnabled) throw new Error('ClickUp Chat alerts are off');
-    await api('POST', `${v3Url}/workspaces/${encodeURIComponent(workspaceId)}/chat/channels/${encodeURIComponent(chatChannelId)}/messages`, {
+  // A message in a Chat channel (markdown) -- the alerts channel unless
+  // another is given. ClickUp shows it as from the API token's owner.
+  async function postChat(text, channelId) {
+    const channel = channelId || chatChannelId;
+    if (!enabled || !channel || channel === 'off') throw new Error('ClickUp Chat is off');
+    await api('POST', `${v3Url}/workspaces/${encodeURIComponent(workspaceId)}/chat/channels/${encodeURIComponent(channel)}/messages`, {
       type: 'message', content: String(text).slice(0, 39000), content_format: 'text/md',
     });
   }
@@ -301,15 +306,18 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
         lastError = `ClickUp attachment answered ${res.status}`;
         throw new Error(`${lastError} (task ${task.id} was created)`);
       }
+      let att = null;
+      try { att = await res.json(); } catch (e) { /* no link back */ }
+      return { id: task.id, url: task.url || null, pdfUrl: (att && (att.url || att.url_w_query)) || null };
     }
-    return { id: task.id, url: task.url || null };
+    return { id: task.id, url: task.url || null, pdfUrl: null };
   }
 
   function status() {
     return { enabled, listId: enabled ? listId : null, chat: chatEnabled ? chatChannelId : null, lastError };
   }
 
-  return { enabled, chatEnabled, status, members, memberByEmail, tasks, view, ticketForIssue, createTicket, addDeveloper, setIgnored, sendReminders, postChat, createReportTask, store: () => store };
+  return { enabled, chatEnabled, reportChannelId: reportChatEnabled ? reportChannelId : null, status, members, memberByEmail, tasks, view, ticketForIssue, createTicket, addDeveloper, setIgnored, sendReminders, postChat, createReportTask, store: () => store };
 }
 
 module.exports = { createClickUp, statusKey, remindersDue, nextReminderHours, REMINDER_HOURS };

@@ -129,6 +129,24 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     return lines.join('\n');
   }
 
+  // The Chat message: headline numbers plus links to the PDF and the task.
+  function chatText(r, task, filename) {
+    const types = Object.entries(r.byType).sort((a, b) => b[1].found - a[1].found).slice(0, 3);
+    const people = Object.entries(r.byPerson).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const lines = [
+      `**[Race Day Dashboard] ${r.title}**`,
+      `- Data quality **${r.score == null ? '-' : `${r.score}%`}** · races ${r.races} · issues ${r.found} · fixed ${r.fixed} (${pct(r.fixed, r.found) ?? '-'}%) · avg fix ${fmtMinutes(r.avgFix)}`,
+      `- Ran with an issue still open: **${r.missed.length}**`,
+    ];
+    if (types.length) lines.push(`- Top issues: ${types.map(([k, v]) => `${label(k)} ${v.found}`).join(' · ')}`);
+    if (people.length) lines.push(`- Marked fixed: ${people.map(([n, v]) => `${n} ${v}`).join(' · ')}`);
+    const links = [];
+    if (task.pdfUrl) links.push(`[📄 ${filename}](${task.pdfUrl})`);
+    if (task.url) links.push(`[Open the report task](${task.url})`);
+    if (links.length) lines.push(links.join(' · '));
+    return lines.join('\n');
+  }
+
   // ---- PDF ----
   function pdf(r) {
     return new Promise((resolve, reject) => {
@@ -291,6 +309,16 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     const filename = `${kind}-report-${period.from}${kind === 'weekly' ? `-to-${period.to}` : ''}.pdf`;
     const task = await clickup.createReportTask({ name: r.title, markdown: markdown(r), pdf: buf, filename, ownerEmail: ownerEmail(), kind });
     state.last = { kind, from: period.from, to: period.to, at: new Date().toISOString(), taskId: task.id, url: task.url };
+    // The PDF link in the report Chat channel too (ClickUp Chat can't carry a file itself).
+    if (clickup.reportChannelId) {
+      try {
+        await clickup.postChat(chatText(r, task, filename), clickup.reportChannelId);
+        state.last.chat = true;
+      } catch (err) {
+        state.last.chat = false;
+        state.lastChatError = err.message;
+      }
+    }
     return state.last;
   }
 
@@ -329,7 +357,7 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
   }
 
   function status() {
-    return { enabled: Boolean(clickup && clickup.enabled), dailyOn: daily, daily: state.daily, weekly: state.weekly, last: state.last, lastError: state.lastError, sendHour: SEND_HOUR };
+    return { enabled: Boolean(clickup && clickup.enabled), dailyOn: daily, daily: state.daily, weekly: state.weekly, last: state.last, lastError: state.lastError || (state.last && state.last.chat === false ? `PDF link not posted in Chat: ${state.lastChatError}` : null), sendHour: SEND_HOUR, chat: Boolean(clickup && clickup.reportChannelId) };
   }
 
   // Admin "send now" (System Health): this period's report straight to ClickUp.
