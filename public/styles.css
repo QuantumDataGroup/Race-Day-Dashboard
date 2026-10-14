@@ -225,6 +225,13 @@ td.bad-time-cell .race-cell-link { color: var(--adm-warn); font-weight: 700; }
 .login-card input[type="text"], .login-card input[type="password"] { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; font-size: 14px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--card-bg); color: var(--fg); }
 .login-card button[type="submit"] { width: 100%; padding: 9px; font-size: 14px; font-weight: 600; border: none; border-radius: 4px; background: var(--header-bg); color: var(--header-fg); cursor: pointer; }
 .login-card button[type="submit"]:hover { background: var(--header-bg-hover); }
+.login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.login-logo { border-radius: 12px; flex-shrink: 0; }
+.login-brand h1 { font-size: 22px; letter-spacing: .5px; margin: 0; }
+.login-brand h1 span { color: var(--accent); }
+.login-brand p.sub { margin: 2px 0 0; font-size: 12px; color: #aab4c3; }
+.login-card label.login-remember { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #cfd6e0; margin: -2px 0 16px; cursor: pointer; }
+@media (max-width: 600px) { .login-page-body { justify-content: center; padding: 16px; } .login-card { width: 100%; max-width: 360px; } }
 /* Show / hide password eye button (8 Oct 2026, public/password-toggle.js),
    inside every password box. */
 .pw-wrap { position: relative; display: inline-block; vertical-align: middle; }
@@ -1218,6 +1225,25 @@ body.race-standalone-view .health-strip { display: none; }
 @media (prefers-reduced-motion: reduce) { .alerts-ping { animation: none; } }
 .al-panel { position: fixed; top: 72px; right: 16px; z-index: 2500; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 96px); display: flex; flex-direction: column; background: var(--modal-bg); border: 1px solid var(--input-border); border-radius: var(--radius); box-shadow: 0 18px 44px var(--modal-shadow); }
 .al-panel[hidden], .alerts-bell[hidden], .alerts-count[hidden] { display: none; }
+
+/* Install as an app (public/app.js, Oct 2026). */
+.install-app-btn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: transparent; color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.install-app-btn:hover { background: var(--accent); color: var(--accent-fg); }
+/* Below very wide screens the header is full: icon only (the title explains it). */
+@media (max-width: 1700px) { .install-app-btn { padding: 0 11px; } .install-app-btn .install-label { display: none; } }
+@media (max-width: 760px) { .install-app-btn .install-label { display: inline; } }
+.install-app-btn[hidden], .install-help[hidden] { display: none; }
+.install-help { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 3000; width: min(360px, calc(100vw - 32px)); box-sizing: border-box; padding: 18px 18px 14px; border-radius: 14px; background: var(--modal-bg); border: 1px solid var(--accent); box-shadow: 0 18px 44px var(--modal-shadow); color: var(--fg); text-align: center; }
+.install-help img { display: block; margin: 0 auto 8px; border-radius: 12px; }
+.install-help b { font-size: 15px; }
+.install-help ol { text-align: left; margin: 10px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: var(--muted); }
+.install-help ol b { font-size: inherit; color: var(--fg); }
+.install-help-close { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
+/* Running as the installed app: room for the phone's notch / home bar. */
+html.is-app body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+html.is-app .install-app-btn { display: none; }
+.al-push-row { display: flex; align-items: center; gap: 8px; }
+.al-push-row .al-tag { font-size: 10px; font-weight: 800; letter-spacing: .5px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); }
 .al-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .al-head b { font-size: 16px; color: var(--fg); }
 .al-sub { flex: 1 1 auto; font-size: 12px; color: var(--muted); }

@@ -1,0 +1,23 @@
+{
+  "id": "/",
+  "name": "RacingHub – Race Day Dashboard",
+  "short_name": "RacingHub",
+  "description": "Race day data quality for Thoroughbred, Harness and Greyhound racing: every race checked, alerts before the jump.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#121a27",
+  "theme_color": "#121a27",
+  "categories": ["sports", "productivity", "business"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Race grid", "url": "/", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Overview", "url": "/overview", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Meetings list", "url": "/meetings-list-view", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

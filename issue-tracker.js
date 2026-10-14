@@ -63,6 +63,7 @@ function createIssueTracker({ dir, now = () => new Date() }) {
       const e = h.issues[i.key] || (h.issues[i.key] = { code: i.code, raceId: i.raceId, meeting: i.meeting, country: i.country, discipline: i.discipline, rNo: i.rNo, firstSeen: at });
       e.lastSeen = at;
       e.detail = i.detail;
+      if (i.startUtc) e.startUtc = i.startUtc; // the daily report's "ran with the issue" (Oct 2026)
       // Back again: no longer fixed (unless the team marked it fixed).
       if (e.resolvedAt && e.resolvedBy === 'data') { delete e.resolvedAt; delete e.resolvedBy; }
     }
@@ -135,6 +136,37 @@ function createIssueTracker({ dir, now = () => new Date() }) {
     };
   }
 
+  // Everything the daily / weekly report needs for one race date (Oct 2026):
+  // the dayStats numbers plus issues by type and country, who marked how many
+  // fixed, and the races that started with an issue still open ("missed").
+  function dayReport(dateStr) {
+    const h = loadHistory(dateStr);
+    const stats = dayStats(dateStr);
+    const byType = {};
+    const byCountry = {};
+    const byPerson = {};
+    const missed = [];
+    const nowMs = now().getTime();
+    for (const [key, e] of Object.entries(h.issues)) {
+      const w = workflow[key];
+      const fixedAt = (w && w.status === 'fixed' && w.fixedAt) || e.resolvedAt || null;
+      const t = byType[e.code] || (byType[e.code] = { found: 0, fixed: 0 });
+      t.found++;
+      if (fixedAt) t.fixed++;
+      const c = byCountry[e.country || '?'] || (byCountry[e.country || '?'] = { found: 0, fixed: 0, missed: 0 });
+      c.found++;
+      if (fixedAt) c.fixed++;
+      if (w && w.status === 'fixed' && w.updatedBy) byPerson[w.updatedBy] = (byPerson[w.updatedBy] || 0) + 1;
+      const start = Date.parse(e.startUtc || '');
+      if (Number.isFinite(start) && start <= nowMs && Date.parse(e.firstSeen) < start && (!fixedAt || Date.parse(fixedAt) > start)) {
+        c.missed++;
+        missed.push({ key, code: e.code, meeting: e.meeting, country: e.country, discipline: e.discipline, rNo: e.rNo, startUtc: e.startUtc, detail: e.detail || '' });
+      }
+    }
+    missed.sort((a, b) => String(a.startUtc).localeCompare(String(b.startUtc)));
+    return { ...stats, byType, byCountry, byPerson, missed };
+  }
+
   function firstSeen(dateStr, key) {
     const e = loadHistory(dateStr).issues[key];
     return e ? e.firstSeen : null;
@@ -148,7 +180,7 @@ function createIssueTracker({ dir, now = () => new Date() }) {
     return e.resolvedAt && e.resolvedBy === 'data' ? 'fixed' : 'still';
   }
 
-  return { recordIssues, statusOf, setStatus, dayStats, firstSeen, dataNow, STATUSES };
+  return { recordIssues, statusOf, setStatus, dayStats, dayReport, firstSeen, dataNow, STATUSES };
 }
 
 // Critical: starts within 30 minutes; High: within the hour; Normal: later.

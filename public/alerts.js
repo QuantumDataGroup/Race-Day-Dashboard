@@ -91,7 +91,76 @@
     } catch (e) { /* no audio */ }
   }
 
+  // Push from the server (Oct 2026): with "Keep alerting when the tab is
+  // closed" on, the server sends the same alerts to this device itself
+  // (push.js / sw.js), so this page doesn't pop up a second copy.
+  var pushOn = false;
+  function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function keyBytes(b64) {
+    var s = (b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+    var raw = atob(s); var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  function postJson(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  }
+  function currentSub() {
+    // serviceWorker.ready never settles if the worker didn't register: give up after 4 s.
+    var timeout = new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 4000); });
+    return Promise.race([navigator.serviceWorker.ready.then(function (reg) { return reg.pushManager.getSubscription(); }), timeout]);
+  }
+  // Is this device getting pushed alerts? (Re-registers a subscription the server lost.)
+  function refreshPush() {
+    if (!pushSupported()) return Promise.resolve(false);
+    return currentSub().then(function (sub) {
+      if (!sub) return false;
+      return fetch('/api/push/key?endpoint=' + encodeURIComponent(sub.endpoint)).then(function (r) { return r.json(); }).then(function (j) {
+        if (j.subscribed) return true;
+        return postJson('/api/push/subscribe', { subscription: sub.toJSON() }).then(function (r) { return r.ok; });
+      });
+    }).then(function (on) { pushOn = on; return on; }).catch(function () { return pushOn; });
+  }
+  function enablePush(box, note) {
+    box.disabled = true;
+    Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') throw new Error('blocked');
+      return fetch('/api/push/key').then(function (r) { return r.json(); });
+    }).then(function (j) {
+      var late = new Promise(function (resolve, reject) { setTimeout(function () { reject(new Error('no worker')); }, 8000); });
+      return Promise.race([navigator.serviceWorker.ready, late]).then(function (reg) {
+        return reg.pushManager.getSubscription().then(function (s) {
+          return s || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(j.publicKey) });
+        });
+      });
+    }).then(function (sub) {
+      return postJson('/api/push/subscribe', { subscription: sub.toJSON() });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('save');
+      pushOn = true; box.checked = true;
+      note.textContent = 'Alerts will reach this device even when the dashboard is closed. A test alert is on its way.';
+      return postJson('/api/push/test');
+    }).catch(function (err) {
+      pushOn = false; box.checked = false;
+      note.textContent = err && err.message === 'blocked'
+        ? 'Notifications are blocked for this site: allow them in the address bar (or the phone\'s settings), then tick this again.'
+        : 'Couldn\'t turn this on in this browser. On an iPhone, install the app first (Share → Add to Home Screen), then open it and tick this.';
+    }).then(function () { box.disabled = false; });
+  }
+  function disablePush(box, note) {
+    pushOn = false;
+    currentSub().then(function (sub) {
+      if (!sub) return null;
+      postJson('/api/push/unsubscribe', { endpoint: sub.endpoint });
+      return sub.unsubscribe();
+    }).catch(function () {}).then(function () {
+      box.checked = false;
+      note.textContent = 'Alerts only show while a dashboard tab is open.';
+    });
+  }
+
   function popup(title, body, url, tag) {
+    if (pushOn) return;
     if (!settings.popups || !('Notification' in window) || Notification.permission !== 'granted') return;
     try {
       var n = new Notification(title, { body: body, tag: tag, icon: '/logo.png' });
@@ -192,12 +261,19 @@
       '<div class="al-list"></div>' +
       '<div class="al-foot">' +
       '<label><input type="checkbox" id="alPopups"' + (settings.popups ? ' checked' : '') + (canPopup ? '' : ' disabled') + '> Pop-up notifications</label>' +
+      '<label class="al-push-row"><input type="checkbox" id="alPush"' + (pushOn ? ' checked' : '') + (pushSupported() ? '' : ' disabled') + '> Keep alerting when the tab is closed <span class="al-tag">NEW</span></label>' +
       '<label><input type="checkbox" id="alSound"' + (settings.sound ? ' checked' : '') + '> Sound</label>' +
       '<a href="/overview">Overview</a>' +
       '<p class="al-note" id="alNote">' + (canPopup ? 'Pop-ups show while a dashboard tab is open, even minimised.' : 'This browser does not support pop-up notifications.') + '</p>' +
       '</div>';
     document.body.appendChild(panel);
     panel.querySelector('#alClose').addEventListener('click', function () { panel.hidden = true; bell.setAttribute('aria-expanded', 'false'); });
+    var pushBox = panel.querySelector('#alPush');
+    pushBox.addEventListener('change', function () {
+      var note = document.getElementById('alNote');
+      if (pushBox.checked) enablePush(pushBox, note); else disablePush(pushBox, note);
+    });
+    refreshPush().then(function (on) { pushBox.checked = on; });
     panel.querySelector('#alSound').addEventListener('change', function (e) { settings.sound = e.target.checked; write(SETTINGS_KEY, settings); if (settings.sound) beep(); });
     panel.querySelector('#alPopups').addEventListener('change', function (e) {
       var box = e.target;
@@ -249,7 +325,7 @@
     panel.hidden = true;
     bell.setAttribute('aria-expanded', 'false');
   });
-  load();
+  refreshPush().then(load);
   setInterval(load, POLL_MS);
   // Milestones are crossed between polls too.
   setInterval(function () { render(); check(); }, 20 * 1000);
