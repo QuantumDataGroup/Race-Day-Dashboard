@@ -1083,6 +1083,48 @@
     // same as before that change -- only the modifier-click/right-click
     // path should navigate anywhere (18 Sep 2026, per Dinesh: "Normal
     // Click panna, Palaya madhiri open aganu").
+    // Phone view (14 Oct 2026, per Dinesh): "+" at the end of a meeting opens
+    // its races as a grid under the name, built from the row's own race cells
+    // (same links, same click -> popup). Which meetings are open is kept for
+    // the session, so the 3-minute auto-refresh doesn't close them.
+    var OPEN_MEETINGS_KEY = 'rdd_open_meetings_v1';
+    function openMeetingKeys() {
+      try { return JSON.parse(sessionStorage.getItem(OPEN_MEETINGS_KEY)) || []; } catch (e) { return []; }
+    }
+    function meetingKey(row) {
+      return (row.closest('.disc-section') || {}).id + '|' + row.getAttribute('data-meeting-name') + '|' + row.getAttribute('data-country');
+    }
+    function buildMeetingRaces(row, box) {
+      box.innerHTML = Array.prototype.map.call(row.querySelectorAll('td.cell.time[data-race-id]'), function (td) {
+        var cls = 'm-race';
+        if (td.classList.contains('has-result')) cls += ' has-result';
+        if (td.classList.contains('abandoned-race')) cls += ' abandoned-race';
+        if (td.classList.contains('bad-time-cell')) cls += ' bad-time-cell';
+        if (td.hasAttribute('data-issues')) cls += ' has-issue';
+        return '<div class="' + cls + '" title="' + escapeHtmlClient(td.getAttribute('title') || '') + '">' + td.innerHTML + '</div>';
+      }).join('') || '<p class="m-races-empty">No races.</p>';
+    }
+    function toggleMeetingRaces(btn, open) {
+      var row = btn.closest('tr');
+      var box = row.querySelector('.m-races');
+      if (open === undefined) open = box.hidden;
+      if (open && !box.dataset.built) { buildMeetingRaces(row, box); box.dataset.built = '1'; }
+      box.hidden = !open;
+      btn.textContent = open ? '−' : '+';
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      row.classList.toggle('m-open', open);
+      var keys = openMeetingKeys().filter(function (k) { return k !== meetingKey(row); });
+      if (open) keys.push(meetingKey(row));
+      try { sessionStorage.setItem(OPEN_MEETINGS_KEY, JSON.stringify(keys.slice(-60))); } catch (e) { /* not remembered */ }
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+      var keys = openMeetingKeys();
+      if (!keys.length) return;
+      document.querySelectorAll('tr.meeting-row').forEach(function (row) {
+        if (keys.indexOf(meetingKey(row)) !== -1) toggleMeetingRaces(row.querySelector('.m-toggle'), true);
+      });
+    });
+
     function handleRaceCellClick(event, id, aEl) {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return true;
       event.preventDefault();

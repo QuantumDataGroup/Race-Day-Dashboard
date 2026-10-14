@@ -1612,10 +1612,18 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         const scheduleNoteTag = m.scheduleNote
           ? ` <span class="schedule-note-tag" title="Schedule Issue: ${escapeHtml(m.scheduleNote)} -- the scheduled times look wrong"><i class="fa-solid fa-clock" aria-hidden="true"></i> ${escapeHtml(m.scheduleNote)}</span>`
           : '';
+        // Phone view (14 Oct 2026, per Dinesh): the race columns are hidden and
+        // a "+" at the end of the meeting opens its races as a grid under the
+        // name (dashboard.html toggleMeetingRaces builds it from this row's
+        // cells). The issue count shows next to it.
+        const mIssueCount = meetingRaceIssues.length
+          ? `<span class="m-issue-count" title="${meetingRaceIssues.length} race${meetingRaceIssues.length === 1 ? '' : 's'} with an issue"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ${meetingRaceIssues.length}</span>`
+          : '';
+        const mToggle = `<button type="button" class="m-toggle" aria-expanded="false" aria-label="Show races at ${escapeHtml(m.meeting)}" onclick="toggleMeetingRaces(this)">+</button>`;
         const meetingCell = `<td class="meeting"><div class="meeting-cell-inner">` +
           `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span>${scheduleNoteTag}</span>` +
-          `<span class="meeting-tags-group">${tabMeetingTag}${abandonedTag}${downloadWidget}</span>` +
-          `</div></td>`;
+          `<span class="meeting-tags-group">${tabMeetingTag}${abandonedTag}${downloadWidget}${mIssueCount}${mToggle}</span>` +
+          `</div><div class="m-races" hidden></div></td>`;
 
         return `${countryHeaderRow}<tr class="meeting-row" data-country="${escapeHtml(m.country)}" data-tabmeeting="${tabMeetingValue}" data-issues="${issueCodes.join(' ')}" data-hasissue="${m.hasAnyIssue}" data-meeting="${escapeHtml(String(m.meeting || '').toLowerCase())}" data-meeting-name="${escapeHtml(m.meeting || '')}">${meetingCell}${cells}<td class="status-cell">${statusIcon}</td></tr>`;
       }).join('\n')
