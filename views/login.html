@@ -6,12 +6,22 @@
 <title>Race Day Dashboard - Login</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#121a27">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RacingHub">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<script src="/app.js?v={{STYLES_VERSION}}" defer></script>
 <script src="/password-toggle.js?v={{STYLES_VERSION}}" defer></script>
 </head>
 <body class="login-page-body">
   <div class="login-card">
-    <h1>Race Day Dashboard</h1>
-    <p class="sub">Sign in to continue</p>
+    <div class="login-brand">
+      <img class="login-logo" src="/icons/icon-192.png" alt="" width="52" height="52">
+      <div><h1>RACING<span>HUB</span></h1><p class="sub">Race Day Dashboard · sign in to continue</p></div>
+    </div>
     {{ERROR_BLOCK}}
     <form method="POST" action="/login" autocomplete="off">
       <label>Username
@@ -20,6 +30,7 @@
       <label>Password
         <input type="password" name="password" autocomplete="current-password" required>
       </label>
+      <label class="login-remember"><input type="checkbox" name="remember"> Keep me signed in on this device (30 days)</label>
       <button type="submit">Log in</button>
     </form>
   </div>

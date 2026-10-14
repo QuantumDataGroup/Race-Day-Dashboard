@@ -30,3 +30,10 @@ jockey-check-state.json
 issue-workflow.json
 issue-history/
 tickets.json
+
+# Server state in the data folder (Oct 2026: push, alerts, reports, logins)
+push-keys.json
+push-subscriptions.json
+alerts-sent.json
+reports-state.json
+sessions.json

@@ -48,14 +48,22 @@ function statusKey(task) {
 }
 // New tickets start in To Do, not the list's first status (Backlog).
 const NEW_TICKET_STATUS = 'to do';
+const REPORT_TAG = 'report';
 
 function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => Date.now() }) {
   const token = env.CLICKUP_API_TOKEN || '';
   const listId = env.CLICKUP_LIST_ID || '';
   const baseUrl = (env.CLICKUP_API_BASE || API).replace(/\/$/, '');
   const enabled = Boolean(token && listId);
+  // Critical race alerts go to a ClickUp Chat channel (Oct 2026, per Dinesh):
+  // "Race day dashboard - Issues" in the Quantum Data Group workspace unless
+  // the server says otherwise; CLICKUP_CHAT_CHANNEL_ID=off turns them off.
+  const workspaceId = env.CLICKUP_WORKSPACE_ID || '90161415163';
+  const chatChannelId = env.CLICKUP_CHAT_CHANNEL_ID || '2kz0m0zv-12176';
+  const chatEnabled = enabled && chatChannelId !== 'off';
+  const v3Url = baseUrl.replace(/\/api\/v2$/, '/api/v3');
   const storePath = path.join(dir, 'tickets.json');
-  let store = { byTask: {}, byIssue: {}, ignored: {} };
+  let store = { byTask: {}, byIssue: {}, ignored: {}, reports: {} };
   try {
     if (fs.existsSync(storePath)) store = { ...store, ...JSON.parse(fs.readFileSync(storePath, 'utf8')) };
   } catch (err) {
@@ -76,7 +84,7 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     if (!enabled) throw new Error('ClickUp is not connected (CLICKUP_API_TOKEN / CLICKUP_LIST_ID not set)');
     let res;
     try {
-      res = await fetchImpl(`${baseUrl}${urlPath}`, {
+      res = await fetchImpl(/^https?:/.test(urlPath) ? urlPath : `${baseUrl}${urlPath}`, {
         method,
         headers: { Authorization: token, 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
@@ -121,13 +129,18 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     return out;
   }
 
+  function isReportTask(t) {
+    return Boolean(store.reports && store.reports[t.id]) || (t.tags || []).some((g) => g && g.name === REPORT_TAG);
+  }
+
   // Every open task in the list, plus tasks closed in the last 14 days.
   async function tasks(fresh) {
     if (!fresh && tasksCache && now() - tasksCache.at < TASKS_FRESH_MS) return tasksCache.list;
     const open = await allPages('include_closed=false');
     const recent = await allPages(`include_closed=true&date_updated_gt=${now() - 14 * 86400000}`);
     const byId = new Map();
-    for (const t of [...open, ...recent]) byId.set(t.id, t);
+    // The daily / weekly report tasks share the list but aren't tickets.
+    for (const t of [...open, ...recent]) if (!isReportTask(t)) byId.set(t.id, t);
     const list = [...byId.values()];
     tasksCache = { at: now(), list };
     return list;
@@ -247,11 +260,56 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     return sent;
   }
 
-  function status() {
-    return { enabled, listId: enabled ? listId : null, lastError };
+  // A message in the alerts Chat channel (markdown). ClickUp shows it as
+  // from the API token's owner.
+  async function postChat(text) {
+    if (!chatEnabled) throw new Error('ClickUp Chat alerts are off');
+    await api('POST', `${v3Url}/workspaces/${encodeURIComponent(workspaceId)}/chat/channels/${encodeURIComponent(chatChannelId)}/messages`, {
+      type: 'message', content: String(text).slice(0, 39000), content_format: 'text/md',
+    });
   }
 
-  return { enabled, status, members, memberByEmail, tasks, view, ticketForIssue, createTicket, addDeveloper, setIgnored, sendReminders, store: () => store };
+  // The daily / weekly report: a task in the list (tagged "report", assigned
+  // to the owner, kept out of the tickets pages and reminders) with the PDF
+  // attached. Returns { id, url }.
+  async function createReportTask({ name, markdown, pdf, filename, ownerEmail, kind }) {
+    const owner = await memberByEmail(ownerEmail).catch(() => null);
+    const body = {
+      name: String(name).slice(0, 250),
+      markdown_description: String(markdown || '').slice(0, 8000),
+      assignees: owner ? [owner.id] : [],
+      tags: [REPORT_TAG],
+      priority: 4,
+    };
+    let task;
+    try {
+      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, { ...body, status: NEW_TICKET_STATUS });
+    } catch (err) {
+      if (!/status/i.test(err.message)) throw err;
+      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, body);
+    }
+    store.reports = store.reports || {};
+    store.reports[task.id] = { kind: kind || 'report', at: new Date(now()).toISOString() };
+    save();
+    if (pdf) {
+      const form = new FormData();
+      form.append('attachment', new Blob([pdf], { type: 'application/pdf' }), filename || 'report.pdf');
+      const res = await fetchImpl(`${baseUrl}/task/${encodeURIComponent(task.id)}/attachment`, {
+        method: 'POST', headers: { Authorization: token }, body: form, signal: AbortSignal.timeout(60000),
+      });
+      if (!res.ok) {
+        lastError = `ClickUp attachment answered ${res.status}`;
+        throw new Error(`${lastError} (task ${task.id} was created)`);
+      }
+    }
+    return { id: task.id, url: task.url || null };
+  }
+
+  function status() {
+    return { enabled, listId: enabled ? listId : null, chat: chatEnabled ? chatChannelId : null, lastError };
+  }
+
+  return { enabled, chatEnabled, status, members, memberByEmail, tasks, view, ticketForIssue, createTicket, addDeveloper, setIgnored, sendReminders, postChat, createReportTask, store: () => store };
 }
 
 module.exports = { createClickUp, statusKey, remindersDue, nextReminderHours, REMINDER_HOURS };

@@ -1313,7 +1313,9 @@ function renderUserBlock(username, access) {
   // View logins (12 Oct 2026): every page hides its change buttons (styles.css
   // .view-only); the server refuses the changes anyway.
   const viewOnly = access && !access.work ? `<script>document.documentElement.classList.add('view-only');</script>` : '';
-  return `${viewOnly}${alertsBell}${overviewLink}${ticketsLink}${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
+  // Install the dashboard as an app (public/app.js shows it when the browser can).
+  const installBtn = `<button type="button" class="install-app-btn" id="installAppBtn" title="Install RacingHub as an app" aria-label="Install app" hidden><i class="fa-solid fa-mobile-screen-button" aria-hidden="true"></i><span class="install-label">Install app</span></button>`;
+  return `${viewOnly}${installBtn}${alertsBell}${overviewLink}${ticketsLink}${adminLink}<span class="session-info">Logged in as <strong>${escapeHtml(username)}</strong> | <a class="logout-link" href="/logout"><i class="fa-solid fa-right-from-bracket"></i> Logout</a></span>`;
 }
 
 // User Activity | System Health | Data Changes | Missing Data buttons

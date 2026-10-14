@@ -363,6 +363,46 @@ panel has **Updated** (issue → fixed) and **Not at source yet** (new status
 settings (localStorage): pop-ups (off until ticked; asks the browser for
 permission) and sound (on). Pop-ups only work while a dashboard tab is open.
 
+**Alerts with the app / tab closed (web push) + ClickUp Chat (14 Oct 2026).**
+The server works out the same alerts itself every minute (`buildAlerts` →
+`dispatchAlerts` in server.js) and sends them as web push (`push.js`, the
+`web-push` package) to every device that ticked **Keep alerting when the
+tab is closed** in the bell panel; `public/sw.js` shows them and opens the
+race on click. A browser with push on doesn't pop up its own copy. VAPID
+keys are generated on first start in `push-keys.json`, subscriptions per
+user in `push-subscriptions.json`, what was sent in `alerts-sent.json` (all
+in the data folder). Recipients: admins + USER logins with Overview. At 30
+and 10 minutes to the jump, one message per race also goes to the ClickUp
+Chat channel "Race day dashboard - Issues" (`clickup.postChat`, API v3;
+`CLICKUP_CHAT_CHANNEL_ID` / `CLICKUP_WORKSPACE_ID` override the defaults,
+`CLICKUP_CHAT_CHANNEL_ID=off` stops it). It shows as from the token's owner.
+
+### Weekly report (`reports.js`, 14 Oct 2026)
+Every Monday 8:00 AM Sri Lanka time, last week's (Mon–Sun) data-quality
+report goes to ClickUp as a task in the tickets list, tagged `report`,
+assigned to `CLICKUP_OWNER_EMAIL` (Dinesh — not his boss), with a PDF
+(pdfkit): data quality %, races, issues found / fixed / average fix time,
+races that ran with an issue still open, by type, by country, who marked
+issues fixed, tickets, and a day-by-day chart. Report tasks are kept out of
+the Tickets pages and reminders. `REPORTS_DAILY=on` adds a daily report for
+the day before. Admins: `GET /api/reports/preview?kind=weekly|daily&date=`
+downloads one, `POST /api/reports/send` sends one now. State in
+`reports-state.json`; System Health shows the last one sent.
+
+### Installable app (PWA, 14 Oct 2026)
+`public/manifest.webmanifest`, icons in `public/icons/`, `public/sw.js`
+(push, offline page `public/offline.html`) and `public/app.js` (registers
+the worker; the header's **Install app** button, an Add to Home Screen
+how-to on iPhone). Every template's head links them. Chrome / Edge on PC
+and Android install it as its own window ("Start app when you sign in" in
+the app's settings opens it at login); iPhone via Safari → Share → Add to
+Home Screen (push only works there once installed).
+**Logins:** sessions are kept in `sessions.json` in the data folder
+(`session-store.js`), so a restart / deploy no longer logs everyone out; a
+normal login still ends when the browser closes (server forgets it after
+12 h unused). "Keep me signed in on this device" on the login page gives a
+30-day cookie.
+
 ### System Health (`/system-health`, admins only)
 Live checks, refreshed every 60 s (cached 60 s server-side): server uptime,
 MongoDB ping, when a scrape was last seen (from the Data Changes tracker,
