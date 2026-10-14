@@ -843,7 +843,12 @@ body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
      (confirmed: still measured ~272px). table-layout: fixed makes column
      widths obey the declared widths for real, so the sticky column stays
      genuinely narrow and ellipsis-truncates instead of stretching. */
-  .table-scroll table { min-width: 640px; box-shadow: none; table-layout: fixed; }
+  /* Each race column gets a real width (14 Oct 2026, per Dinesh: on a phone
+     12 races squeezed into 640px left ~40px a column and the times ran into
+     each other) -- the table is as wide as its races need and swipes
+     sideways instead. --race-cols is the section's highest race number. */
+  .table-scroll table { min-width: max(640px, calc(110px + var(--race-cols, 12) * 68px + 58px)); box-shadow: none; table-layout: fixed; }
+  .table-scroll thead th:last-child { width: 58px; }
   .table-scroll th, .table-scroll td { white-space: nowrap; }
   .table-scroll th:first-child, .table-scroll td.meeting {
     width: 110px; overflow: hidden; text-overflow: ellipsis;
