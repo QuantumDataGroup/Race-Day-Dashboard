@@ -1242,6 +1242,8 @@ body.race-standalone-view .health-strip { display: none; }
 /* Running as the installed app: room for the phone's notch / home bar. */
 html.is-app body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 html.is-app .install-app-btn { display: none; }
+.sh-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.sh-actions .sh-sub { flex-basis: 100%; }
 .al-push-row { display: flex; align-items: center; gap: 8px; }
 .al-push-row .al-tag { font-size: 10px; font-weight: 800; letter-spacing: .5px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); }
 .al-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
