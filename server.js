@@ -102,6 +102,9 @@ const {
 } = require('./raceView');
 const { createIssueTracker, priorityFor } = require('./issue-tracker');
 const { createClickUp } = require('./clickup');
+const { createPush } = require('./push');
+const { createReports } = require('./reports');
+const { FileSessionStore } = require('./session-store');
 
 // Default config-file location changed 9 Sep 2026, per Dinesh: production's
 // WinSW service actually runs out of `C:\Thilina\Dinesh project\project - 1`
@@ -118,6 +121,8 @@ const AGE_IGNORE_PATH = process.env.AGE_IGNORE_PATH || 'C:\\Thilina\\Dinesh proj
 const DUP_JOCKEY_IGNORE_PATH = process.env.DUP_JOCKEY_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\dup-jockey-ignores.json';
 const MISSING_JOCKEY_IGNORE_PATH = process.env.MISSING_JOCKEY_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\missing-jockey-ignores.json';
 const PORT = process.env.PORT || 3000;
+// The dashboard's public address, for links in ClickUp messages and reports.
+const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://racedaydashboard.troyendata.com').replace(/\/$/, '');
 const CONNECTION_NAME = process.env.DB_CONNECTION_NAME || 'mongodb-prod';
 
 // "Missing form lines" runner-level manual overrides (28 Aug 2026, per
@@ -786,6 +791,20 @@ async function runHealthChecks() {
   const cu = clickup.status();
   if (!cu.enabled) add('clickup', 'ClickUp tickets', 'ok', 'Not connected', 'Add CLICKUP_API_TOKEN and CLICKUP_LIST_ID to the server settings to turn tickets on');
   else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `List ${cu.listId} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
+
+  // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
+  const ps = push.status();
+  add('alerts', 'Race alerts (push + ClickUp Chat)', alertDispatch.lastError || ps.lastError ? 'warn' : 'ok',
+    `${ps.devices} device${ps.devices === 1 ? '' : 's'}`,
+    [`${ps.users} user${ps.users === 1 ? '' : 's'} get pushed alerts · ${ps.sent} sent since start`,
+      cu.chat ? `ClickUp Chat at 30 / 10 min · ${alertDispatch.chatSent} message${alertDispatch.chatSent === 1 ? '' : 's'}${alertDispatch.lastChatAt ? `, last ${new Date(alertDispatch.lastChatAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : ''}` : 'ClickUp Chat off',
+      alertDispatch.lastError || ps.lastError || ''].filter(Boolean).join(' · '));
+
+  // Weekly report (Oct 2026).
+  const rs = reports.status();
+  add('reports', 'Reports to ClickUp', rs.lastError ? 'warn' : 'ok',
+    rs.last ? `${rs.last.kind === 'weekly' ? 'Weekly' : 'Daily'} sent ${rs.last.at.slice(0, 10)}` : (rs.enabled ? 'None sent yet' : 'Not connected'),
+    rs.lastError || `Weekly every Monday ${rs.sendHour}:00 Sri Lanka time${rs.dailyOn ? ' · daily every day' : ''} · a ClickUp task with the PDF, assigned to ${ticketOwnerEmail() || 'the owner'}`);
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
@@ -2546,6 +2565,8 @@ app.use(session({
   saveUninitialized: false,
   name: 'rdd.sid',
   cookie: { httpOnly: true, sameSite: 'lax' }, // no maxAge -> browser-session cookie, cleared on browser close
+  // Kept in the data folder so a restart / deploy doesn't log everyone out (Oct 2026).
+  store: new FileSessionStore({ file: path.join(ACTIVITY_LOG_DIR, 'sessions.json') }),
 }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -3107,6 +3128,9 @@ app.post('/login', (req, res) => {
     req.session.loggedIn = true;
     req.session.username = user.username;
     req.session.sessionVersion = user.sessionVersion || 0;
+    // "Keep me signed in on this device" (Oct 2026, for the installed app):
+    // a 30-day cookie instead of one that ends with the browser.
+    if (req.body && req.body.remember === 'on') req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
     logActivity(req, 'login', {});
     res.redirect(returnTo);
   });
@@ -3903,48 +3927,201 @@ function jockeySourceHint(raceId) {
   return null;
 }
 
+const ALERT_MILESTONES = [180, 120, 60, 30, 10];
+async function buildAlerts() {
+  const nowMs = Date.now();
+  const today = todayStr();
+  // A race 3 hours away can be on tomorrow's date (Australia, early morning here).
+  const dates = [today, shiftDate(today, 1)];
+  const byRace = new Map();
+  for (const dateStr of dates) {
+    const { issues } = await currentIssues(dateStr);
+    for (const i of issues) {
+      if (i.resulted) continue;
+      const start = Date.parse(i.startUtc || '');
+      if (!Number.isFinite(start)) continue;
+      const mins = (start - nowMs) / 60000;
+      const lateScratching = i.code === 'missing-scratching';
+      // Late scratchings alert at any time on race day; tomorrow's only in
+      // the 3-hour window like the rest (12 Oct 2026: a race 19 h away
+      // looked like a wrong time).
+      const anyTime = lateScratching && dateStr === today;
+      if (mins < -5 || (mins > ALERT_WINDOW_MIN && !anyTime)) continue;
+      const w = issueTracker.statusOf(i.key);
+      if (w.status === 'fixed') continue;
+      const race = byRace.get(i.raceId) || {
+        raceId: i.raceId, date: dateStr, meeting: i.meeting, country: i.country, discipline: i.discipline, rNo: i.rNo,
+        time: i.time, startUtc: i.startUtc, startsInMin: Math.round(mins),
+        raceUrl: raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: dateStr, rNo: i.rNo }),
+        issues: [],
+      };
+      race.issues.push({
+        key: i.key, code: i.code, label: i.label, detail: i.detail, lateScratching,
+        workflow: w.status, owner: w.owner || null, note: w.note || '', updatedBy: w.updatedBy || null,
+        source: i.code === 'missing-jockey' ? jockeySourceHint(i.raceId) : null,
+      });
+      byRace.set(i.raceId, race);
+    }
+  }
+  return {
+    generatedAt: new Date(nowMs).toISOString(), today, windowMin: ALERT_WINDOW_MIN, milestones: ALERT_MILESTONES,
+    races: [...byRace.values()].sort((a, b) => a.startsInMin - b.startsInMin),
+  };
+}
+
 app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
   try {
-    const nowMs = Date.now();
-    const today = todayStr();
-    // A race 3 hours away can be on tomorrow's date (Australia, early morning here).
-    const dates = [today, shiftDate(today, 1)];
-    const byRace = new Map();
-    for (const dateStr of dates) {
-      const { issues } = await currentIssues(dateStr);
-      for (const i of issues) {
-        if (i.resulted) continue;
-        const start = Date.parse(i.startUtc || '');
-        if (!Number.isFinite(start)) continue;
-        const mins = (start - nowMs) / 60000;
-        const lateScratching = i.code === 'missing-scratching';
-        // Late scratchings alert at any time on race day; tomorrow's only in
-        // the 3-hour window like the rest (12 Oct 2026: a race 19 h away
-        // looked like a wrong time).
-        const anyTime = lateScratching && dateStr === today;
-        if (mins < -5 || (mins > ALERT_WINDOW_MIN && !anyTime)) continue;
-        const w = issueTracker.statusOf(i.key);
-        if (w.status === 'fixed') continue;
-        const race = byRace.get(i.raceId) || {
-          raceId: i.raceId, date: dateStr, meeting: i.meeting, country: i.country, discipline: i.discipline, rNo: i.rNo,
-          time: i.time, startUtc: i.startUtc, startsInMin: Math.round(mins),
-          raceUrl: raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: dateStr, rNo: i.rNo }),
-          issues: [],
-        };
-        race.issues.push({
-          key: i.key, code: i.code, label: i.label, detail: i.detail, lateScratching,
-          workflow: w.status, owner: w.owner || null, note: w.note || '', updatedBy: w.updatedBy || null,
-          source: i.code === 'missing-jockey' ? jockeySourceHint(i.raceId) : null,
-        });
-        byRace.set(i.raceId, race);
-      }
-    }
-    res.json({
-      generatedAt: new Date(nowMs).toISOString(), today, windowMin: ALERT_WINDOW_MIN, milestones: [180, 120, 60, 30, 10],
-      races: [...byRace.values()].sort((a, b) => a.startsInMin - b.startsInMin),
-    });
+    res.json(await buildAlerts());
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Alerts with the app closed + critical alerts in ClickUp Chat --------
+// (Oct 2026, per Dinesh.) Every minute the server works out the same alerts
+// as the bell and sends them itself: web push to every device that turned on
+// "Keep alerting when the tab is closed" (same 3h/2h/1h/30/10 min times and
+// late scratchings), and at 30 and 10 minutes to the jump one message per
+// race to the ClickUp Chat channel. alerts-sent.json remembers what went out
+// so a restart doesn't repeat it.
+const push = createPush({ dir: ACTIVITY_LOG_DIR, subject: PUBLIC_URL });
+const CHAT_MILESTONES = [30, 10];
+const ALERT_DISPATCH_EVERY_MS = 60 * 1000;
+const ALERTS_SENT_PATH = path.join(ACTIVITY_LOG_DIR, 'alerts-sent.json');
+let alertsSent = {};
+try {
+  if (fs.existsSync(ALERTS_SENT_PATH)) alertsSent = JSON.parse(fs.readFileSync(ALERTS_SENT_PATH, 'utf8'));
+} catch (err) { alertsSent = {}; }
+const alertDispatch = { lastRunAt: null, lastChatAt: null, chatSent: 0, lastError: null };
+
+function milestoneFor(mins) {
+  let hit = null;
+  for (const x of ALERT_MILESTONES) if (mins <= x) hit = x;
+  return hit;
+}
+function liveAlertIssues(race, milestone) {
+  return race.issues.filter((i) => i.workflow !== 'fixed' && (i.workflow !== 'waiting_source' || (milestone != null && milestone <= 30)));
+}
+function minutesText(m) {
+  if (m < 1) return 'now';
+  if (m < 60) return `in ${Math.round(m)} min`;
+  return `in ${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')} m`;
+}
+const DISCIPLINE_NAMES = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+// Logins that get pushed alerts: the bell's people (Overview + able to make changes).
+function alertRecipients() {
+  return (authConfig.users || [])
+    .filter((u) => u.role === 'admin' || (userType(u) !== 'view' && Array.isArray(u.permissions) && u.permissions.includes('overview')))
+    .map((u) => u.username);
+}
+function chatMessage(race, milestone, issues) {
+  const head = `**[Race Day Dashboard] ${milestone <= 10 ? 'Critical · 10 min to jump' : 'Critical · 30 min to jump'}** — ${race.meeting} R${race.rNo} (${race.country}) · ${DISCIPLINE_NAMES[race.discipline] || race.discipline} · ${race.time || ''} local`;
+  const lines = issues.map((i) => {
+    const who = i.workflow === 'in_progress' ? ` — ${i.owner} is fixing` : i.workflow === 'waiting_source' ? ' — not at the source yet' : ' — nobody on it yet';
+    return `- ${i.lateScratching ? 'Late scratching' : i.label}: ${i.detail || ''}${i.source ? ` (${i.source.text})` : ''}${who}`;
+  });
+  return [head, ...lines, `[Open race](${PUBLIC_URL}${race.raceUrl})`].join('\n');
+}
+
+async function dispatchAlerts() {
+  const recipients = alertRecipients().filter((u) => push.users().includes(u));
+  if (!recipients.length && !clickup.chatEnabled) return;
+  const data = await buildAlerts();
+  const nowMs = Date.now();
+  const due = [];
+  for (const race of data.races) {
+    const mins = (Date.parse(race.startUtc) - nowMs) / 60000;
+    const disc = DISCIPLINE_NAMES[race.discipline] || race.discipline;
+    for (const i of race.issues) {
+      if (i.lateScratching && i.workflow !== 'fixed' && !alertsSent[`ls|${i.key}`]) {
+        alertsSent[`ls|${i.key}`] = nowMs;
+        due.push({ title: `Late scratching not updated · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${minutesText(mins)}: ${i.detail}`, url: race.raceUrl, tag: `ls-${race.raceId}` });
+      }
+    }
+    const milestone = milestoneFor(mins);
+    if (milestone == null || mins < -5) continue;
+    const list = liveAlertIssues(race, milestone);
+    if (!list.length) continue;
+    const key = `${race.raceId}|${milestone}`;
+    if (!alertsSent[`p|${key}`]) {
+      alertsSent[`p|${key}`] = nowMs;
+      due.push({ title: `${race.meeting} R${race.rNo} · ${disc} — ${minutesText(mins)}`, body: list.map((i) => i.detail || i.label).join(', '), url: race.raceUrl, tag: `race-${race.raceId}` });
+    }
+    if (clickup.chatEnabled && CHAT_MILESTONES.includes(milestone) && !alertsSent[`c|${key}`]) {
+      alertsSent[`c|${key}`] = nowMs;
+      try {
+        await clickup.postChat(chatMessage(race, milestone, list));
+        alertDispatch.lastChatAt = new Date().toISOString();
+        alertDispatch.chatSent++;
+      } catch (err) {
+        alertDispatch.lastError = `ClickUp Chat: ${err.message}`;
+      }
+    }
+  }
+  if (recipients.length && due.length) {
+    const batch = due.length > 3
+      ? [{ title: `${due.length} race alerts`, body: due.slice(0, 4).map((d) => d.title).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/overview', tag: 'race-alerts' }]
+      : due;
+    for (const p of batch) await push.sendTo(recipients, p);
+  }
+  const cutoff = nowMs - 24 * 60 * 60 * 1000;
+  for (const [k, t] of Object.entries(alertsSent)) if (t < cutoff) delete alertsSent[k];
+  try { fs.writeFileSync(ALERTS_SENT_PATH, JSON.stringify(alertsSent), 'utf8'); } catch (err) { /* next run */ }
+  alertDispatch.lastRunAt = new Date().toISOString();
+}
+setInterval(() => {
+  dispatchAlerts().catch((err) => { alertDispatch.lastError = err.message; console.warn(`[race-dashboard] WARNING: alert dispatch failed: ${err.message}`); });
+}, ALERT_DISPATCH_EVERY_MS);
+
+// This browser's push subscription (bell panel → "Keep alerting when the tab is closed").
+app.get('/api/push/key', requirePermission('overview'), requireWork, (req, res) => {
+  res.json({ publicKey: push.publicKey, subscribed: push.has(req.session.username, String(req.query.endpoint || '')) });
+});
+app.post('/api/push/subscribe', requirePermission('overview'), requireWork, (req, res) => {
+  try {
+    push.subscribe(req.session.username, req.body && req.body.subscription, req.get('user-agent'));
+    logActivity(req, 'push-on', {});
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/push/unsubscribe', requirePermission('overview'), requireWork, (req, res) => {
+  push.unsubscribe(req.session.username, String((req.body && req.body.endpoint) || ''));
+  res.json({ ok: true });
+});
+app.post('/api/push/test', requirePermission('overview'), requireWork, async (req, res) => {
+  const sent = await push.sendTo([req.session.username], { title: 'Race alerts are on', body: 'You will get alerts here even when the dashboard is closed.', url: '/', tag: 'alerts-on' });
+  res.json({ ok: true, sent });
+});
+
+// --- Daily / weekly reports to ClickUp (reports.js) ------------------------
+const reports = createReports({
+  issueTracker, clickup, issueLabels: ISSUE_LABELS, timezone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo',
+  dir: ACTIVITY_LOG_DIR, logoPath: path.join(__dirname, 'public', 'logo.png'), siteUrl: PUBLIC_URL,
+  ownerEmail: () => ticketOwnerEmail(), daily: process.env.REPORTS_DAILY === 'on',
+});
+setInterval(() => { reports.runDue().catch(() => {}); }, 5 * 60 * 1000);
+setTimeout(() => { reports.runDue().catch(() => {}); }, 2 * 60 * 1000);
+// Admins: download a report now (?kind=daily|weekly&date=YYYY-MM-DD) or send it to ClickUp now.
+app.get('/api/reports/preview', requireAdmin, async (req, res) => {
+  try {
+    const kind = req.query.kind === 'weekly' ? 'weekly' : 'daily';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null;
+    const { buf, filename } = await reports.previewPdf(kind, date);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"` }).send(buf);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post('/api/reports/send', requireAdmin, async (req, res) => {
+  if (!clickup.enabled) return notConnected(res);
+  try {
+    const last = await reports.sendNow((req.body && req.body.kind) === 'daily' ? 'daily' : 'weekly');
+    logActivity(req, 'report-sent', { detail: `${last.kind} ${last.from}` });
+    res.json({ ok: true, ...last });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });
 
