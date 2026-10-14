@@ -92,7 +92,11 @@
       document.getElementById('grid').innerHTML = h.checks.map(function (c) {
         return '<article class="sh-check sh-' + c.status + '"><div class="sh-check-top"><h2>' + esc(c.name) + '</h2>' +
           '<span class="sh-pill sh-' + c.status + '"><i></i>' + LABEL[c.status] + '</span></div>' +
-          '<div class="sh-main">' + localTimes(c.main) + '</div><div class="sh-sub">' + localTimes(c.sub) + '</div></article>';
+          '<div class="sh-main">' + localTimes(c.main) + '</div><div class="sh-sub">' + localTimes(c.sub) + '</div>' +
+          // Weekly report (Oct 2026): preview the PDF, or send last week's to ClickUp now.
+          (c.key === 'reports' ? '<div class="sh-actions"><a class="adm-btn" href="/api/reports/preview?kind=weekly" target="_blank" rel="noopener"><i class="fa-regular fa-file-pdf"></i> Preview PDF</a> ' +
+            '<button type="button" class="adm-btn primary" data-send-report="weekly"><i class="fa-solid fa-paper-plane"></i> Send to ClickUp now</button><span class="sh-sub" id="reportMsg">' + esc(reportMsg || '') + '</span></div>' : '') +
+          '</article>';
       }).join('');
       document.getElementById('checkedAt').textContent = clock(new Date(h.checkedAt));
     }
@@ -126,6 +130,19 @@
     }
 
     document.getElementById('checkNow').addEventListener('click', function () { load(true); });
+    var reportMsg = '';
+    document.getElementById('grid').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-send-report]');
+      if (!btn) return;
+      btn.disabled = true;
+      reportMsg = 'Sending…';
+      document.getElementById('reportMsg').textContent = reportMsg;
+      fetch('/api/reports/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: btn.getAttribute('data-send-report') }) })
+        .then(function (res) { return res.json().then(function (j) { if (!res.ok || j.enabled === false) throw new Error(j.error || j.reason || 'Failed'); return j; }); })
+        .then(function () { reportMsg = 'Sent — check ClickUp (Race Day Dashboard Issues).'; load(true); })
+        .catch(function (err) { reportMsg = 'Not sent: ' + err.message; })
+        .then(function () { var m = document.getElementById('reportMsg'); if (m) m.textContent = reportMsg; btn.disabled = false; });
+    });
     setInterval(function () {
       if (busy) return;
       left -= 1;
