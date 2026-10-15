@@ -1267,6 +1267,27 @@ html.is-app .install-app-btn { display: none; }
   .m-race.abandoned-race a.race-cell-link { opacity: .6; }
   .m-races-empty { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--muted); }
 }
+/* Comment picks report (/comment-picks, 15 Oct 2026). */
+.cp-subnav { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.cp-subnav a { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 14px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.cp-subnav a:hover { color: var(--fg); }
+.cp-subnav a.on { color: var(--accent); border-bottom-color: var(--accent); }
+.cp-filters { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.cp-dl { display: flex; gap: 6px; align-self: flex-end; }
+.ov-table.cp-table { min-width: 520px; }
+.cp-table td.cp-num { font-weight: 800; color: var(--fg); }
+.cp-table tr.cp-first td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.cp-table tr.cp-first td.cp-num { color: var(--accent); }
+.cp-table tr.cp-click { cursor: pointer; }
+.cp-table tr.cp-click:hover td { background: var(--hover-bg); }
+.ov-bar-row.cp-bar-row { grid-template-columns: 96px minmax(0, 1fr) 54px 44px; }
+.ov-bar-amber.cp-none i { background: var(--muted); }
+.cp-pick { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 5px; margin: 0 4px 2px 0; border-radius: 6px; border: 1px solid var(--border); font-size: 12px; font-weight: 700; color: var(--fg); }
+.cp-pick-win { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.cp-pick-place { border-color: var(--adm-ok); color: var(--adm-ok); }
+.cp-tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--sub-bg); color: var(--muted); }
+.cp-tag.cp-won { background: var(--accent); color: var(--accent-fg); }
+.cp-tag.cp-placed { background: var(--adm-ok-bg); color: var(--adm-ok); }
 .sh-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .sh-actions .sh-sub { flex-basis: 100%; }
 .al-push-row { display: flex; align-items: center; gap: 8px; }
