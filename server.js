@@ -4021,7 +4021,11 @@ function chatMessage(race, milestone, issues) {
   const head = `**[Race Day Dashboard] ${milestone <= 10 ? 'Critical · 10 min to jump' : 'Critical · 30 min to jump'}** — ${race.meeting} R${race.rNo} (${race.country}) · ${DISCIPLINE_NAMES[race.discipline] || race.discipline} · ${race.time || ''} local`;
   const lines = issues.map((i) => {
     const who = i.workflow === 'in_progress' ? ` — ${i.owner} is fixing` : i.workflow === 'waiting_source' ? ' — not at the source yet' : ' — nobody on it yet';
-    return `- ${i.lateScratching ? 'Late scratching' : i.label}: ${i.detail || ''}${i.source ? ` (${i.source.text})` : ''}${who}`;
+    // The detail usually starts with the label already ("Scratched runner in comment (#5 …)"): say it once.
+    const label = i.lateScratching ? 'Late scratching' : i.label;
+    const detail = String(i.detail || '');
+    const text = !i.lateScratching && detail.toLowerCase().startsWith(String(i.label || '').toLowerCase()) ? detail : `${label}: ${detail}`;
+    return `- ${text}${i.source ? ` (${i.source.text})` : ''}${who}`;
   });
   return [head, ...lines, `[Open race](${PUBLIC_URL}${race.raceUrl})`].join('\n');
 }

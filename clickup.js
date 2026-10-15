@@ -56,10 +56,10 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
   const baseUrl = (env.CLICKUP_API_BASE || API).replace(/\/$/, '');
   const enabled = Boolean(token && listId);
   // Critical race alerts go to a ClickUp Chat channel (Oct 2026, per Dinesh):
-  // "Race day dashboard - Issues" in the Quantum Data Group workspace unless
+  // "Race day dashboard - Alert" (15 Oct 2026; was "- Issues") in the Quantum Data Group workspace unless
   // the server says otherwise; CLICKUP_CHAT_CHANNEL_ID=off turns them off.
   const workspaceId = env.CLICKUP_WORKSPACE_ID || '90161415163';
-  const chatChannelId = env.CLICKUP_CHAT_CHANNEL_ID || '2kz0m0zv-12176';
+  const chatChannelId = env.CLICKUP_CHAT_CHANNEL_ID || '2kz0m0zv-12256';
   const chatEnabled = enabled && chatChannelId !== 'off';
   // The weekly report's PDF link goes to Dinesh's "RDD - Weekly Update"
   // channel (14 Oct 2026); CLICKUP_REPORT_CHANNEL_ID overrides, "off" stops it.
