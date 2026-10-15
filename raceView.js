@@ -427,7 +427,7 @@ function buildSchedule(docs, dateStr) {
       // (see attachFormLineStatus), so this stays false for them too rather
       // than flagging a check that was never actually run.
       missingRaceComment: doc.hasRaceComment === false,
-      scratchedInComment: doc.raceComment ? scratchedInComment(doc.raceComment, doc.runners) : [],
+      scratchedInComment: commentScratchCheck(doc),
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
       isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
@@ -893,7 +893,7 @@ function buildRaceDetail(doc) {
     raceComment: doc.raceComment || null,
     missingRaceComment: doc.hasRaceComment === false,
     // Scratched runners the comment still mentions (15 Oct 2026): warned and highlighted in the popup.
-    scratchedInComment: doc.raceComment ? scratchedInComment(doc.raceComment, doc.runners) : [],
+    scratchedInComment: commentScratchCheck(doc),
     // Spotlights from `llmContent` (server.js's attachSpotlights), in the
     // race country's style, falling back to any style the race has:
     // [{ horse, name, explanation }].
@@ -1432,6 +1432,17 @@ function scratchedInComment(comment, runners) {
     if (byTab || byName) out.push({ tab, name: r.horseName || '' });
   }
   return out;
+}
+
+// Only races still more than 12 hours from the jump (15 Oct 2026, per
+// Dinesh): a runner scratched closer to the race is a late scratching the
+// comment couldn't know about, so it isn't an issue.
+const COMMENT_SCRATCH_MIN_HOURS = 12;
+function commentScratchCheck(doc) {
+  if (!doc || !doc.raceComment) return [];
+  const start = Date.parse(doc.rScheduleTimeUTC || '');
+  if (!Number.isFinite(start) || start - Date.now() <= COMMENT_SCRATCH_MIN_HOURS * 60 * 60 * 1000) return [];
+  return scratchedInComment(doc.raceComment, doc.runners);
 }
 
 // Friendly names for the issue codes (Overview, tickets).
