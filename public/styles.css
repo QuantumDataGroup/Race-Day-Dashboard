@@ -493,6 +493,11 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
 .cv2-note { font-size: 12px; color: var(--muted); }
 .cv2-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
 .modal-race-comment .cv2-label { margin-top: 0; }
+/* Race comment still mentions a scratched runner (15 Oct 2026). */
+.scr-warn { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 7px 10px; border-radius: 4px; background: var(--adm-warn-bg); color: var(--adm-warn); font-size: 13px; font-weight: 600; }
+.scr-warn b { color: var(--fg); }
+.modal-box .modal-race-comment.has-scr { border-left: 3px solid var(--adm-warn); }
+.scr-mark { background: var(--adm-warn-bg); color: var(--adm-warn); font-weight: 700; text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
 .cv2-runners { display: grid; gap: 0; }
 .cv2-runner { display: grid; grid-template-columns: 36px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .cv2-tab { font-weight: 700; text-align: center; background: var(--sub-bg); border-radius: var(--radius-sm); padding: 3px 0; align-self: start; }
