@@ -374,7 +374,7 @@ keys are generated on first start in `push-keys.json`, subscriptions per
 user in `push-subscriptions.json`, what was sent in `alerts-sent.json` (all
 in the data folder). Recipients: admins + USER logins with Overview. At 30
 and 10 minutes to the jump, one message per race also goes to the ClickUp
-Chat channel "Race day dashboard - Issues" (`clickup.postChat`, API v3;
+Chat channel "Race day dashboard - Alert" (`clickup.postChat`, API v3;
 `CLICKUP_CHAT_CHANNEL_ID` / `CLICKUP_WORKSPACE_ID` override the defaults,
 `CLICKUP_CHAT_CHANNEL_ID=off` stops it). It shows as from the token's owner.
 
