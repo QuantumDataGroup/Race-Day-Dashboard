@@ -377,6 +377,20 @@ Chat channel "Race day dashboard - Issues" (`clickup.postChat`, API v3;
 `CLICKUP_CHAT_CHANNEL_ID` / `CLICKUP_WORKSPACE_ID` override the defaults,
 `CLICKUP_CHAT_CHANNEL_ID=off` stops it). It shows as from the token's owner.
 
+### Comment picks (`/comment-picks`, `picks-report.js`, 15 Oct 2026)
+Asked for by Dinesh's boss: how the race comment's picks run. For every
+resulted race (no trials) the popup's race comment (racecards
+`RaceComment`, AU style first) is parsed for tab numbers in brackets —
+"EAKLY (6) … COUNTRY CAPER (4)" — in the order first mentioned; runners
+scratched in our race doc and numbers not in the field are removed; what's
+left is the 1st, 2nd, 3rd… pick. The result string gives positions ("/" =
+dead heat). Per pick: races, wins, win strike rate, places (always top 3),
+place rate; which pick the winner was (or not picked); overall, by
+discipline and by country, over a date range (Yesterday / 7 / 30 days /
+custom, max ~3 months), with Excel (Summary, By discipline, By country,
+Races) and CSV (races) downloads. Same people as the Overview (a tab next to
+"Data quality"). A past date is cached 6 h, today 5 min.
+
 ### Weekly report (`reports.js`, 14 Oct 2026)
 Every Monday 8:00 AM Sri Lanka time, last week's (Mon–Sun) data-quality
 report goes to ClickUp as a task in the tickets list, tagged `report`,

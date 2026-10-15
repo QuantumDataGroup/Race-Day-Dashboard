@@ -98,13 +98,16 @@ const {
   buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
   renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
-  renderOverviewPage, renderTicketsPage, collectIssues, ISSUE_LABELS,
+  renderOverviewPage, renderTicketsPage, renderCommentPicksPage, collectIssues, ISSUE_LABELS,
 } = require('./raceView');
 const { createIssueTracker, priorityFor } = require('./issue-tracker');
 const { createClickUp } = require('./clickup');
 const { createPush } = require('./push');
 const { createReports } = require('./reports');
 const { FileSessionStore } = require('./session-store');
+const {
+  loadDate: loadPicksDate, summarise: summarisePicks, MAX_PICKS: PICKS_MAX, PLACE_POSITIONS: PICKS_PLACE_POSITIONS, DISCIPLINES: PICKS_DISCIPLINES,
+} = require('./picks-report');
 
 // Default config-file location changed 9 Sep 2026, per Dinesh: production's
 // WinSW service actually runs out of `C:\Thilina\Dinesh project\project - 1`
@@ -4093,6 +4096,94 @@ app.post('/api/push/unsubscribe', requirePermission('overview'), requireWork, (r
 app.post('/api/push/test', requirePermission('overview'), requireWork, async (req, res) => {
   const sent = await push.sendTo([req.session.username], { title: 'Race alerts are on', body: 'You will get alerts here even when the dashboard is closed.', url: '/', tag: 'alerts-on' });
   res.json({ ok: true, sent });
+});
+
+// --- Comment picks report (picks-report.js, 15 Oct 2026) -----------------
+// How the race comment's picks ran: win / place strike rate by pick, by
+// discipline and country, over a date range. Results don't change once in,
+// so a past date is cached for 6 hours, today's for 5 minutes.
+const picksCache = new Map();
+async function picksForDate(dateStr) {
+  const hit = picksCache.get(dateStr);
+  const fresh = dateStr < todayStr() ? 6 * 60 * 60 * 1000 : 5 * 60 * 1000;
+  if (hit && Date.now() - hit.at < fresh) return hit.rows;
+  const client = await getClient();
+  const rows = await loadPicksDate(client.db(), dateStr);
+  picksCache.set(dateStr, { at: Date.now(), rows });
+  if (picksCache.size > 120) picksCache.delete(picksCache.keys().next().value);
+  return rows;
+}
+async function picksReport(query) {
+  const today = todayStr();
+  const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+  let to = ok(query.to) ? query.to : shiftDate(today, -1);
+  let from = ok(query.from) ? query.from : shiftDate(to, -6);
+  if (from > to) [from, to] = [to, from];
+  if (to > today) to = today;
+  if (shiftDate(from, 92) < to) from = shiftDate(to, -92); // at most ~3 months
+  const dates = [];
+  for (let d = from; d <= to; d = shiftDate(d, 1)) dates.push(d);
+  const all = [];
+  for (let i = 0; i < dates.length; i += 4) {
+    const chunk = await Promise.all(dates.slice(i, i + 4).map((d) => picksForDate(d)));
+    for (const rows of chunk) all.push(...rows);
+  }
+  const countries = [...new Set(all.map((r) => r.country))].sort();
+  const disciplines = [...new Set(all.map((r) => r.discipline))].sort();
+  const rows = all.filter((r) => (!query.discipline || r.discipline === query.discipline) && (!query.country || r.country === query.country));
+  rows.sort((a, b) => (b.date + String(b.rNo).padStart(2, '0')).localeCompare(a.date + String(a.rNo).padStart(2, '0')));
+  return { from, to, discipline: query.discipline || '', country: query.country || '', countries, disciplines, placePositions: PICKS_PLACE_POSITIONS, ...summarisePicks(rows), rows };
+}
+app.get('/comment-picks', requirePermission('overview'), (req, res) => {
+  logActivity(req, 'view-comment-picks', {}, { key: 'comment-picks', ms: 30 * 60 * 1000 });
+  res.send(renderCommentPicksPage({ username: req.session.username, access: accessOf(req) }));
+});
+app.get('/api/comment-picks', requirePermission('overview'), async (req, res) => {
+  try {
+    const r = await picksReport(req.query);
+    res.json({ ...r, rows: r.rows.slice(0, 400), totalRows: r.rows.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+function picksPickLabel(n) { return n >= PICKS_MAX ? `${PICKS_MAX}th+ pick` : `${n}${['st', 'nd', 'rd'][n - 1] || 'th'} pick`; }
+app.get(['/comment-picks.xlsx', '/comment-picks.csv'], requirePermission('overview'), async (req, res) => {
+  try {
+    const r = await picksReport(req.query);
+    const name = `comment-picks-${r.from}-to-${r.to}${r.discipline ? `-${r.discipline}` : ''}${r.country ? `-${r.country}` : ''}`;
+    const raceRow = (a) => [a.date, a.meeting, `R${a.rNo}`, a.country, PICKS_DISCIPLINES[a.discipline] || a.discipline, a.picks.join(', '), a.removed.join(', '), a.result,
+      a.outcome[0] === 1 ? 'Won' : (a.outcome[0] != null && a.outcome[0] <= r.placePositions ? 'Placed' : 'Unplaced'), a.winnerPick ? picksPickLabel(a.winnerPick) : 'Not picked'];
+    const raceHead = ['Date', 'Meeting', 'Race', 'Country', 'Discipline', 'Picks (scratchings removed)', 'Scratched picks removed', 'Result', '1st pick', 'Winner was'];
+    if (req.path.endsWith('.csv')) {
+      const csv = [raceHead, ...r.rows.map(raceRow)].map((line) => line.map((v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      return res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}.csv"` }).send(`﻿${csv}`);
+    }
+    const wb = new ExcelJS.Workbook();
+    const pickHead = ['Pick', 'Races', 'Wins', 'Win strike rate %', `Places (top ${r.placePositions})`, 'Place rate %'];
+    const pickRows = (s) => s.byPick.map((b) => [picksPickLabel(b.pick), b.races, b.wins, b.winRate, b.places, b.placeRate]);
+    const sheet = (title, head, rows) => {
+      const ws = wb.addWorksheet(title);
+      ws.addRow(head).font = { bold: true };
+      rows.forEach((row) => ws.addRow(row));
+      ws.columns.forEach((c) => { c.width = 18; });
+      return ws;
+    };
+    const s1 = sheet('Summary', pickHead, pickRows(r.overall));
+    s1.addRow([]);
+    s1.addRow(['Winner was', 'Races', 'Share %']).font = { bold: true };
+    r.overall.winnerFrom.picked.forEach((w) => { if (w.races) s1.addRow([picksPickLabel(w.pick), w.races, w.share]); });
+    s1.addRow(['Not picked', r.overall.winnerFrom.none.races, r.overall.winnerFrom.none.share]);
+    s1.addRow([]);
+    s1.addRow([`${r.from} to ${r.to}${r.discipline ? ` · ${PICKS_DISCIPLINES[r.discipline] || r.discipline}` : ''}${r.country ? ` · ${r.country}` : ''} · ${r.overall.races} races`]);
+    const groupRows = (groups) => groups.flatMap((g) => g.byPick.map((b) => [g.label, picksPickLabel(b.pick), b.races, b.wins, b.winRate, b.places, b.placeRate]));
+    sheet('By discipline', ['Discipline', ...pickHead], groupRows(r.byDiscipline));
+    sheet('By country', ['Country', ...pickHead], groupRows(r.byCountry));
+    sheet('Races', raceHead, r.rows.map(raceRow));
+    const buf = await wb.xlsx.writeBuffer();
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${name}.xlsx"` }).send(Buffer.from(buf));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Daily / weekly reports to ClickUp (reports.js) ------------------------
