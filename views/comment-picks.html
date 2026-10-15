@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Comment picks</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#121a27">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RacingHub">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Comment picks</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-table-cells"></i> Race grid</a>
+      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <main class="adm-main ov-main">
+    <nav class="cp-subnav" aria-label="Overview pages">
+      <a href="/overview"><i class="fa-solid fa-gauge-high" aria-hidden="true"></i> Data quality</a>
+      <a href="/comment-picks" class="on" aria-current="page"><i class="fa-solid fa-ranking-star" aria-hidden="true"></i> Comment picks</a>
+    </nav>
+    <div class="adm-page-head">
+      <div>
+        <h1>Comment picks</h1>
+        <p>Picks = tab numbers in the race comment, in the order they're mentioned, scratched runners removed · place = top 3 · resulted races only</p>
+      </div>
+    </div>
+
+    <section class="ov-card ov-pad cp-filters" aria-label="Filters">
+      <div class="ov-days" role="group" aria-label="Date range">
+        <button type="button" class="ov-day" data-range="1">Yesterday</button>
+        <button type="button" class="ov-day on" data-range="7" aria-pressed="true">Last 7 days</button>
+        <button type="button" class="ov-day" data-range="30">Last 30 days</button>
+      </div>
+      <div class="ov-filters">
+        <label>From<input type="date" id="fFrom"></label>
+        <label>To<input type="date" id="fTo"></label>
+        <label>Discipline<select id="fDisc"><option value="">All disciplines</option></select></label>
+        <label>Country<select id="fCountry"><option value="">All countries</option></select></label>
+        <div class="cp-dl">
+          <a class="adm-btn" id="dlXlsx" href="#"><i class="fa-solid fa-file-excel"></i> Excel</a>
+          <a class="adm-btn" id="dlCsv" href="#"><i class="fa-solid fa-file-csv"></i> CSV</a>
+        </div>
+      </div>
+    </section>
+    <p class="adm-error" id="cpError" hidden></p>
+
+    <section class="ov-tiles" aria-label="Headline numbers">
+      <div class="ov-tile"><span class="ov-tile-label">Races analysed</span><b class="ov-tile-num" id="kRaces">-</b><span class="ov-tile-sub" id="kRacesSub">resulted, with picks in the comment</span></div>
+      <div class="ov-tile ov-tile-accent"><span class="ov-tile-label">1st pick win rate</span><b class="ov-tile-num" id="kWin">-</b><span class="ov-tile-sub" id="kWinSub">-</span></div>
+      <div class="ov-tile"><span class="ov-tile-label">1st pick place rate</span><b class="ov-tile-num" id="kPlace">-</b><span class="ov-tile-sub" id="kPlaceSub">top 3</span></div>
+      <div class="ov-tile"><span class="ov-tile-label">Winner not picked</span><b class="ov-tile-num" id="kNone">-</b><span class="ov-tile-sub" id="kNoneSub">-</span></div>
+    </section>
+
+    <div class="ov-two">
+      <section class="ov-card" aria-labelledby="pickHead">
+        <div class="ov-card-head"><div><h2 id="pickHead">Strike rate by pick</h2><p>Win = finished 1st · place = top 3</p></div></div>
+        <div class="ov-table-wrap"><table class="ov-table cp-table">
+          <thead><tr><th scope="col">Pick</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">Wins</th><th scope="col" class="ov-right">Win %</th><th scope="col" class="ov-right">Places</th><th scope="col" class="ov-right">Place %</th></tr></thead>
+          <tbody id="pickRows"><tr><td colspan="6" class="ov-empty">Loading...</td></tr></tbody>
+        </table></div>
+      </section>
+      <section class="ov-card ov-pad" aria-labelledby="winHead">
+        <h2 id="winHead">Winners came from</h2>
+        <p class="ov-sub">Which pick the winner was</p>
+        <div id="winRows" class="ov-bars"></div>
+      </section>
+    </div>
+
+    <div class="ov-two">
+      <section class="ov-card" aria-labelledby="countryHead">
+        <div class="ov-card-head"><div><h2 id="countryHead">By country</h2><p>Click a country to filter</p></div></div>
+        <div class="ov-table-wrap"><table class="ov-table cp-table">
+          <thead><tr><th scope="col">Country</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">1st win %</th><th scope="col" class="ov-right">1st place %</th><th scope="col" class="ov-right">2nd win %</th><th scope="col" class="ov-right">2nd place %</th><th scope="col" class="ov-right">3rd win %</th><th scope="col" class="ov-right">3rd place %</th></tr></thead>
+          <tbody id="countryRows"></tbody>
+        </table></div>
+      </section>
+      <section class="ov-card" aria-labelledby="discHead">
+        <div class="ov-card-head"><div><h2 id="discHead">By discipline</h2><p>Click a discipline to filter</p></div></div>
+        <div class="ov-table-wrap"><table class="ov-table cp-table">
+          <thead><tr><th scope="col">Discipline</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">1st win %</th><th scope="col" class="ov-right">1st place %</th><th scope="col" class="ov-right">2nd win %</th><th scope="col" class="ov-right">3rd win %</th></tr></thead>
+          <tbody id="discRows"></tbody>
+        </table></div>
+      </section>
+    </div>
+
+    <section class="ov-card" aria-labelledby="raceHead">
+      <div class="ov-card-head">
+        <div><h2 id="raceHead">Races <span id="raceCount" class="ov-count"></span></h2><p>Newest first · every race is in the Excel / CSV</p></div>
+        <div class="ov-filters"><label>Search<input type="search" id="fText" placeholder="Meeting"></label></div>
+      </div>
+      <div class="ov-table-wrap"><table class="ov-table cp-table">
+        <thead><tr><th scope="col">Date</th><th scope="col">Race</th><th scope="col">Picks (after scratchings)</th><th scope="col">Result</th><th scope="col">1st pick</th><th scope="col">Winner was</th></tr></thead>
+        <tbody id="raceRows"></tbody>
+      </table></div>
+    </section>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+    (function () { var t = 'dark'; try { t = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ } applyTheme(t); })();
+
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function pct(v) { return v == null ? '-' : v.toFixed(1) + '%'; }
+    function ord(n) { return n + (['st', 'nd', 'rd'][n - 1] || 'th'); }
+    function pickLabel(n, max) { return n >= max ? ord(max) + '+ pick' : ord(n) + ' pick'; }
+    var DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+    var MAX = 6;
+    var data = null;
+
+    function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function setRange(days) {
+      var to = new Date(); to.setDate(to.getDate() - 1);
+      var from = new Date(to); from.setDate(from.getDate() - (days - 1));
+      document.getElementById('fFrom').value = ymd(from);
+      document.getElementById('fTo').value = ymd(to);
+      document.querySelectorAll('.ov-day').forEach(function (b) { var on = Number(b.dataset.range) === days; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+    }
+    function query() {
+      var q = new URLSearchParams({ from: document.getElementById('fFrom').value, to: document.getElementById('fTo').value });
+      if (document.getElementById('fDisc').value) q.set('discipline', document.getElementById('fDisc').value);
+      if (document.getElementById('fCountry').value) q.set('country', document.getElementById('fCountry').value);
+      return q.toString();
+    }
+    function pickOf(s, n) { return (s.byPick || []).filter(function (b) { return b.pick === n; })[0] || {}; }
+
+    function render() {
+      var o = data.overall;
+      var p1 = pickOf(o, 1);
+      document.getElementById('kRaces').textContent = o.races.toLocaleString();
+      document.getElementById('kRacesSub').textContent = data.from + ' to ' + data.to;
+      document.getElementById('kWin').textContent = pct(p1.winRate);
+      document.getElementById('kWinSub').textContent = (p1.wins || 0) + ' winners from ' + (p1.races || 0) + ' races';
+      document.getElementById('kPlace').textContent = pct(p1.placeRate);
+      document.getElementById('kPlaceSub').textContent = (p1.places || 0) + ' placed (top 3)';
+      document.getElementById('kNone').textContent = pct(o.winnerFrom.none.share);
+      document.getElementById('kNoneSub').textContent = o.winnerFrom.none.races + ' races';
+
+      document.getElementById('pickRows').innerHTML = o.byPick.map(function (b) {
+        return '<tr' + (b.pick === 1 ? ' class="cp-first"' : '') + '><td><b>' + pickLabel(b.pick, MAX) + '</b></td><td class="ov-right">' + b.races + '</td><td class="ov-right">' + b.wins + '</td><td class="ov-right cp-num">' + pct(b.winRate) + '</td><td class="ov-right">' + b.places + '</td><td class="ov-right cp-num">' + pct(b.placeRate) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="ov-empty">No resulted races with picks in this range.</td></tr>';
+
+      var wf = o.winnerFrom.picked.filter(function (w) { return w.races; }).map(function (w) { return { label: pickLabel(w.pick, MAX), share: w.share, races: w.races }; });
+      wf.push({ label: 'Not picked', share: o.winnerFrom.none.share, races: o.winnerFrom.none.races, none: true });
+      var max = Math.max.apply(null, wf.map(function (w) { return w.share || 0; }).concat([1]));
+      document.getElementById('winRows').innerHTML = o.races ? wf.map(function (w) {
+        return '<div class="ov-bar-row cp-bar-row" title="' + esc(w.label + ': ' + w.races + ' winners') + '"><span>' + esc(w.label) + '</span><div class="ov-bar ov-bar-amber' + (w.none ? ' cp-none' : '') + '"><i style="width:' + Math.round(((w.share || 0) / max) * 100) + '%"></i></div><span class="ov-num">' + pct(w.share) + '</span><span class="ov-mini">' + w.races + '</span></div>';
+      }).join('') : '<p class="ov-empty">No data.</p>';
+
+      document.getElementById('countryRows').innerHTML = data.byCountry.map(function (g) {
+        var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+        return '<tr class="cp-click" data-country="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td class="ov-right">' + g.races + '</td><td class="ov-right cp-num">' + pct(a.winRate) + '</td><td class="ov-right">' + pct(a.placeRate) + '</td><td class="ov-right">' + pct(b.winRate) + '</td><td class="ov-right">' + pct(b.placeRate) + '</td><td class="ov-right">' + pct(c.winRate) + '</td><td class="ov-right">' + pct(c.placeRate) + '</td></tr>';
+      }).join('') || '<tr><td colspan="8" class="ov-empty">-</td></tr>';
+      document.getElementById('discRows').innerHTML = data.byDiscipline.map(function (g) {
+        var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+        return '<tr class="cp-click" data-disc="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td class="ov-right">' + g.races + '</td><td class="ov-right cp-num">' + pct(a.winRate) + '</td><td class="ov-right">' + pct(a.placeRate) + '</td><td class="ov-right">' + pct(b.winRate) + '</td><td class="ov-right">' + pct(c.winRate) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="ov-empty">-</td></tr>';
+      renderRaces();
+    }
+
+    function renderRaces() {
+      var text = document.getElementById('fText').value.trim().toLowerCase();
+      var rows = data.rows.filter(function (r) { return !text || String(r.meeting).toLowerCase().indexOf(text) !== -1; });
+      document.getElementById('raceCount').textContent = '(' + (text ? rows.length + ' of ' : '') + data.totalRows.toLocaleString() + ')';
+      document.getElementById('raceRows').innerHTML = rows.slice(0, 200).map(function (r) {
+        var first = r.outcome[0];
+        var res = first === 1 ? '<span class="cp-tag cp-won">Won</span>' : (first != null && first <= 3 ? '<span class="cp-tag cp-placed">Placed ' + ord(first) + '</span>' : '<span class="cp-tag">' + (first ? ord(first) : 'Unplaced') + '</span>');
+        var picks = r.picks.map(function (t, i) { return '<span class="cp-pick' + (r.outcome[i] === 1 ? ' cp-pick-win' : (r.outcome[i] != null && r.outcome[i] <= 3 ? ' cp-pick-place' : '')) + '" title="' + esc(r.pickNames[i] || '') + '">' + t + '</span>'; }).join('');
+        return '<tr><td>' + esc(r.date) + '</td><td><b>' + esc(r.meeting) + ' R' + esc(r.rNo) + '</b><div class="ov-mini">' + esc(r.country) + ' · ' + esc(DISC[r.discipline] || r.discipline) + '</div></td>' +
+          '<td>' + picks + (r.removed.length ? ' <span class="ov-mini">(' + r.removed.join(', ') + ' scr)</span>' : '') + '</td><td>' + esc(r.result) + '</td><td>' + res + '</td><td>' + (r.winnerPick ? pickLabel(r.winnerPick, MAX) : '<span class="ov-mini">Not picked</span>') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="ov-empty">No races.</td></tr>';
+    }
+
+    function fillSelect(id, values, label) {
+      var sel = document.getElementById(id); var cur = sel.value;
+      sel.innerHTML = '<option value="">' + sel.options[0].text + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(label ? label(v) : v) + '</option>'; }).join('');
+      sel.value = values.indexOf(cur) !== -1 ? cur : '';
+    }
+
+    var loading = 0;
+    function load() {
+      var my = ++loading;
+      var q = query();
+      document.getElementById('dlXlsx').href = '/comment-picks.xlsx?' + q;
+      document.getElementById('dlCsv').href = '/comment-picks.csv?' + q;
+      document.getElementById('pickRows').innerHTML = '<tr><td colspan="6" class="ov-empty">Loading... (a long range can take a few seconds the first time)</td></tr>';
+      fetch('/api/comment-picks?' + q).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Failed'); return j; }); })
+        .then(function (j) {
+          if (my !== loading) return;
+          data = j;
+          document.getElementById('cpError').hidden = true;
+          fillSelect('fDisc', j.disciplines, function (d) { return DISC[d] || d; });
+          fillSelect('fCountry', j.countries);
+          render();
+        })
+        .catch(function (err) { var e = document.getElementById('cpError'); e.textContent = 'Could not load the report: ' + err.message; e.hidden = false; });
+    }
+
+    document.querySelectorAll('.ov-day').forEach(function (b) { b.addEventListener('click', function () { setRange(Number(b.dataset.range)); load(); }); });
+    ['fFrom', 'fTo'].forEach(function (id) { document.getElementById(id).addEventListener('change', function () { document.querySelectorAll('.ov-day').forEach(function (b) { b.classList.remove('on'); }); load(); }); });
+    ['fDisc', 'fCountry'].forEach(function (id) { document.getElementById(id).addEventListener('change', load); });
+    document.getElementById('fText').addEventListener('input', function () { if (data) renderRaces(); });
+    document.addEventListener('click', function (e) {
+      var row = e.target.closest('.cp-click');
+      if (!row) return;
+      if (row.dataset.country) document.getElementById('fCountry').value = row.dataset.country;
+      if (row.dataset.disc) document.getElementById('fDisc').value = row.dataset.disc;
+      load();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    setRange(7);
+    load();
+  </script>
+</body>
+</html>
