@@ -427,7 +427,7 @@ function buildSchedule(docs, dateStr) {
       // (see attachFormLineStatus), so this stays false for them too rather
       // than flagging a check that was never actually run.
       missingRaceComment: doc.hasRaceComment === false,
-      scratchedInComment: commentScratchCheck(doc),
+      scratchedInComment: commentScratchCheck(doc, dateStr),
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
       isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
@@ -1434,14 +1434,18 @@ function scratchedInComment(comment, runners) {
   return out;
 }
 
-// Only races still more than 12 hours from the jump (15 Oct 2026, per
-// Dinesh): a runner scratched closer to the race is a late scratching the
-// comment couldn't know about, so it isn't an issue.
+// Which races get the check (15 Oct 2026, per Dinesh): every race on a later
+// day than today (tomorrow's meetings), and today's races still more than
+// 12 hours from the jump. A runner scratched closer to the race than that
+// is a late scratching the comment couldn't know about -- not an issue.
+// dateStr: the schedule's date (the grid's docs don't carry rDate).
 const COMMENT_SCRATCH_MIN_HOURS = 12;
-function commentScratchCheck(doc) {
+function commentScratchCheck(doc, dateStr) {
   if (!doc || !doc.raceComment) return [];
+  const laterDay = String(doc.rDate || dateStr || '') > todayStr();
   const start = Date.parse(doc.rScheduleTimeUTC || '');
-  if (!Number.isFinite(start) || start - Date.now() <= COMMENT_SCRATCH_MIN_HOURS * 60 * 60 * 1000) return [];
+  const farAway = Number.isFinite(start) && start - Date.now() > COMMENT_SCRATCH_MIN_HOURS * 60 * 60 * 1000;
+  if (!laterDay && !farAway) return [];
   return scratchedInComment(doc.raceComment, doc.runners);
 }
 
