@@ -108,6 +108,7 @@
             <option value="runnermismatch">Runner Missing / Mismatched</option>
             <option value="missingresults">Results Missing</option>
             <option value="missingracecomment">Missing Race Comment</option>
+            <option value="scratchedincomment">Scratched Runner in Comment</option>
             <option value="scheduleissue">Schedule Issue</option>
             <option value="hasissues">Meetings with Issues</option>
             <option value="healthy">Healthy Meetings</option>
@@ -959,7 +960,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -982,6 +983,7 @@
       'horse-age-issue': { label: 'Horse Age Issue', code: 'ageissue' },
       'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
       'missing-race-comment': { label: 'Missing Race Comment', code: 'missingracecomment' },
+      'scratched-in-comment': { label: 'Scratched runner in comment', code: 'scratchedincomment' },
     };
 
     // Every ignorable issue currently still active on one race cell, read
@@ -1124,6 +1126,28 @@
         if (keys.indexOf(meetingKey(row)) !== -1) toggleMeetingRaces(row.querySelector('.m-toggle'), true);
       });
     });
+
+    // The race comment, with a warning and highlight when it still talks
+    // about a scratched runner (15 Oct 2026, per Dinesh) -- by "(5)" or by
+    // the horse's name in capitals, same rule as raceView.js.
+    function raceCommentHtml(race) {
+      var hits = race.scratchedInComment || [];
+      var html = escapeHtmlClient(race.raceComment);
+      if (hits.length) {
+        var pats = [];
+        hits.forEach(function (s) {
+          if (s.tab != null) pats.push('\\(' + s.tab + '\\)');
+          var n = String(s.name || '').trim().toUpperCase();
+          if (n.length >= 3) pats.push(escapeHtmlClient(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        });
+        if (pats.length) html = html.replace(new RegExp('(' + pats.join('|') + ')', 'g'), '<mark class="scr-mark">$1</mark>');
+      }
+      var warn = hits.length
+        ? '<div class="scr-warn"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Comment mentions scratched runner' + (hits.length === 1 ? '' : 's') + ': ' +
+          hits.map(function (s) { return '<b>' + (s.tab != null ? '#' + escapeHtmlClient(String(s.tab)) + ' ' : '') + escapeHtmlClient(s.name) + '</b>'; }).join(', ') + '</div>'
+        : '';
+      return warn + '<p class="modal-race-comment' + (hits.length ? ' has-scr' : '') + '">' + html + '</p>';
+    }
 
     function handleRaceCellClick(event, id, aEl) {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return true;
@@ -1467,7 +1491,7 @@
           (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
           (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
           (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
-        (race.raceComment ? '<p class="modal-race-comment">' + escapeHtmlClient(race.raceComment) + '</p>' : '') +
+        (race.raceComment ? raceCommentHtml(race) : '') +
         resultLine +
         runnerCheckLine +
         '<div class="tk-raise" id="tkRaise" hidden></div>' +
