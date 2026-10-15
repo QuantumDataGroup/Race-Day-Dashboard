@@ -427,7 +427,7 @@ function buildSchedule(docs, dateStr) {
       // (see attachFormLineStatus), so this stays false for them too rather
       // than flagging a check that was never actually run.
       missingRaceComment: doc.hasRaceComment === false,
-      scratchedInComment: doc.raceComment ? scratchedInComment(doc.raceComment, doc.runners) : [],
+      scratchedInComment: commentScratchCheck(doc, dateStr),
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
       isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
@@ -893,7 +893,7 @@ function buildRaceDetail(doc) {
     raceComment: doc.raceComment || null,
     missingRaceComment: doc.hasRaceComment === false,
     // Scratched runners the comment still mentions (15 Oct 2026): warned and highlighted in the popup.
-    scratchedInComment: doc.raceComment ? scratchedInComment(doc.raceComment, doc.runners) : [],
+    scratchedInComment: commentScratchCheck(doc),
     // Spotlights from `llmContent` (server.js's attachSpotlights), in the
     // race country's style, falling back to any style the race has:
     // [{ horse, name, explanation }].
@@ -1432,6 +1432,21 @@ function scratchedInComment(comment, runners) {
     if (byTab || byName) out.push({ tab, name: r.horseName || '' });
   }
   return out;
+}
+
+// Which races get the check (15 Oct 2026, per Dinesh): every race on a later
+// day than today (tomorrow's meetings), and today's races still more than
+// 12 hours from the jump. A runner scratched closer to the race than that
+// is a late scratching the comment couldn't know about -- not an issue.
+// dateStr: the schedule's date (the grid's docs don't carry rDate).
+const COMMENT_SCRATCH_MIN_HOURS = 12;
+function commentScratchCheck(doc, dateStr) {
+  if (!doc || !doc.raceComment) return [];
+  const laterDay = String(doc.rDate || dateStr || '') > todayStr();
+  const start = Date.parse(doc.rScheduleTimeUTC || '');
+  const farAway = Number.isFinite(start) && start - Date.now() > COMMENT_SCRATCH_MIN_HOURS * 60 * 60 * 1000;
+  if (!laterDay && !farAway) return [];
+  return scratchedInComment(doc.raceComment, doc.runners);
 }
 
 // Friendly names for the issue codes (Overview, tickets).
