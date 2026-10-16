@@ -389,8 +389,25 @@ dead heat). Per pick: races, wins, win strike rate, places (always top 3),
 place rate; which pick the winner was (or not picked); overall, by
 discipline and by country, over a date range (Yesterday / 7 / 30 days /
 custom, max ~3 months), with Excel (Summary, By discipline, By country,
-Races) and CSV (races) downloads. **Share as HTML** (16 Oct 2026; first called "HTML (offline)") downloads one self-contained file for the chosen dates (`/comment-picks-offline.html`, template `views/comment-picks-offline.html`): the races are baked in and the filters, tables and CSV run in the browser, so it can be sent to anyone and works without a login or a connection. Same people as the Overview (a tab next to
+Races) and CSV (races) downloads. Since 16 Oct 2026 the page itself is one
+self-contained file (`views/comment-picks.html`, filled by the
+`/comment-picks` route in `server.js`): CSS, logo, `public/pager.js` and the
+chosen dates' races are baked in, so a plain right-click → Save as gives a
+file anyone can open with no login or connection (the "Share as HTML"
+button is gone; old `/comment-picks-offline.html` links redirect). New
+dates reload the page (`?from&to`, slower the first time for a long range);
+discipline / country / search / CSV run in the browser. In a saved copy
+(`file://`) the date boxes only filter the dates inside it and the links go
+to `PUBLIC_URL`. Same people as the Overview (a tab next to
 "Data quality"). A past date is cached 6 h, today 5 min.
+
+### Page size box (`public/pager.js`, 16 Oct 2026)
+Long lists show 10 / 25 / 50 / 100 rows a page (default 25) with page
+numbers: Comment picks races, Overview all open issues, All tickets, Admin
+activity log, Data Changes, and both Missing Data lists. A page calls
+`RddPager.create(el, render)`, renders `pager.slice(rows)` and calls
+`pager.reset()` when a filter changes. Styles: `.rdd-pager*` in
+`styles.css` (copied inline in the Comment picks page).
 
 ### Weekly report (`reports.js`, 14 Oct 2026)
 Every Monday 8:00 AM Sri Lanka time, last week's (Mon–Sun) data-quality

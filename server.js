@@ -98,7 +98,7 @@ const {
   buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
   renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
-  renderOverviewPage, renderTicketsPage, renderCommentPicksPage, collectIssues, ISSUE_LABELS,
+  renderOverviewPage, renderTicketsPage, collectIssues, ISSUE_LABELS,
 } = require('./raceView');
 const { createIssueTracker, priorityFor } = require('./issue-tracker');
 const { createClickUp } = require('./clickup');
@@ -4138,41 +4138,39 @@ async function picksReport(query) {
   rows.sort((a, b) => (b.date + String(b.rNo).padStart(2, '0')).localeCompare(a.date + String(a.rNo).padStart(2, '0')));
   return { from, to, discipline: query.discipline || '', country: query.country || '', countries, disciplines, placePositions: PICKS_PLACE_POSITIONS, ...summarisePicks(rows), rows };
 }
-app.get('/comment-picks', requirePermission('overview'), (req, res) => {
-  logActivity(req, 'view-comment-picks', {}, { key: 'comment-picks', ms: 30 * 60 * 1000 });
-  res.send(renderCommentPicksPage({ username: req.session.username, access: accessOf(req) }));
-});
-app.get('/api/comment-picks', requirePermission('overview'), async (req, res) => {
-  try {
-    const r = await picksReport(req.query);
-    res.json({ ...r, rows: r.rows.slice(0, 400), totalRows: r.rows.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 function picksPickLabel(n) { return n >= PICKS_MAX ? `${PICKS_MAX}th+ pick` : `${n}${['st', 'nd', 'rd'][n - 1] || 'th'} pick`; }
-// A self-contained HTML copy of the report (16 Oct 2026, per Dinesh: a saved
-// copy of the page didn't work for his boss -- it loads its data from this
-// server after login). The races are baked into the file and the filters,
-// tables and CSV run in the browser, so it works anywhere, offline.
-const PICKS_OFFLINE_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'comment-picks-offline.html'), 'utf8');
-app.get('/comment-picks-offline.html', requirePermission('overview'), async (req, res) => {
+// The Comment picks page is one self-contained file (16 Oct 2026, per Dinesh:
+// no "Share as HTML" button, a plain right-click -> Save as must work for
+// anyone). CSS, logo, pager and the races for the chosen dates are baked in;
+// discipline / country / search / CSV run in the browser, so a saved copy
+// opens anywhere without a login or a connection.
+const PICKS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'comment-picks.html'), 'utf8');
+const PAGER_JS = fs.readFileSync(path.join(__dirname, 'public', 'pager.js'), 'utf8');
+const PICKS_LOGO = `data:image/png;base64,${fs.readFileSync(path.join(__dirname, 'public', 'icons', 'icon-192.png')).toString('base64')}`;
+app.get('/comment-picks', requirePermission('overview'), async (req, res) => {
+  logActivity(req, 'view-comment-picks', {}, { key: 'comment-picks', ms: 30 * 60 * 1000 });
   try {
     const r = await picksReport({ from: req.query.from, to: req.query.to });
     const rows = r.rows.map((a) => [a.date, a.meeting, a.rNo, a.country, a.discipline, a.picks, a.outcome, a.removed, a.result, a.winnerPick]);
-    const days = Math.round((Date.parse(`${r.to}T12:00:00Z`) - Date.parse(`${r.from}T12:00:00Z`)) / 86400000) + 1;
-    const logo = `data:image/png;base64,${fs.readFileSync(path.join(__dirname, 'public', 'icons', 'icon-192.png')).toString('base64')}`;
     const generated = new Date().toLocaleString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     // JSON inside <script>: escape every "<" so nothing can close the tag early.
-    const json = JSON.stringify({ from: r.from, to: r.to, rows }).split('<').join('\\u003c');
-    const html = PICKS_OFFLINE_TEMPLATE
-      .split('{{FROM}}').join(r.from).split('{{TO}}').join(r.to).split('{{DAYS}}').join(String(days))
-      .split('{{GENERATED}}').join(generated).split('{{LOGO}}').join(logo)
+    const json = JSON.stringify({ site: PUBLIC_URL, from: r.from, to: r.to, yesterday: shiftDate(todayStr(), -1), rows }).split('<').join('\\u003c');
+    const html = PICKS_TEMPLATE
+      .split('{{FROM}}').join(r.from).split('{{TO}}').join(r.to)
+      .split('{{GENERATED}}').join(generated).split('{{LOGO}}').join(PICKS_LOGO)
+      .split('{{PAGER_JS}}').join(PAGER_JS)
       .split('{{DATA_JSON}}').join(json);
-    res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `attachment; filename="comment-picks-${r.from}-to-${r.to}.html"` }).send(html);
+    res.set('Cache-Control', 'private, no-store').type('html').send(html);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).type('text').send(`Could not build the Comment picks report: ${err.message}`);
   }
+});
+// Old "Share as HTML" links: the page itself is the shareable file now.
+app.get('/comment-picks-offline.html', requirePermission('overview'), (req, res) => {
+  const q = new URLSearchParams();
+  if (req.query.from) q.set('from', String(req.query.from));
+  if (req.query.to) q.set('to', String(req.query.to));
+  res.redirect(`/comment-picks${q.toString() ? `?${q}` : ''}`);
 });
 app.get(['/comment-picks.xlsx', '/comment-picks.csv'], requirePermission('overview'), async (req, res) => {
   try {

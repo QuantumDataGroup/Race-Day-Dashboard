@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -81,6 +82,7 @@
             <tbody id="rRows"><tr><td colspan="5" class="adm-empty">Loading...</td></tr></tbody>
           </table>
         </div>
+        <div id="rPager"></div>
       </section>
       <p class="adm-foot">Runners are checked every <span id="rEvery">8</span> hours, for today to 2 days ahead (races already run are skipped). Every check reads the RAS API and the Neds website together and shows the differences from both, each tagged RAS, Neds or RAS + Neds (the two sometimes list a race differently -- check it and Ignore the ones that are fine). A runner of ours that Neds doesn't list is not shown; Jockey Missing always comes from Neds. If one source doesn't answer, the other is used alone. "Check now" runs it straight away (at most once every 10 minutes). A difference fixed in our database disappears straight away. Runners = running horses in the source / in ours.</p>
     </div>
@@ -125,6 +127,7 @@
           <tbody id="rows"><tr><td colspan="5" class="adm-empty">Loading...</td></tr></tbody>
         </table>
       </div>
+      <div id="mPager"></div>
     </section>
     </div>
   </main>
@@ -187,6 +190,10 @@
       if (d.classList && d.classList.contains('mm-runners')) openRunners[d.getAttribute('data-key')] = d.open;
     }, true);
 
+    // Both lists: 10 / 25 / 50 / 100 a page (public/pager.js, 16 Oct 2026).
+    var mPager = RddPager.create(document.getElementById('mPager'), function () { render(); });
+    var rPager = RddPager.create(document.getElementById('rPager'), function () { renderRunners(); });
+
     function render() {
       fillSelect('fDate', data.dates, 'Today to 2 days ahead', dayLabel);
       fillSelect('fCountry', uniq(data.meetings.map(function (m) { return m.country; })), 'All');
@@ -201,7 +208,7 @@
       var ignoredCount = inScope.filter(function (m) { return m.status === 'ignored'; }).length;
       document.getElementById('tMissingSub').textContent = 'not on the dashboard' + (ignoredCount ? ' · ' + ignoredCount + ' ignored' : '');
 
-      document.getElementById('rows').innerHTML = shown.length ? shown.map(function (m) {
+      document.getElementById('rows').innerHTML = shown.length ? mPager.slice(shown).map(function (m) {
         var missing = m.status === 'missing';
         // Found: the dashboard's meeting name + OK. Not found: Missing, with
         // an Ignore button for a meeting nobody needs or can't be added.
@@ -346,7 +353,7 @@
       if (btn) setIgnored(btn.getAttribute('data-id'), btn.getAttribute('data-act') === 'ignore', btn);
     });
 
-    ['fDate', 'fCountry', 'fMissing'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+    ['fDate', 'fCountry', 'fMissing'].forEach(function (id) { document.getElementById(id).addEventListener('change', function () { mPager.reset(); render(); }); });
     document.getElementById('refreshBtn').addEventListener('click', function () { load(true); });
 
     // --- Missing / Mismatched Runners pane --------------------------------
@@ -381,7 +388,7 @@
       document.getElementById('rMismatched').textContent = count('mismatched');
       document.getElementById('rCount').textContent = count('count');
       document.getElementById('rJockey').textContent = count('jockey');
-      document.getElementById('rRows').innerHTML = rows.length ? rows.map(function (r) {
+      document.getElementById('rRows').innerHTML = rows.length ? rPager.slice(rows).map(function (r) {
         var c = r.counts;
         var countCell = c ? '<span class="' + (c.source !== c.ours ? 'mm-count-bad' : '') + '">' + c.source + ' / ' + c.ours + '</span>' : '-';
         var issues = r.issues.map(function (i) {
@@ -491,8 +498,9 @@
         .catch(function (err) { btn.disabled = false; showCheckMsg('Could not save: ' + err.message, true); });
     });
 
-    ['rDate', 'rCountry', 'rDisc', 'rKind'].forEach(function (id) { document.getElementById(id).addEventListener('change', renderRunners); });
-    document.getElementById('rText').addEventListener('input', renderRunners);
+    function refilterRunners() { rPager.reset(); renderRunners(); }
+    ['rDate', 'rCountry', 'rDisc', 'rKind'].forEach(function (id) { document.getElementById(id).addEventListener('change', refilterRunners); });
+    document.getElementById('rText').addEventListener('input', refilterRunners);
 
     function showPane(name) {
       ['meetings', 'runners'].forEach(function (p) {

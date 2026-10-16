@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -58,6 +59,7 @@
         <thead><tr><th scope="col">Ticket</th><th scope="col">Raised</th><th scope="col">Waiting</th><th scope="col">Developer</th><th scope="col">Data now</th><th scope="col" class="ov-right">Action</th></tr></thead>
         <tbody id="tkRows"></tbody>
       </table></div>
+      <div id="tkPager"></div>
       <div class="ov-card-foot" id="tkFoot"></div>
     </section>
   </main>
@@ -130,6 +132,9 @@
       return '<span class="ov-mini">-</span>';
     }
 
+    // 10 / 25 / 50 / 100 a page (public/pager.js).
+    var tkPager = RddPager.create(document.getElementById('tkPager'), function () { renderRows(); });
+
     function renderRows() {
       var text = document.getElementById('tkText').value.trim().toLowerCase();
       var by = document.getElementById('tkBy').value;
@@ -137,7 +142,7 @@
         return inTab(t, tab) && (!by || (t.raisedBy || t.creatorEmail) === by) &&
           (!text || (t.name + ' ' + t.id).toLowerCase().indexOf(text) !== -1);
       });
-      document.getElementById('tkRows').innerHTML = list.map(function (t) {
+      document.getElementById('tkRows').innerHTML = tkPager.slice(list).map(function (t) {
         var tone = t.status === 'todo' ? ageTone(t.ageHours) : 'info';
         var reminder = t.status === 'todo'
           ? (t.remindersSent ? 'Reminded ' + t.remindersSent + '× · next at ' + t.nextReminderHours + 'h' : 'First reminder at ' + t.nextReminderHours + 'h')
@@ -198,7 +203,7 @@
 
     document.addEventListener('click', function (e) {
       var t = e.target.closest('[data-tab]');
-      if (t) { tab = t.getAttribute('data-tab'); renderTabs(); renderRows(); return; }
+      if (t) { tab = t.getAttribute('data-tab'); tkPager.reset(); renderTabs(); renderRows(); return; }
       var ig = e.target.closest('[data-ignore]');
       if (ig) {
         ig.disabled = true;
@@ -217,7 +222,7 @@
         .then(function () { load(true); })
         .catch(function (err) { alert('Could not add the developer: ' + err.message); sel.disabled = false; });
     });
-    ['tkText', 'tkBy'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { if (data) renderRows(); }); });
+    ['tkText', 'tkBy'].forEach(function (id) { document.getElementById(id).addEventListener('input', function () { tkPager.reset(); if (data) renderRows(); }); });
     document.getElementById('tkRefresh').addEventListener('click', function () { load(true); });
     setInterval(function () { load(false); }, 2 * 60 * 1000);
 
