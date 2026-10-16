@@ -4151,6 +4151,29 @@ app.get('/api/comment-picks', requirePermission('overview'), async (req, res) =>
   }
 });
 function picksPickLabel(n) { return n >= PICKS_MAX ? `${PICKS_MAX}th+ pick` : `${n}${['st', 'nd', 'rd'][n - 1] || 'th'} pick`; }
+// A self-contained HTML copy of the report (16 Oct 2026, per Dinesh: a saved
+// copy of the page didn't work for his boss -- it loads its data from this
+// server after login). The races are baked into the file and the filters,
+// tables and CSV run in the browser, so it works anywhere, offline.
+const PICKS_OFFLINE_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'comment-picks-offline.html'), 'utf8');
+app.get('/comment-picks-offline.html', requirePermission('overview'), async (req, res) => {
+  try {
+    const r = await picksReport({ from: req.query.from, to: req.query.to });
+    const rows = r.rows.map((a) => [a.date, a.meeting, a.rNo, a.country, a.discipline, a.picks, a.outcome, a.removed, a.result, a.winnerPick]);
+    const days = Math.round((Date.parse(`${r.to}T12:00:00Z`) - Date.parse(`${r.from}T12:00:00Z`)) / 86400000) + 1;
+    const logo = `data:image/png;base64,${fs.readFileSync(path.join(__dirname, 'public', 'icons', 'icon-192.png')).toString('base64')}`;
+    const generated = new Date().toLocaleString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    // JSON inside <script>: escape every "<" so nothing can close the tag early.
+    const json = JSON.stringify({ from: r.from, to: r.to, rows }).split('<').join('\\u003c');
+    const html = PICKS_OFFLINE_TEMPLATE
+      .split('{{FROM}}').join(r.from).split('{{TO}}').join(r.to).split('{{DAYS}}').join(String(days))
+      .split('{{GENERATED}}').join(generated).split('{{LOGO}}').join(logo)
+      .split('{{DATA_JSON}}').join(json);
+    res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `attachment; filename="comment-picks-${r.from}-to-${r.to}.html"` }).send(html);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get(['/comment-picks.xlsx', '/comment-picks.csv'], requirePermission('overview'), async (req, res) => {
   try {
     const r = await picksReport(req.query);

@@ -60,6 +60,7 @@
         <div class="cp-dl">
           <a class="adm-btn" id="dlXlsx" href="#"><i class="fa-solid fa-file-excel"></i> Excel</a>
           <a class="adm-btn" id="dlCsv" href="#"><i class="fa-solid fa-file-csv"></i> CSV</a>
+          <a class="adm-btn" id="dlHtml" href="#" title="One file with this date range's data in it: works offline, for anyone, no login"><i class="fa-solid fa-file-code"></i> HTML (offline)</a>
         </div>
       </div>
     </section>
@@ -212,6 +213,7 @@
       var q = query();
       document.getElementById('dlXlsx').href = '/comment-picks.xlsx?' + q;
       document.getElementById('dlCsv').href = '/comment-picks.csv?' + q;
+      document.getElementById('dlHtml').href = '/comment-picks-offline.html?' + new URLSearchParams({ from: document.getElementById('fFrom').value, to: document.getElementById('fTo').value });
       document.getElementById('pickRows').innerHTML = '<tr><td colspan="6" class="ov-empty">Loading... (a long range can take a few seconds the first time)</td></tr>';
       fetch('/api/comment-picks?' + q).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Failed'); return j; }); })
         .then(function (j) {

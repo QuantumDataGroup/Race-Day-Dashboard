@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RacingHub – Comment picks ({{FROM}} to {{TO}})</title>
+<style>
+  :root { --bg: #0d1420; --card: #151e2d; --sub: #1b2537; --line: #263247; --fg: #e6eaf0; --muted: #9aa6b8; --accent: #f5a524; --accent-fg: #121a27; --ok: #34d399; --ok-bg: rgba(52,211,153,.13); --warn: #fb7185; }
+  :root[data-theme="light"] { --bg: #f3f5f8; --card: #ffffff; --sub: #eef1f5; --line: #dde3ea; --fg: #1b2330; --muted: #667085; --accent: #d97f06; --accent-fg: #ffffff; --ok: #1f8a4c; --ok-bg: rgba(31,138,76,.12); --warn: #c0392b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: "Segoe UI", Roboto, Arial, sans-serif; font-size: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 18px 28px; background: #121a27; color: #fff; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img { width: 46px; height: 46px; border-radius: 10px; }
+  .brand b { font-size: 22px; letter-spacing: .5px; } .brand b span { color: #f5a524; }
+  .brand small { display: block; color: #aab4c3; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .snap { color: #aab4c3; font-size: 12px; text-align: right; }
+  .snap button { margin-top: 6px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .lead { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .pad { padding: 16px 18px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  input, select, button { font: inherit; font-size: 13px; color: var(--fg); background: var(--sub); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+  button { cursor: pointer; font-weight: 700; }
+  button.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .pills { display: flex; gap: 6px; } .pills button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { padding: 14px 18px; } .tile.acc { border-color: var(--accent); }
+  .tile span { display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .tile b { display: block; font-size: 34px; font-weight: 800; margin: 4px 0; } .tile small { color: var(--muted); font-size: 13px; }
+  .two { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; } .two > .card { flex: 1 1 420px; min-width: 0; }
+  .head { padding: 14px 18px; border-bottom: 1px solid var(--line); } .head h2 { margin: 0; font-size: 16px; } .head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 520px; }
+  th { text-align: right; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--sub); padding: 9px 12px; }
+  td { text-align: right; padding: 9px 12px; border-top: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; padding-left: 18px; }
+  td.num { font-weight: 800; } tr.first td { background: rgba(245,165,36,.09); } tr.first td.num { color: var(--accent); }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--sub); }
+  .left { text-align: left !important; }
+  .bars { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+  .bar-row { display: grid; grid-template-columns: 96px minmax(0,1fr) 56px 44px; gap: 10px; align-items: center; }
+  .bar { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--accent); }
+  .bar.none i { background: var(--muted); }
+  .mini { color: var(--muted); font-size: 12px; }
+  .pick { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 5px; margin: 0 4px 2px 0; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 700; }
+  .pick.win { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); } .pick.place { border-color: var(--ok); color: var(--ok); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--sub); color: var(--muted); }
+  .tag.won { background: var(--accent); color: var(--accent-fg); } .tag.placed { background: var(--ok-bg); color: var(--ok); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; }
+  @media print { header button, .filters, #dlCsv { display: none !important; } body { background: #fff; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><img src="{{LOGO}}" alt=""><div><b>RACING<span>HUB</span></b><small>Comment picks report</small></div></div>
+  <div class="snap">Snapshot of race dates {{FROM}} to {{TO}}<br>made {{GENERATED}} (Sri Lanka time)<br><button type="button" id="theme">Light / dark</button></div>
+</header>
+<main>
+  <h1>Comment picks</h1>
+  <p class="lead">Picks = tab numbers in the race comment, in the order they're mentioned, scratched runners removed · win = finished 1st · place = top 3 · resulted races only</p>
+
+  <section class="card pad filters" aria-label="Filters">
+    <div class="pills" role="group" aria-label="Range">
+      <button type="button" data-days="1">Last day</button>
+      <button type="button" data-days="7">Last 7 days</button>
+      <button type="button" data-days="0" class="on">All {{DAYS}} days</button>
+    </div>
+    <label>From<input type="date" id="fFrom" min="{{FROM}}" max="{{TO}}" value="{{FROM}}"></label>
+    <label>To<input type="date" id="fTo" min="{{FROM}}" max="{{TO}}" value="{{TO}}"></label>
+    <label>Discipline<select id="fDisc"><option value="">All disciplines</option></select></label>
+    <label>Country<select id="fCountry"><option value="">All countries</option></select></label>
+    <button type="button" class="pri" id="dlCsv">⬇ CSV of these races</button>
+  </section>
+
+  <section class="tiles">
+    <div class="card tile"><span>Races analysed</span><b id="kRaces">-</b><small id="kRacesSub">-</small></div>
+    <div class="card tile acc"><span>1st pick win rate</span><b id="kWin">-</b><small id="kWinSub">-</small></div>
+    <div class="card tile"><span>1st pick place rate</span><b id="kPlace">-</b><small id="kPlaceSub">top 3</small></div>
+    <div class="card tile"><span>Winner not picked</span><b id="kNone">-</b><small id="kNoneSub">-</small></div>
+  </section>
+
+  <div class="two">
+    <section class="card"><div class="head"><h2>Strike rate by pick</h2><p>Win = finished 1st · place = top 3</p></div>
+      <div class="wrap"><table><thead><tr><th>Pick</th><th>Races</th><th>Wins</th><th>Win %</th><th>Places</th><th>Place %</th></tr></thead><tbody id="pickRows"></tbody></table></div></section>
+    <section class="card"><div class="head"><h2>Winners came from</h2><p>Which pick the winner was</p></div><div class="bars" id="winRows"></div></section>
+  </div>
+  <div class="two">
+    <section class="card"><div class="head"><h2>By country</h2><p>Click a country to filter</p></div>
+      <div class="wrap"><table><thead><tr><th>Country</th><th>Races</th><th>1st win %</th><th>1st place %</th><th>2nd win %</th><th>2nd place %</th><th>3rd win %</th><th>3rd place %</th></tr></thead><tbody id="countryRows"></tbody></table></div></section>
+    <section class="card"><div class="head"><h2>By discipline</h2><p>Click a discipline to filter</p></div>
+      <div class="wrap"><table><thead><tr><th>Discipline</th><th>Races</th><th>1st win %</th><th>1st place %</th><th>2nd win %</th><th>3rd win %</th></tr></thead><tbody id="discRows"></tbody></table></div></section>
+  </div>
+  <section class="card"><div class="head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h2>Races <span class="mini" id="raceCount"></span></h2><p>Newest first · the first 300 shown, all are in the CSV</p></div><label class="mini">Search <input type="search" id="fText" placeholder="Meeting"></label></div>
+    <div class="wrap"><table><thead><tr><th>Date</th><th class="left">Race</th><th class="left">Picks (after scratchings)</th><th class="left">Result</th><th class="left">1st pick</th><th class="left">Winner was</th></tr></thead><tbody id="raceRows"></tbody></table></div></section>
+</main>
+<footer>RacingHub · Race Day Dashboard · racedaydashboard.troyendata.com</footer>
+
+<script id="data" type="application/json">{{DATA_JSON}}</script>
+<script>
+  var DATA = JSON.parse(document.getElementById('data').textContent);
+  var ROWS = DATA.rows; // [date, meeting, rNo, country, discipline, picks[], outcome[], removed[], result, winnerPick]
+  var MAX = 6, PLACE = 3, DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pct(v) { return v == null ? '-' : v.toFixed(1) + '%'; }
+  function rate(n, d) { return d ? Math.round((n / d) * 1000) / 10 : null; }
+  function ord(n) { return n + (['st', 'nd', 'rd'][n - 1] || 'th'); }
+  function pickLabel(n) { return n >= MAX ? ord(MAX) + '+ pick' : ord(n) + ' pick'; }
+
+  function summary(rows) {
+    var by = []; for (var i = 0; i < MAX; i++) by.push({ pick: i + 1, races: 0, wins: 0, places: 0 });
+    var from = []; for (i = 0; i < MAX; i++) from.push(0); var none = 0;
+    rows.forEach(function (r) {
+      var picks = r[5], out = r[6];
+      for (var k = 0; k < Math.min(picks.length, MAX); k++) {
+        var p = out[k];
+        if (k === MAX - 1) { var tail = out.slice(k).filter(function (x) { return x != null; }); p = tail.length ? Math.min.apply(null, tail) : null; }
+        by[k].races++; if (p === 1) by[k].wins++; if (p != null && p <= PLACE) by[k].places++;
+      }
+      if (r[9] == null) none++; else from[Math.min(r[9], MAX) - 1]++;
+    });
+    by = by.filter(function (b) { return b.races; }).map(function (b) { b.winRate = rate(b.wins, b.races); b.placeRate = rate(b.places, b.races); return b; });
+    return { races: rows.length, byPick: by, from: from, none: none };
+  }
+  function pickOf(s, n) { return s.byPick.filter(function (b) { return b.pick === n; })[0] || {}; }
+  function groups(rows, idx, label) {
+    var m = {}; rows.forEach(function (r) { (m[r[idx]] = m[r[idx]] || []).push(r); });
+    return Object.keys(m).map(function (k) { var s = summary(m[k]); s.key = k; s.label = label ? label(k) : k; return s; }).sort(function (a, b) { return b.races - a.races; });
+  }
+
+  function filtered(withPlaceFilters) {
+    var from = $('fFrom').value || DATA.from, to = $('fTo').value || DATA.to, d = $('fDisc').value, c = $('fCountry').value;
+    return ROWS.filter(function (r) { return r[0] >= from && r[0] <= to && (!withPlaceFilters || ((!d || r[4] === d) && (!c || r[3] === c))); });
+  }
+
+  function render() {
+    var rows = filtered(true), s = summary(rows), p1 = pickOf(s, 1);
+    $('kRaces').textContent = s.races.toLocaleString();
+    $('kRacesSub').textContent = ($('fFrom').value || DATA.from) + ' to ' + ($('fTo').value || DATA.to);
+    $('kWin').textContent = pct(p1.winRate); $('kWinSub').textContent = (p1.wins || 0) + ' winners from ' + (p1.races || 0) + ' races';
+    $('kPlace').textContent = pct(p1.placeRate); $('kPlaceSub').textContent = (p1.places || 0) + ' placed (top 3)';
+    $('kNone').textContent = pct(rate(s.none, s.races)); $('kNoneSub').textContent = s.none + ' races';
+    $('pickRows').innerHTML = s.byPick.map(function (b) {
+      return '<tr' + (b.pick === 1 ? ' class="first"' : '') + '><td><b>' + pickLabel(b.pick) + '</b></td><td>' + b.races + '</td><td>' + b.wins + '</td><td class="num">' + pct(b.winRate) + '</td><td>' + b.places + '</td><td class="num">' + pct(b.placeRate) + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="left mini">No races.</td></tr>';
+    var wf = s.from.map(function (n, i) { return { label: pickLabel(i + 1), n: n }; }).filter(function (w) { return w.n; });
+    wf.push({ label: 'Not picked', n: s.none, none: true });
+    var max = Math.max.apply(null, wf.map(function (w) { return rate(w.n, s.races) || 0; }).concat([1]));
+    $('winRows').innerHTML = s.races ? wf.map(function (w) {
+      var r = rate(w.n, s.races) || 0;
+      return '<div class="bar-row"><span>' + w.label + '</span><div class="bar' + (w.none ? ' none' : '') + '"><i style="width:' + Math.round(r / max * 100) + '%"></i></div><b>' + pct(r) + '</b><span class="mini">' + w.n + '</span></div>';
+    }).join('') : '<p class="mini">No races.</p>';
+    $('countryRows').innerHTML = groups(rows, 3).map(function (g) {
+      var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+      return '<tr class="click" data-country="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td>' + g.races + '</td><td class="num">' + pct(a.winRate) + '</td><td>' + pct(a.placeRate) + '</td><td>' + pct(b.winRate) + '</td><td>' + pct(b.placeRate) + '</td><td>' + pct(c.winRate) + '</td><td>' + pct(c.placeRate) + '</td></tr>';
+    }).join('');
+    $('discRows').innerHTML = groups(rows, 4, function (k) { return DISC[k] || k; }).map(function (g) {
+      var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+      return '<tr class="click" data-disc="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td>' + g.races + '</td><td class="num">' + pct(a.winRate) + '</td><td>' + pct(a.placeRate) + '</td><td>' + pct(b.winRate) + '</td><td>' + pct(c.winRate) + '</td></tr>';
+    }).join('');
+    renderRaces(rows);
+  }
+  function renderRaces(rows) {
+    rows = rows || filtered(true);
+    var text = $('fText').value.trim().toLowerCase();
+    var list = rows.filter(function (r) { return !text || String(r[1]).toLowerCase().indexOf(text) !== -1; });
+    $('raceCount').textContent = '(' + list.length.toLocaleString() + ')';
+    $('raceRows').innerHTML = list.slice(0, 300).map(function (r) {
+      var first = r[6][0];
+      var res = first === 1 ? '<span class="tag won">Won</span>' : (first != null && first <= PLACE ? '<span class="tag placed">Placed ' + ord(first) + '</span>' : '<span class="tag">' + (first ? ord(first) : 'Unplaced') + '</span>');
+      var picks = r[5].map(function (t, i) { var p = r[6][i]; return '<span class="pick' + (p === 1 ? ' win' : (p != null && p <= PLACE ? ' place' : '')) + '">' + t + '</span>'; }).join('');
+      return '<tr><td>' + esc(r[0]) + '</td><td class="left"><b>' + esc(r[1]) + ' R' + esc(r[2]) + '</b><div class="mini">' + esc(r[3]) + ' · ' + esc(DISC[r[4]] || r[4]) + '</div></td><td class="left">' + picks + (r[7].length ? ' <span class="mini">(' + r[7].join(', ') + ' scr)</span>' : '') + '</td><td class="left">' + esc(r[8]) + '</td><td class="left">' + res + '</td><td class="left">' + (r[9] ? pickLabel(r[9]) : '<span class="mini">Not picked</span>') + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="left mini">No races.</td></tr>';
+  }
+  function fillSelects() {
+    var all = filtered(false);
+    var keep = function (id, values, label) {
+      var sel = $(id), cur = sel.value;
+      sel.innerHTML = '<option value="">' + sel.options[0].text + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(label ? label(v) : v) + '</option>'; }).join('');
+      sel.value = values.indexOf(cur) !== -1 ? cur : '';
+    };
+    keep('fDisc', Array.from(new Set(all.map(function (r) { return r[4]; }))).sort(), function (d) { return DISC[d] || d; });
+    keep('fCountry', Array.from(new Set(all.map(function (r) { return r[3]; }))).sort());
+  }
+  function update() { fillSelects(); render(); }
+
+  document.querySelectorAll('.pills button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var days = Number(b.dataset.days);
+      $('fTo').value = DATA.to;
+      if (!days) $('fFrom').value = DATA.from;
+      else { var d = new Date(DATA.to + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - (days - 1)); var f = d.toISOString().slice(0, 10); $('fFrom').value = f < DATA.from ? DATA.from : f; }
+      document.querySelectorAll('.pills button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      update();
+    });
+  });
+  ['fFrom', 'fTo'].forEach(function (id) { $(id).addEventListener('change', function () { document.querySelectorAll('.pills button').forEach(function (x) { x.classList.remove('on'); }); update(); }); });
+  ['fDisc', 'fCountry'].forEach(function (id) { $(id).addEventListener('change', render); });
+  $('fText').addEventListener('input', function () { renderRaces(); });
+  document.addEventListener('click', function (e) {
+    var tr = e.target.closest && e.target.closest('tr.click'); if (!tr) return;
+    if (tr.dataset.country) $('fCountry').value = tr.dataset.country;
+    if (tr.dataset.disc) $('fDisc').value = tr.dataset.disc;
+    render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $('dlCsv').addEventListener('click', function () {
+    var head = ['Date', 'Meeting', 'Race', 'Country', 'Discipline', 'Picks (scratchings removed)', 'Scratched picks removed', 'Result', '1st pick', 'Winner was'];
+    var lines = [head].concat(filtered(true).map(function (r) {
+      var f = r[6][0];
+      return [r[0], r[1], 'R' + r[2], r[3], DISC[r[4]] || r[4], r[5].join(', '), r[7].join(', '), r[8], f === 1 ? 'Won' : (f != null && f <= PLACE ? 'Placed' : 'Unplaced'), r[9] ? pickLabel(r[9]) : 'Not picked'];
+    }));
+    var csv = '﻿' + lines.map(function (l) { return l.map(function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'comment-picks-' + ($('fFrom').value || DATA.from) + '-to-' + ($('fTo').value || DATA.to) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  $('theme').addEventListener('click', function () {
+    var r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+  });
+  update();
+</script>
+</body>
+</html>
