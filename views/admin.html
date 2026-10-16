@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <script src="/password-toggle.js?v={{STYLES_VERSION}}" defer></script>
 </head>
@@ -130,7 +131,7 @@
         </table>
       </div>
       <div class="adm-empty" id="logEmpty" hidden>No activity for these filters.</div>
-      <div class="adm-more" id="logMore" hidden><button type="button" class="adm-btn" id="showMoreBtn">Show more</button></div>
+      <div id="logPager"></div>
     </section>
     </div>
   </main>
@@ -180,9 +181,10 @@
       'admin-bootstrap': ['First admin set up', 'admin', 'admin'],
       'system-warning': ['System warning', 'failed', 'admin'],
     };
-    var PAGE_SIZE = 300;
+    // Activity log: 10 / 25 / 50 / 100 a page (public/pager.js, 16 Oct 2026; was 300 + "Show more").
+    var logPager = RddPager.create(document.getElementById('logPager'), function () { render(); });
     var data = { me: '', users: [], entries: [] };
-    var state = { range: 'today', user: '', action: '', text: '', inline: null, notice: null, limit: PAGE_SIZE };
+    var state = { range: 'today', user: '', action: '', text: '', inline: null, notice: null };
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function t(e) { return Date.parse(e.time); }
@@ -317,7 +319,7 @@
         return (!state.user || sameUser(e.user, state.user)) && (!state.action || info[2] === state.action) &&
           (!text || (detailText(e) + ' ' + info[0] + ' ' + (e.user || '')).toLowerCase().indexOf(text) !== -1);
       });
-      document.getElementById('logBody').innerHTML = shown.slice(0, state.limit).map(function (e) {
+      document.getElementById('logBody').innerHTML = logPager.slice(shown).map(function (e) {
         var info = actionInfo(e);
         return '<tr' + (info[1] === 'failed' ? ' class="adm-failed-row"' : '') + '>' +
           '<td class="adm-time">' + fmtTime(t(e), state.range !== 'today') + '</td>' +
@@ -327,7 +329,6 @@
           '<td class="adm-ip">' + esc(e.ip || '') + '</td></tr>';
       }).join('');
       document.getElementById('logEmpty').hidden = shown.length > 0;
-      document.getElementById('logMore').hidden = shown.length <= state.limit;
     }
 
     function syncUserFilter() {
@@ -376,16 +377,15 @@
     document.querySelectorAll('.adm-chip[data-range]').forEach(function (b) {
       b.addEventListener('click', function () {
         state.range = b.dataset.range;
-        state.limit = PAGE_SIZE;
+        logPager.reset();
         document.querySelectorAll('.adm-chip[data-range]').forEach(function (x) { x.classList.toggle('on', x === b); });
         render();
       });
     });
-    document.getElementById('fUser').addEventListener('change', function (e) { state.user = e.target.value; state.limit = PAGE_SIZE; render(); });
-    document.getElementById('fAction').addEventListener('change', function (e) { state.action = e.target.value; state.limit = PAGE_SIZE; render(); });
-    document.getElementById('fText').addEventListener('input', function (e) { state.text = e.target.value; state.limit = PAGE_SIZE; render(); });
+    document.getElementById('fUser').addEventListener('change', function (e) { state.user = e.target.value; logPager.reset(); render(); });
+    document.getElementById('fAction').addEventListener('change', function (e) { state.action = e.target.value; logPager.reset(); render(); });
+    document.getElementById('fText').addEventListener('input', function (e) { state.text = e.target.value; logPager.reset(); render(); });
     document.getElementById('refreshBtn').addEventListener('click', function () { state.notice = null; load(); });
-    document.getElementById('showMoreBtn').addEventListener('click', function () { state.limit += PAGE_SIZE; render(); });
 
     var usersBody = document.getElementById('usersBody');
     usersBody.addEventListener('click', function (e) {

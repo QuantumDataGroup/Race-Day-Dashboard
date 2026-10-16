@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -67,6 +68,7 @@
     </div>
 
     <div id="batches" class="chg-batches"></div>
+    <div id="chgPager" class="adm-card chg-pager"></div>
     <p class="adm-foot">"Fixed" = it was blank before and has a value now (e.g. a missing jockey filled in). "Now missing" = it had a value and is blank now. Odds changes are not recorded.</p>
   </main>
 
@@ -101,6 +103,9 @@
     }
     function uniq(list) { return Array.from(new Set(list)).sort(); }
 
+    // 10 / 25 / 50 / 100 changes a page (public/pager.js); each page is grouped into its check times.
+    var chgPager = RddPager.create(document.getElementById('chgPager'), function () { render(); });
+
     function render() {
       var e = data.entries;
       fillSelect('fCountry', uniq(e.map(function (c) { return c.country; })), 'All');
@@ -128,7 +133,7 @@
       document.getElementById('tAdded').textContent = n('added');
 
       var groups = [];
-      rows.forEach(function (c) {
+      chgPager.slice(rows).forEach(function (c) {
         var g = groups[groups.length - 1];
         if (!g || g.time !== c.time) { g = { time: c.time, items: [] }; groups.push(g); }
         g.items.push(c);
@@ -174,9 +179,10 @@
       });
     }
 
-    ['fCountry', 'fMeeting', 'fField', 'fFixed'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
-    document.getElementById('fText').addEventListener('input', render);
-    document.getElementById('fDate').addEventListener('change', function (e) { load(e.target.value); });
+    function refilter() { chgPager.reset(); render(); }
+    ['fCountry', 'fMeeting', 'fField', 'fFixed'].forEach(function (id) { document.getElementById(id).addEventListener('change', refilter); });
+    document.getElementById('fText').addEventListener('input', refilter);
+    document.getElementById('fDate').addEventListener('change', function (e) { chgPager.reset(); load(e.target.value); });
     document.getElementById('refreshBtn').addEventListener('click', function () { load(document.getElementById('fDate').value); });
 
     (function init() {

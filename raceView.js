@@ -1286,7 +1286,6 @@ const CHANGES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'changes.
 const SYSTEM_HEALTH_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'system-health.html'), 'utf8');
 const MISSING_MEETINGS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'missing-meetings.html'), 'utf8');
 const OVERVIEW_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'overview.html'), 'utf8');
-const COMMENT_PICKS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'comment-picks.html'), 'utf8');
 const TICKETS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'tickets.html'), 'utf8');
 
 // styles.css is served with a long cache lifetime in production, so the
@@ -1356,10 +1355,6 @@ function renderSystemHealthPage(options = {}) {
 
 function renderMissingMeetingsPage(options = {}) {
   return renderTemplate(MISSING_MEETINGS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('missing', options.access) });
-}
-
-function renderCommentPicksPage(options = {}) {
-  return renderTemplate(COMMENT_PICKS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access) });
 }
 
 function renderOverviewPage(options = {}) {
@@ -1972,6 +1967,6 @@ module.exports = {
   buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
   buildMeetingsListReport, meetingsListReportToCsv,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
-  renderOverviewPage, renderCommentPicksPage, renderTicketsPage, raceIssueList, collectIssues, ISSUE_LABELS,
+  renderOverviewPage, renderTicketsPage, raceIssueList, collectIssues, ISSUE_LABELS,
   MISSING_JOCKEY_BORDER_THRESHOLD, MISSING_FORM_BORDER_THRESHOLD, MAX_EXPECTED_HORSE_AGE, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };
