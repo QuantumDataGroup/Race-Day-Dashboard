@@ -389,7 +389,7 @@ dead heat). Per pick: races, wins, win strike rate, places (always top 3),
 place rate; which pick the winner was (or not picked); overall, by
 discipline and by country, over a date range (Yesterday / 7 / 30 days /
 custom, max ~3 months), with Excel (Summary, By discipline, By country,
-Races) and CSV (races) downloads. **HTML (offline)** (16 Oct 2026) downloads one self-contained file for the chosen dates (`/comment-picks-offline.html`, template `views/comment-picks-offline.html`): the races are baked in and the filters, tables and CSV run in the browser, so it can be sent to anyone and works without a login or a connection. Same people as the Overview (a tab next to
+Races) and CSV (races) downloads. **Share as HTML** (16 Oct 2026; first called "HTML (offline)") downloads one self-contained file for the chosen dates (`/comment-picks-offline.html`, template `views/comment-picks-offline.html`): the races are baked in and the filters, tables and CSV run in the browser, so it can be sent to anyone and works without a login or a connection. Same people as the Overview (a tab next to
 "Data quality"). A past date is cached 6 h, today 5 min.
 
 ### Weekly report (`reports.js`, 14 Oct 2026)
