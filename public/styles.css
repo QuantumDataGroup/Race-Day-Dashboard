@@ -1272,6 +1272,21 @@ html.is-app .install-app-btn { display: none; }
   .m-race.abandoned-race a.race-cell-link { opacity: .6; }
   .m-races-empty { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--muted); }
 }
+/* Page-size box + page numbers under a list (public/pager.js, 16 Oct 2026). */
+.rdd-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.rdd-pager[hidden] { display: none; }
+.rdd-pager-size { display: inline-flex; align-items: center; gap: 6px; }
+.rdd-pager-size select { font: inherit; font-size: 13px; color: var(--fg); background: var(--sub-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm); padding: 4px 8px; }
+.rdd-pager-count { font-variant-numeric: tabular-nums; }
+.rdd-pager-nav { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.rdd-pager-btn { min-width: 32px; height: 32px; padding: 0 8px; font: inherit; font-size: 13px; font-weight: 700; color: var(--fg); background: var(--sub-bg); border: 1px solid var(--input-border); border-radius: var(--radius-sm); cursor: pointer; }
+.rdd-pager-btn:hover:not(:disabled) { border-color: var(--accent); }
+.rdd-pager-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.rdd-pager-btn:disabled { opacity: .4; cursor: default; }
+.rdd-pager-gap { padding: 0 4px; }
+.chg-pager.rdd-pager { margin-top: 14px; border-top: 0; }
+.chg-pager[hidden] { display: none; }
+
 /* Comment picks report (/comment-picks, 15 Oct 2026). */
 .cp-subnav { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
 .cp-subnav a { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 14px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -1px; }

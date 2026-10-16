@@ -3,244 +3,314 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Race Day Dashboard - Comment picks</title>
-<link rel="icon" type="image/png" href="/logo.png">
-<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#121a27">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="RacingHub">
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<script src="/app.js?v={{STYLES_VERSION}}" defer></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<title>RacingHub – Comment picks ({{FROM}} to {{TO}})</title>
+<link rel="icon" type="image/png" href="{{LOGO}}">
+<!--
+  Comment picks (16 Oct 2026, per Dinesh: no "Share as HTML" button, a plain
+  right-click -> Save as must give a file that works for anyone). So this page
+  is ONE file: CSS, logo, pager and the races are all inside it, nothing is
+  loaded from the server afterwards. Opened from the dashboard the date boxes
+  reload the page for new dates; a saved copy keeps its own dates and the
+  filters, tables and CSV still work offline.
+-->
+<style>
+  :root { --bg: #0d1420; --card: #151e2d; --sub: #1b2537; --line: #263247; --fg: #e6eaf0; --muted: #9aa6b8; --accent: #f5a524; --accent-fg: #121a27; --ok: #34d399; --ok-bg: rgba(52,211,153,.13); --warn: #fb7185; }
+  :root[data-theme="light"] { --bg: #f3f5f8; --card: #ffffff; --sub: #eef1f5; --line: #dde3ea; --fg: #1b2330; --muted: #667085; --accent: #d97f06; --accent-fg: #ffffff; --ok: #1f8a4c; --ok-bg: rgba(31,138,76,.12); --warn: #c0392b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: "Segoe UI", Roboto, Arial, sans-serif; font-size: 14px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 28px; background: #121a27; color: #fff; }
+  .brand { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
+  .brand img { width: 46px; height: 46px; border-radius: 10px; }
+  .brand b { font-size: 22px; letter-spacing: .5px; } .brand b span { color: #f5a524; }
+  .brand small { display: block; color: #aab4c3; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .top-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .top-nav a, .top-nav button { color: #e6eaf0; background: #1b2537; border: 1px solid #263247; border-radius: 7px; padding: 7px 12px; font-size: 13px; font-weight: 700; text-decoration: none; }
+  .top-nav a:hover, .top-nav button:hover { border-color: #f5a524; }
+  main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 40px; }
+  .subnav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+  .subnav a { padding: 7px 14px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); font-weight: 700; font-size: 13px; text-decoration: none; }
+  .subnav a.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  h1 { font-size: 22px; margin: 0 0 4px; } .lead { color: var(--muted); margin: 0 0 6px; font-size: 13px; }
+  .note { font-size: 12px; color: var(--muted); margin: 0 0 16px; } .note b { color: var(--fg); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .pad { padding: 16px 18px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  input, select, button { font: inherit; font-size: 13px; color: var(--fg); background: var(--sub); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+  button { cursor: pointer; font-weight: 700; }
+  button.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .pills { display: flex; gap: 6px; flex-wrap: wrap; } .pills[hidden] { display: none; }
+  .pills button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .dl { display: flex; gap: 8px; margin-left: auto; }
+  .dl a { display: inline-flex; align-items: center; font-size: 13px; font-weight: 700; color: var(--fg); background: var(--sub); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; text-decoration: none; }
+  .dl a:hover { border-color: var(--accent); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { padding: 14px 18px; } .tile.acc { border-color: var(--accent); }
+  .tile span { display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .tile b { display: block; font-size: 34px; font-weight: 800; margin: 4px 0; } .tile small { color: var(--muted); font-size: 13px; }
+  .two { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; } .two > .card { flex: 1 1 420px; min-width: 0; }
+  .head { padding: 14px 18px; border-bottom: 1px solid var(--line); } .head h2 { margin: 0; font-size: 16px; } .head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 520px; }
+  th { text-align: right; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--sub); padding: 9px 12px; }
+  td { text-align: right; padding: 9px 12px; border-top: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; padding-left: 18px; }
+  td.num { font-weight: 800; } tr.first td { background: rgba(245,165,36,.09); } tr.first td.num { color: var(--accent); }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--sub); }
+  .left { text-align: left !important; }
+  .bars { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+  .bar-row { display: grid; grid-template-columns: 96px minmax(0,1fr) 56px 44px; gap: 10px; align-items: center; }
+  .bar { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--accent); }
+  .bar.none i { background: var(--muted); }
+  .mini { color: var(--muted); font-size: 12px; }
+  .pick { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 5px; margin: 0 4px 2px 0; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 700; }
+  .pick.win { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); } .pick.place { border-color: var(--ok); color: var(--ok); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--sub); color: var(--muted); }
+  .tag.won { background: var(--accent); color: var(--accent-fg); } .tag.placed { background: var(--ok-bg); color: var(--ok); }
+  .loading-bar { position: fixed; top: 0; left: 0; right: 0; padding: 10px 16px; text-align: center; font-weight: 700; background: var(--accent); color: var(--accent-fg); z-index: 9; }
+  .rdd-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .rdd-pager[hidden] { display: none; }
+  .rdd-pager-size { display: inline-flex; align-items: center; gap: 6px; }
+  .rdd-pager-size select { padding: 4px 8px; }
+  .rdd-pager-count { font-variant-numeric: tabular-nums; }
+  .rdd-pager-nav { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+  .rdd-pager-btn { min-width: 32px; height: 32px; padding: 0 8px; }
+  .rdd-pager-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .rdd-pager-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .rdd-pager-btn:disabled { opacity: .4; cursor: default; }
+  .rdd-pager-gap { padding: 0 4px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; }
+  @media (max-width: 700px) { header, main { padding-left: 16px; padding-right: 16px; } .dl { margin-left: 0; } }
+  @media print { .top-nav, .subnav, .filters, .rdd-pager { display: none !important; } body { background: #fff; } }
+</style>
 </head>
 <body>
-  <header class="app-header">
-    <div class="app-header-left">
-      <a class="brand" href="/">
-        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
-        <div class="brand-text">
-          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
-          <span class="brand-subtitle">Comment picks</span>
-        </div>
-      </a>
+<header>
+  <a class="brand" data-href="/"><img src="{{LOGO}}" alt="RacingHub logo"><div><b>RACING<span>HUB</span></b><small>Comment picks</small></div></a>
+  <nav class="top-nav" aria-label="Dashboard"><a data-href="/">Race grid</a><button type="button" id="theme">Light / dark</button></nav>
+</header>
+<main>
+  <nav class="subnav" aria-label="Overview pages"><a data-href="/overview">Data quality</a><a data-href="/comment-picks" class="on" aria-current="page">Comment picks</a></nav>
+  <h1>Comment picks</h1>
+  <p class="lead">Picks = tab numbers in the race comment, in the order they're mentioned, scratched runners removed · win = finished 1st · place = top 3 · resulted races only</p>
+  <p class="note">Race dates <b>{{FROM}}</b> to <b>{{TO}}</b> · made {{GENERATED}} (Sri Lanka time) · <span id="saveTip">to send this report: right-click → <b>Save as…</b> gives one file that opens anywhere, no login needed</span></p>
+
+  <section class="card pad filters" aria-label="Filters">
+    <div class="pills" role="group" aria-label="Date range" id="pills">
+      <button type="button" data-days="1">Yesterday</button>
+      <button type="button" data-days="7">Last 7 days</button>
+      <button type="button" data-days="30">Last 30 days</button>
     </div>
-    <div class="app-header-right">
-      <a class="meetings-list-link" href="/"><i class="fa-solid fa-table-cells"></i> Race grid</a>
-      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
-      {{USERNAME_BLOCK}}
-    </div>
-  </header>
+    <label>From<input type="date" id="fFrom" value="{{FROM}}"></label>
+    <label>To<input type="date" id="fTo" value="{{TO}}"></label>
+    <label>Discipline<select id="fDisc"><option value="">All disciplines</option></select></label>
+    <label>Country<select id="fCountry"><option value="">All countries</option></select></label>
+    <div class="dl"><a id="dlXlsx" href="#">⬇ Excel</a><button type="button" class="pri" id="dlCsv">⬇ CSV</button></div>
+  </section>
 
-  <main class="adm-main ov-main">
-    <nav class="cp-subnav" aria-label="Overview pages">
-      <a href="/overview"><i class="fa-solid fa-gauge-high" aria-hidden="true"></i> Data quality</a>
-      <a href="/comment-picks" class="on" aria-current="page"><i class="fa-solid fa-ranking-star" aria-hidden="true"></i> Comment picks</a>
-    </nav>
-    <div class="adm-page-head">
-      <div>
-        <h1>Comment picks</h1>
-        <p>Picks = tab numbers in the race comment, in the order they're mentioned, scratched runners removed · place = top 3 · resulted races only</p>
-      </div>
-    </div>
+  <section class="tiles">
+    <div class="card tile"><span>Races analysed</span><b id="kRaces">-</b><small id="kRacesSub">-</small></div>
+    <div class="card tile acc"><span>1st pick win rate</span><b id="kWin">-</b><small id="kWinSub">-</small></div>
+    <div class="card tile"><span>1st pick place rate</span><b id="kPlace">-</b><small id="kPlaceSub">top 3</small></div>
+    <div class="card tile"><span>Winner not picked</span><b id="kNone">-</b><small id="kNoneSub">-</small></div>
+  </section>
 
-    <section class="ov-card ov-pad cp-filters" aria-label="Filters">
-      <div class="ov-days" role="group" aria-label="Date range">
-        <button type="button" class="ov-day" data-range="1">Yesterday</button>
-        <button type="button" class="ov-day on" data-range="7" aria-pressed="true">Last 7 days</button>
-        <button type="button" class="ov-day" data-range="30">Last 30 days</button>
-      </div>
-      <div class="ov-filters">
-        <label>From<input type="date" id="fFrom"></label>
-        <label>To<input type="date" id="fTo"></label>
-        <label>Discipline<select id="fDisc"><option value="">All disciplines</option></select></label>
-        <label>Country<select id="fCountry"><option value="">All countries</option></select></label>
-        <div class="cp-dl">
-          <a class="adm-btn" id="dlXlsx" href="#"><i class="fa-solid fa-file-excel"></i> Excel</a>
-          <a class="adm-btn" id="dlCsv" href="#"><i class="fa-solid fa-file-csv"></i> CSV</a>
-          <a class="adm-btn" id="dlHtml" href="#" title="Downloads ONE .html file with these dates' report inside. Send it to anyone: it opens by double-click, no login, no internet, no extra folder."><i class="fa-solid fa-share-nodes"></i> Share as HTML</a>
-        </div>
-      </div>
-    </section>
-    <p class="adm-error" id="cpError" hidden></p>
+  <div class="two">
+    <section class="card"><div class="head"><h2>Strike rate by pick</h2><p>Win = finished 1st · place = top 3</p></div>
+      <div class="wrap"><table><thead><tr><th>Pick</th><th>Races</th><th>Wins</th><th>Win %</th><th>Places</th><th>Place %</th></tr></thead><tbody id="pickRows"></tbody></table></div></section>
+    <section class="card"><div class="head"><h2>Winners came from</h2><p>Which pick the winner was</p></div><div class="bars" id="winRows"></div></section>
+  </div>
+  <div class="two">
+    <section class="card"><div class="head"><h2>By country</h2><p>Click a country to filter</p></div>
+      <div class="wrap"><table><thead><tr><th>Country</th><th>Races</th><th>1st win %</th><th>1st place %</th><th>2nd win %</th><th>2nd place %</th><th>3rd win %</th><th>3rd place %</th></tr></thead><tbody id="countryRows"></tbody></table></div></section>
+    <section class="card"><div class="head"><h2>By discipline</h2><p>Click a discipline to filter</p></div>
+      <div class="wrap"><table><thead><tr><th>Discipline</th><th>Races</th><th>1st win %</th><th>1st place %</th><th>2nd win %</th><th>3rd win %</th></tr></thead><tbody id="discRows"></tbody></table></div></section>
+  </div>
+  <section class="card"><div class="head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap"><div><h2>Races <span class="mini" id="raceCount"></span></h2><p>Newest first · every race is in the Excel / CSV</p></div><label class="mini">Search <input type="search" id="fText" placeholder="Meeting"></label></div>
+    <div class="wrap"><table><thead><tr><th>Date</th><th class="left">Race</th><th class="left">Picks (after scratchings)</th><th class="left">Result</th><th class="left">1st pick</th><th class="left">Winner was</th></tr></thead><tbody id="raceRows"></tbody></table></div>
+    <div id="racePager"></div></section>
+</main>
+<footer>RacingHub · Race Day Dashboard · <span id="siteName"></span></footer>
 
-    <section class="ov-tiles" aria-label="Headline numbers">
-      <div class="ov-tile"><span class="ov-tile-label">Races analysed</span><b class="ov-tile-num" id="kRaces">-</b><span class="ov-tile-sub" id="kRacesSub">resulted, with picks in the comment</span></div>
-      <div class="ov-tile ov-tile-accent"><span class="ov-tile-label">1st pick win rate</span><b class="ov-tile-num" id="kWin">-</b><span class="ov-tile-sub" id="kWinSub">-</span></div>
-      <div class="ov-tile"><span class="ov-tile-label">1st pick place rate</span><b class="ov-tile-num" id="kPlace">-</b><span class="ov-tile-sub" id="kPlaceSub">top 3</span></div>
-      <div class="ov-tile"><span class="ov-tile-label">Winner not picked</span><b class="ov-tile-num" id="kNone">-</b><span class="ov-tile-sub" id="kNoneSub">-</span></div>
-    </section>
+<script id="data" type="application/json">{{DATA_JSON}}</script>
+<script>
+{{PAGER_JS}}
+</script>
+<script>
+  var DATA = JSON.parse(document.getElementById('data').textContent);
+  var ROWS = DATA.rows; // [date, meeting, rNo, country, discipline, picks[], outcome[], removed[], result, winnerPick]
+  var MAX = 6, PLACE = 3, DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
+  var $ = function (id) { return document.getElementById(id); };
 
-    <div class="ov-two">
-      <section class="ov-card" aria-labelledby="pickHead">
-        <div class="ov-card-head"><div><h2 id="pickHead">Strike rate by pick</h2><p>Win = finished 1st · place = top 3</p></div></div>
-        <div class="ov-table-wrap"><table class="ov-table cp-table">
-          <thead><tr><th scope="col">Pick</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">Wins</th><th scope="col" class="ov-right">Win %</th><th scope="col" class="ov-right">Places</th><th scope="col" class="ov-right">Place %</th></tr></thead>
-          <tbody id="pickRows"><tr><td colspan="6" class="ov-empty">Loading...</td></tr></tbody>
-        </table></div>
-      </section>
-      <section class="ov-card ov-pad" aria-labelledby="winHead">
-        <h2 id="winHead">Winners came from</h2>
-        <p class="ov-sub">Which pick the winner was</p>
-        <div id="winRows" class="ov-bars"></div>
-      </section>
-    </div>
+  // Same theme setting as the rest of the dashboard.
+  (function () { var t = 'dark'; try { t = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ } document.documentElement.setAttribute('data-theme', t); })();
 
-    <div class="ov-two">
-      <section class="ov-card" aria-labelledby="countryHead">
-        <div class="ov-card-head"><div><h2 id="countryHead">By country</h2><p>Click a country to filter</p></div></div>
-        <div class="ov-table-wrap"><table class="ov-table cp-table">
-          <thead><tr><th scope="col">Country</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">1st win %</th><th scope="col" class="ov-right">1st place %</th><th scope="col" class="ov-right">2nd win %</th><th scope="col" class="ov-right">2nd place %</th><th scope="col" class="ov-right">3rd win %</th><th scope="col" class="ov-right">3rd place %</th></tr></thead>
-          <tbody id="countryRows"></tbody>
-        </table></div>
-      </section>
-      <section class="ov-card" aria-labelledby="discHead">
-        <div class="ov-card-head"><div><h2 id="discHead">By discipline</h2><p>Click a discipline to filter</p></div></div>
-        <div class="ov-table-wrap"><table class="ov-table cp-table">
-          <thead><tr><th scope="col">Discipline</th><th scope="col" class="ov-right">Races</th><th scope="col" class="ov-right">1st win %</th><th scope="col" class="ov-right">1st place %</th><th scope="col" class="ov-right">2nd win %</th><th scope="col" class="ov-right">3rd win %</th></tr></thead>
-          <tbody id="discRows"></tbody>
-        </table></div>
-      </section>
-    </div>
+  // From the dashboard (http/https) new dates reload the page from the
+  // server. A saved copy (file://) only has its own dates inside, so there the
+  // date boxes filter those and the links go to the live site.
+  var LIVE = /^https?:$/.test(location.protocol);
+  var SITE = LIVE ? location.origin : DATA.site;
+  var QS = new URLSearchParams(LIVE ? location.search : '');
+  document.querySelectorAll('[data-href]').forEach(function (a) { a.href = SITE + a.getAttribute('data-href'); });
+  $('siteName').textContent = SITE.replace(/^https?:\/\//, '');
+  if (!LIVE) {
+    $('pills').hidden = true;
+    $('saveTip').textContent = 'saved copy';
+    ['fFrom', 'fTo'].forEach(function (id) { $(id).min = DATA.from; $(id).max = DATA.to; });
+  }
+  var racePager = RddPager.create($('racePager'), function () { renderRaces(); });
 
-    <section class="ov-card" aria-labelledby="raceHead">
-      <div class="ov-card-head">
-        <div><h2 id="raceHead">Races <span id="raceCount" class="ov-count"></span></h2><p>Newest first · every race is in the Excel / CSV</p></div>
-        <div class="ov-filters"><label>Search<input type="search" id="fText" placeholder="Meeting"></label></div>
-      </div>
-      <div class="ov-table-wrap"><table class="ov-table cp-table">
-        <thead><tr><th scope="col">Date</th><th scope="col">Race</th><th scope="col">Picks (after scratchings)</th><th scope="col">Result</th><th scope="col">1st pick</th><th scope="col">Winner was</th></tr></thead>
-        <tbody id="raceRows"></tbody>
-      </table></div>
-    </section>
-  </main>
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function pct(v) { return v == null ? '-' : v.toFixed(1) + '%'; }
+  function rate(n, d) { return d ? Math.round((n / d) * 1000) / 10 : null; }
+  function ord(n) { return n + (['st', 'nd', 'rd'][n - 1] || 'th'); }
+  function pickLabel(n) { return n >= MAX ? ord(MAX) + '+ pick' : ord(n) + ' pick'; }
+  function shift(ymd, days) { var d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  <script>
-    function applyTheme(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-      var btn = document.getElementById('themeToggle');
-      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
-    }
-    function toggleTheme() {
-      var next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'light' ? 'dark' : 'light';
-      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
-      applyTheme(next);
-    }
-    (function () { var t = 'dark'; try { t = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ } applyTheme(t); })();
+  // Same sums as picks-report.js summarisePicks (6th+ picks count once a race).
+  function summary(rows) {
+    var by = []; for (var i = 0; i < MAX; i++) by.push({ pick: i + 1, races: 0, wins: 0, places: 0 });
+    var from = []; for (i = 0; i < MAX; i++) from.push(0); var none = 0;
+    rows.forEach(function (r) {
+      var picks = r[5], out = r[6];
+      for (var k = 0; k < Math.min(picks.length, MAX); k++) {
+        var p = out[k];
+        if (k === MAX - 1) { var tail = out.slice(k).filter(function (x) { return x != null; }); p = tail.length ? Math.min.apply(null, tail) : null; }
+        by[k].races++; if (p === 1) by[k].wins++; if (p != null && p <= PLACE) by[k].places++;
+      }
+      if (r[9] == null) none++; else from[Math.min(r[9], MAX) - 1]++;
+    });
+    by = by.filter(function (b) { return b.races; }).map(function (b) { b.winRate = rate(b.wins, b.races); b.placeRate = rate(b.places, b.races); return b; });
+    return { races: rows.length, byPick: by, from: from, none: none };
+  }
+  function pickOf(s, n) { return s.byPick.filter(function (b) { return b.pick === n; })[0] || {}; }
+  function groups(rows, idx, label) {
+    var m = {}; rows.forEach(function (r) { (m[r[idx]] = m[r[idx]] || []).push(r); });
+    return Object.keys(m).map(function (k) { var s = summary(m[k]); s.key = k; s.label = label ? label(k) : k; return s; }).sort(function (a, b) { return b.races - a.races; });
+  }
 
-    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-    function pct(v) { return v == null ? '-' : v.toFixed(1) + '%'; }
-    function ord(n) { return n + (['st', 'nd', 'rd'][n - 1] || 'th'); }
-    function pickLabel(n, max) { return n >= max ? ord(max) + '+ pick' : ord(n) + ' pick'; }
-    var DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
-    var MAX = 6;
-    var data = null;
+  function filtered(withPlaceFilters) {
+    var from = $('fFrom').value || DATA.from, to = $('fTo').value || DATA.to, d = $('fDisc').value, c = $('fCountry').value;
+    return ROWS.filter(function (r) { return r[0] >= from && r[0] <= to && (!withPlaceFilters || ((!d || r[4] === d) && (!c || r[3] === c))); });
+  }
 
-    function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    function setRange(days) {
-      var to = new Date(); to.setDate(to.getDate() - 1);
-      var from = new Date(to); from.setDate(from.getDate() - (days - 1));
-      document.getElementById('fFrom').value = ymd(from);
-      document.getElementById('fTo').value = ymd(to);
-      document.querySelectorAll('.ov-day').forEach(function (b) { var on = Number(b.dataset.range) === days; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
-    }
-    function query() {
-      var q = new URLSearchParams({ from: document.getElementById('fFrom').value, to: document.getElementById('fTo').value });
-      if (document.getElementById('fDisc').value) q.set('discipline', document.getElementById('fDisc').value);
-      if (document.getElementById('fCountry').value) q.set('country', document.getElementById('fCountry').value);
-      return q.toString();
-    }
-    function pickOf(s, n) { return (s.byPick || []).filter(function (b) { return b.pick === n; })[0] || {}; }
-
-    function render() {
-      var o = data.overall;
-      var p1 = pickOf(o, 1);
-      document.getElementById('kRaces').textContent = o.races.toLocaleString();
-      document.getElementById('kRacesSub').textContent = data.from + ' to ' + data.to;
-      document.getElementById('kWin').textContent = pct(p1.winRate);
-      document.getElementById('kWinSub').textContent = (p1.wins || 0) + ' winners from ' + (p1.races || 0) + ' races';
-      document.getElementById('kPlace').textContent = pct(p1.placeRate);
-      document.getElementById('kPlaceSub').textContent = (p1.places || 0) + ' placed (top 3)';
-      document.getElementById('kNone').textContent = pct(o.winnerFrom.none.share);
-      document.getElementById('kNoneSub').textContent = o.winnerFrom.none.races + ' races';
-
-      document.getElementById('pickRows').innerHTML = o.byPick.map(function (b) {
-        return '<tr' + (b.pick === 1 ? ' class="cp-first"' : '') + '><td><b>' + pickLabel(b.pick, MAX) + '</b></td><td class="ov-right">' + b.races + '</td><td class="ov-right">' + b.wins + '</td><td class="ov-right cp-num">' + pct(b.winRate) + '</td><td class="ov-right">' + b.places + '</td><td class="ov-right cp-num">' + pct(b.placeRate) + '</td></tr>';
-      }).join('') || '<tr><td colspan="6" class="ov-empty">No resulted races with picks in this range.</td></tr>';
-
-      var wf = o.winnerFrom.picked.filter(function (w) { return w.races; }).map(function (w) { return { label: pickLabel(w.pick, MAX), share: w.share, races: w.races }; });
-      wf.push({ label: 'Not picked', share: o.winnerFrom.none.share, races: o.winnerFrom.none.races, none: true });
-      var max = Math.max.apply(null, wf.map(function (w) { return w.share || 0; }).concat([1]));
-      document.getElementById('winRows').innerHTML = o.races ? wf.map(function (w) {
-        return '<div class="ov-bar-row cp-bar-row" title="' + esc(w.label + ': ' + w.races + ' winners') + '"><span>' + esc(w.label) + '</span><div class="ov-bar ov-bar-amber' + (w.none ? ' cp-none' : '') + '"><i style="width:' + Math.round(((w.share || 0) / max) * 100) + '%"></i></div><span class="ov-num">' + pct(w.share) + '</span><span class="ov-mini">' + w.races + '</span></div>';
-      }).join('') : '<p class="ov-empty">No data.</p>';
-
-      document.getElementById('countryRows').innerHTML = data.byCountry.map(function (g) {
-        var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
-        return '<tr class="cp-click" data-country="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td class="ov-right">' + g.races + '</td><td class="ov-right cp-num">' + pct(a.winRate) + '</td><td class="ov-right">' + pct(a.placeRate) + '</td><td class="ov-right">' + pct(b.winRate) + '</td><td class="ov-right">' + pct(b.placeRate) + '</td><td class="ov-right">' + pct(c.winRate) + '</td><td class="ov-right">' + pct(c.placeRate) + '</td></tr>';
-      }).join('') || '<tr><td colspan="8" class="ov-empty">-</td></tr>';
-      document.getElementById('discRows').innerHTML = data.byDiscipline.map(function (g) {
-        var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
-        return '<tr class="cp-click" data-disc="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td class="ov-right">' + g.races + '</td><td class="ov-right cp-num">' + pct(a.winRate) + '</td><td class="ov-right">' + pct(a.placeRate) + '</td><td class="ov-right">' + pct(b.winRate) + '</td><td class="ov-right">' + pct(c.winRate) + '</td></tr>';
-      }).join('') || '<tr><td colspan="6" class="ov-empty">-</td></tr>';
-      renderRaces();
-    }
-
-    function renderRaces() {
-      var text = document.getElementById('fText').value.trim().toLowerCase();
-      var rows = data.rows.filter(function (r) { return !text || String(r.meeting).toLowerCase().indexOf(text) !== -1; });
-      document.getElementById('raceCount').textContent = '(' + (text ? rows.length + ' of ' : '') + data.totalRows.toLocaleString() + ')';
-      document.getElementById('raceRows').innerHTML = rows.slice(0, 200).map(function (r) {
-        var first = r.outcome[0];
-        var res = first === 1 ? '<span class="cp-tag cp-won">Won</span>' : (first != null && first <= 3 ? '<span class="cp-tag cp-placed">Placed ' + ord(first) + '</span>' : '<span class="cp-tag">' + (first ? ord(first) : 'Unplaced') + '</span>');
-        var picks = r.picks.map(function (t, i) { return '<span class="cp-pick' + (r.outcome[i] === 1 ? ' cp-pick-win' : (r.outcome[i] != null && r.outcome[i] <= 3 ? ' cp-pick-place' : '')) + '" title="' + esc(r.pickNames[i] || '') + '">' + t + '</span>'; }).join('');
-        return '<tr><td>' + esc(r.date) + '</td><td><b>' + esc(r.meeting) + ' R' + esc(r.rNo) + '</b><div class="ov-mini">' + esc(r.country) + ' · ' + esc(DISC[r.discipline] || r.discipline) + '</div></td>' +
-          '<td>' + picks + (r.removed.length ? ' <span class="ov-mini">(' + r.removed.join(', ') + ' scr)</span>' : '') + '</td><td>' + esc(r.result) + '</td><td>' + res + '</td><td>' + (r.winnerPick ? pickLabel(r.winnerPick, MAX) : '<span class="ov-mini">Not picked</span>') + '</td></tr>';
-      }).join('') || '<tr><td colspan="6" class="ov-empty">No races.</td></tr>';
-    }
-
-    function fillSelect(id, values, label) {
-      var sel = document.getElementById(id); var cur = sel.value;
+  function render() {
+    var rows = filtered(true), s = summary(rows), p1 = pickOf(s, 1);
+    $('kRaces').textContent = s.races.toLocaleString();
+    $('kRacesSub').textContent = ($('fFrom').value || DATA.from) + ' to ' + ($('fTo').value || DATA.to);
+    $('kWin').textContent = pct(p1.winRate); $('kWinSub').textContent = (p1.wins || 0) + ' winners from ' + (p1.races || 0) + ' races';
+    $('kPlace').textContent = pct(p1.placeRate); $('kPlaceSub').textContent = (p1.places || 0) + ' placed (top 3)';
+    $('kNone').textContent = pct(rate(s.none, s.races)); $('kNoneSub').textContent = s.none + ' races';
+    $('pickRows').innerHTML = s.byPick.map(function (b) {
+      return '<tr' + (b.pick === 1 ? ' class="first"' : '') + '><td><b>' + pickLabel(b.pick) + '</b></td><td>' + b.races + '</td><td>' + b.wins + '</td><td class="num">' + pct(b.winRate) + '</td><td>' + b.places + '</td><td class="num">' + pct(b.placeRate) + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="left mini">No resulted races with picks in this range.</td></tr>';
+    var wf = s.from.map(function (n, i) { return { label: pickLabel(i + 1), n: n }; }).filter(function (w) { return w.n; });
+    wf.push({ label: 'Not picked', n: s.none, none: true });
+    var max = Math.max.apply(null, wf.map(function (w) { return rate(w.n, s.races) || 0; }).concat([1]));
+    $('winRows').innerHTML = s.races ? wf.map(function (w) {
+      var r = rate(w.n, s.races) || 0;
+      return '<div class="bar-row"><span>' + w.label + '</span><div class="bar' + (w.none ? ' none' : '') + '"><i style="width:' + Math.round(r / max * 100) + '%"></i></div><b>' + pct(r) + '</b><span class="mini">' + w.n + '</span></div>';
+    }).join('') : '<p class="mini">No races.</p>';
+    $('countryRows').innerHTML = groups(rows, 3).map(function (g) {
+      var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+      return '<tr class="click" data-country="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td>' + g.races + '</td><td class="num">' + pct(a.winRate) + '</td><td>' + pct(a.placeRate) + '</td><td>' + pct(b.winRate) + '</td><td>' + pct(b.placeRate) + '</td><td>' + pct(c.winRate) + '</td><td>' + pct(c.placeRate) + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" class="left mini">-</td></tr>';
+    $('discRows').innerHTML = groups(rows, 4, function (k) { return DISC[k] || k; }).map(function (g) {
+      var a = pickOf(g, 1), b = pickOf(g, 2), c = pickOf(g, 3);
+      return '<tr class="click" data-disc="' + esc(g.key) + '"><td><b>' + esc(g.label) + '</b></td><td>' + g.races + '</td><td class="num">' + pct(a.winRate) + '</td><td>' + pct(a.placeRate) + '</td><td>' + pct(b.winRate) + '</td><td>' + pct(c.winRate) + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="left mini">-</td></tr>';
+    renderRaces(rows);
+  }
+  function renderRaces(rows) {
+    rows = rows || filtered(true);
+    var text = $('fText').value.trim().toLowerCase();
+    var list = rows.filter(function (r) { return !text || String(r[1]).toLowerCase().indexOf(text) !== -1; });
+    $('raceCount').textContent = '(' + list.length.toLocaleString() + ')';
+    $('raceRows').innerHTML = racePager.slice(list).map(function (r) {
+      var first = r[6][0];
+      var res = first === 1 ? '<span class="tag won">Won</span>' : (first != null && first <= PLACE ? '<span class="tag placed">Placed ' + ord(first) + '</span>' : '<span class="tag">' + (first ? ord(first) : 'Unplaced') + '</span>');
+      var picks = r[5].map(function (t, i) { var p = r[6][i]; return '<span class="pick' + (p === 1 ? ' win' : (p != null && p <= PLACE ? ' place' : '')) + '">' + t + '</span>'; }).join('');
+      return '<tr><td>' + esc(r[0]) + '</td><td class="left"><b>' + esc(r[1]) + ' R' + esc(r[2]) + '</b><div class="mini">' + esc(r[3]) + ' · ' + esc(DISC[r[4]] || r[4]) + '</div></td><td class="left">' + picks + (r[7].length ? ' <span class="mini">(' + r[7].join(', ') + ' scr)</span>' : '') + '</td><td class="left">' + esc(r[8]) + '</td><td class="left">' + res + '</td><td class="left">' + (r[9] ? pickLabel(r[9]) : '<span class="mini">Not picked</span>') + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="left mini">No races.</td></tr>';
+  }
+  function fillSelects() {
+    var all = filtered(false);
+    var keep = function (id, values, label) {
+      var sel = $(id), cur = sel.value;
       sel.innerHTML = '<option value="">' + sel.options[0].text + '</option>' + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(label ? label(v) : v) + '</option>'; }).join('');
       sel.value = values.indexOf(cur) !== -1 ? cur : '';
-    }
+    };
+    keep('fDisc', Array.from(new Set(all.map(function (r) { return r[4]; }))).sort(), function (d) { return DISC[d] || d; });
+    keep('fCountry', Array.from(new Set(all.map(function (r) { return r[3]; }))).sort());
+  }
 
-    var loading = 0;
-    function load() {
-      var my = ++loading;
-      var q = query();
-      document.getElementById('dlXlsx').href = '/comment-picks.xlsx?' + q;
-      document.getElementById('dlCsv').href = '/comment-picks.csv?' + q;
-      document.getElementById('dlHtml').href = '/comment-picks-offline.html?' + new URLSearchParams({ from: document.getElementById('fFrom').value, to: document.getElementById('fTo').value });
-      document.getElementById('pickRows').innerHTML = '<tr><td colspan="6" class="ov-empty">Loading... (a long range can take a few seconds the first time)</td></tr>';
-      fetch('/api/comment-picks?' + q).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Failed'); return j; }); })
-        .then(function (j) {
-          if (my !== loading) return;
-          data = j;
-          document.getElementById('cpError').hidden = true;
-          fillSelect('fDisc', j.disciplines, function (d) { return DISC[d] || d; });
-          fillSelect('fCountry', j.countries);
-          render();
-        })
-        .catch(function (err) { var e = document.getElementById('cpError'); e.textContent = 'Could not load the report: ' + err.message; e.hidden = false; });
-    }
+  function filterQuery() {
+    var q = new URLSearchParams({ from: $('fFrom').value || DATA.from, to: $('fTo').value || DATA.to });
+    if ($('fDisc').value) q.set('discipline', $('fDisc').value);
+    if ($('fCountry').value) q.set('country', $('fCountry').value);
+    return q.toString();
+  }
+  // Excel comes from the server (all races, every sheet). The address bar
+  // follows the filters so a reload or a copied link opens the same view.
+  function syncLinks() {
+    var q = filterQuery();
+    $('dlXlsx').href = SITE + '/comment-picks.xlsx?' + q;
+    if (LIVE && history.replaceState) history.replaceState(null, '', location.pathname + '?' + q);
+  }
+  function reloadDates(from, to) {
+    if (from > to) { var x = from; from = to; to = x; }
+    $('fFrom').value = from; $('fTo').value = to;
+    var bar = document.createElement('div');
+    bar.className = 'loading-bar';
+    bar.textContent = 'Loading ' + from + ' to ' + to + '... (a long range can take a few seconds the first time)';
+    document.body.appendChild(bar);
+    location.href = location.pathname + '?' + filterQuery();
+  }
+  function filtersChanged() { racePager.reset(); render(); syncLinks(); }
 
-    document.querySelectorAll('.ov-day').forEach(function (b) { b.addEventListener('click', function () { setRange(Number(b.dataset.range)); load(); }); });
-    ['fFrom', 'fTo'].forEach(function (id) { document.getElementById(id).addEventListener('change', function () { document.querySelectorAll('.ov-day').forEach(function (b) { b.classList.remove('on'); }); load(); }); });
-    ['fDisc', 'fCountry'].forEach(function (id) { document.getElementById(id).addEventListener('change', load); });
-    document.getElementById('fText').addEventListener('input', function () { if (data) renderRaces(); });
-    document.addEventListener('click', function (e) {
-      var row = e.target.closest('.cp-click');
-      if (!row) return;
-      if (row.dataset.country) document.getElementById('fCountry').value = row.dataset.country;
-      if (row.dataset.disc) document.getElementById('fDisc').value = row.dataset.disc;
-      load();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.querySelectorAll('.pills button').forEach(function (b) {
+    var from = shift(DATA.yesterday, -(Number(b.dataset.days) - 1));
+    var on = DATA.to === DATA.yesterday && DATA.from === from;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.addEventListener('click', function () { reloadDates(from, DATA.yesterday); });
+  });
+  ['fFrom', 'fTo'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      if (!$('fFrom').value || !$('fTo').value) return;
+      if (LIVE) { reloadDates($('fFrom').value, $('fTo').value); return; }
+      fillSelects(); filtersChanged();
     });
-    setRange(7);
-    load();
-  </script>
+  });
+  ['fDisc', 'fCountry'].forEach(function (id) { $(id).addEventListener('change', filtersChanged); });
+  $('fText').addEventListener('input', function () { racePager.reset(); renderRaces(); });
+  document.addEventListener('click', function (e) {
+    var tr = e.target.closest && e.target.closest('tr.click'); if (!tr) return;
+    if (tr.dataset.country) $('fCountry').value = tr.dataset.country;
+    if (tr.dataset.disc) $('fDisc').value = tr.dataset.disc;
+    filtersChanged(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $('dlCsv').addEventListener('click', function () {
+    var head = ['Date', 'Meeting', 'Race', 'Country', 'Discipline', 'Picks (scratchings removed)', 'Scratched picks removed', 'Result', '1st pick', 'Winner was'];
+    var lines = [head].concat(filtered(true).map(function (r) {
+      var f = r[6][0];
+      return [r[0], r[1], 'R' + r[2], r[3], DISC[r[4]] || r[4], r[5].join(', '), r[7].join(', '), r[8], f === 1 ? 'Won' : (f != null && f <= PLACE ? 'Placed' : 'Unplaced'), r[9] ? pickLabel(r[9]) : 'Not picked'];
+    }));
+    var csv = '﻿' + lines.map(function (l) { return l.map(function (v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'comment-picks-' + ($('fFrom').value || DATA.from) + '-to-' + ($('fTo').value || DATA.to) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  $('theme').addEventListener('click', function () {
+    var r = document.documentElement, next = r.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    r.setAttribute('data-theme', next);
+    try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+  });
+
+  fillSelects();
+  if (QS.get('discipline')) $('fDisc').value = QS.get('discipline');
+  if (QS.get('country')) $('fCountry').value = QS.get('country');
+  filtersChanged();
+</script>
 </body>
 </html>

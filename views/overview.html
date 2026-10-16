@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -109,6 +110,7 @@
         <thead><tr><th scope="col">Starts</th><th scope="col">Race</th><th scope="col">Issue</th><th scope="col">Status</th><th scope="col">Owner / note</th><th scope="col" class="ov-right">Action</th></tr></thead>
         <tbody id="allRows"></tbody>
       </table></div>
+      <div id="allPager"></div>
     </section>
   </main>
 
@@ -222,6 +224,9 @@
       el.value = keep;
     }
 
+    // 10 / 25 / 50 / 100 a page (public/pager.js).
+    var allPager = RddPager.create(document.getElementById('allPager'), function () { renderAll(); });
+
     function renderAll() {
       var text = document.getElementById('fText').value.trim().toLowerCase();
       var type = document.getElementById('fType').value;
@@ -234,7 +239,7 @@
           (!text || (i.meeting + ' ' + i.label + ' ' + i.detail).toLowerCase().indexOf(text) !== -1);
       });
       document.getElementById('allCount').textContent = '(' + list.length + ')';
-      document.getElementById('allRows').innerHTML = list.slice(0, 400).map(function (i) {
+      document.getElementById('allRows').innerHTML = allPager.slice(list).map(function (i) {
         var m = liveMins(i.startUtc);
         return '<tr><td class="ov-nowrap"><b>' + esc(i.time || '-') + '</b><div class="ov-mini">' + (i.resulted ? 'resulted' : esc(minsText(m))) + '</div></td>' +
           '<td>' + raceCell(i) + '</td><td>' + issueCell(i) + '</td><td class="ov-nowrap">' + statusPill(i) + '</td>' +
@@ -311,11 +316,12 @@
       setStatus(key, btn.getAttribute('data-to'));
     });
     ['fText', 'fType', 'fCountry', 'fShow'].forEach(function (id) {
-      document.getElementById(id).addEventListener('input', function () { if (data) renderAll(); });
+      document.getElementById(id).addEventListener('input', function () { allPager.reset(); if (data) renderAll(); });
     });
     document.querySelectorAll('.ov-day').forEach(function (b) {
       b.addEventListener('click', function () {
         shift = Number(b.getAttribute('data-shift'));
+        allPager.reset();
         document.querySelectorAll('.ov-day').forEach(function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         load();
       });
