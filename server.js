@@ -1758,6 +1758,30 @@ function pickBestFormLines(variants) {
   return best;
 }
 
+// Runner comments name their horse first: "RICO (10) has been well-beaten...".
+// The racecard can be written before the field changes (emergencies in,
+// tabs renumbered), and then each comment sits on the RunnerId of whoever
+// now has its OLD tab -- seen at Moe R3, 18 Oct 2026: "RICO (10)" was on
+// Amsterdam Nights (now tab 10) and Rico (now 13) showed "Missing runner
+// comment" (per Dinesh: "Runner comments irukku but ye adu missingnu
+// kaattudu"). So the comment that names the horse wins; a RunnerId match
+// whose comment names another horse is not this runner's.
+function commentHorseKey(comment) {
+  const m = /^\s*([^()]+?)\s*\(\d{1,2}\)/.exec(comment || '');
+  if (!m || m[1] !== m[1].toUpperCase()) return null; // must be the CAPITALS name
+  return horseKey(m[1]);
+}
+function horseKey(name) {
+  return String(name || '').replace(/\([^)]*\)/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
+}
+function runnerCommentFor(runner, byRunnerId, byName) {
+  const own = horseKey(runner.horseName);
+  if (own && byName && byName.has(own)) return byName.get(own);
+  const named = commentHorseKey(byRunnerId);
+  if (named && own && named !== own) return null;
+  return byRunnerId || null;
+}
+
 // Cross-references each race's runners against the `racecards` collection --
 // the same store TD admin's racecard export reads `FormLines` from
 // (races._id == racecards.RaceId, runners[].runnerId == Runners[].RunnerId --
@@ -1841,6 +1865,8 @@ async function attachFormLineStatus(docs, options = {}) {
   // than picking a single winner (4 Sep 2026, per Dinesh -- wants country
   // code, pedigree, and full past-race history on click).
   const enrichByRaceId = new Map();
+  // raceId -> horse name key -> runner comment (see commentHorseKey).
+  const commentByNameByRaceId = new Map();
   for (const card of cards) {
     const clientLabel = card.Client || 'Default';
     if (!raceCommentByRaceId.has(card.RaceId) && card.RaceComment) raceCommentByRaceId.set(card.RaceId, card.RaceComment);
@@ -1881,6 +1907,14 @@ async function attachFormLineStatus(docs, options = {}) {
       // the race-level RaceComment above. Same "first variant found wins"
       // pattern as sire/dam.
       if (!enrich.comment && r.Comment) enrich.comment = r.Comment;
+      // Also index it by the horse it names ("RICO (10) has been...") --
+      // see runnerCommentFor below.
+      const named = commentHorseKey(r.Comment);
+      if (named) {
+        if (!commentByNameByRaceId.has(card.RaceId)) commentByNameByRaceId.set(card.RaceId, new Map());
+        const byName = commentByNameByRaceId.get(card.RaceId);
+        if (!byName.has(named)) byName.set(named, r.Comment);
+      }
       // Compact form-figures string (e.g. "8x61", "34350x153" -- 18 Sep
       // 2026, per Dinesh, a reference screenshot) -- distinct from FormLines
       // above (the structured past-race table); same "first variant found
@@ -1921,7 +1955,7 @@ async function attachFormLineStatus(docs, options = {}) {
       r.performanceStatistics = enrich ? enrich.performanceStatistics : null;
       r.currentOdds = enrich ? enrich.currentOdds : null;
       r.weightKg = enrich ? enrich.weightKg : null;
-      r.runnerComment = enrich ? enrich.comment : null;
+      r.runnerComment = runnerCommentFor(r, enrich ? enrich.comment : null, commentByNameByRaceId.get(doc._id));
       r.formFigures = enrich ? enrich.form : null;
     }
   }
