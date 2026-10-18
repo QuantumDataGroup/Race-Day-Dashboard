@@ -157,7 +157,7 @@ breakdown of exactly which checks fired.
 | **Missing Trainer** | per-runner | all | `trainer` field blank |
 | **Missing Form Lines** | per-race count, meeting flagged if count > 3 | Thoroughbred only | Runner has no racecards FormLines data from ANY feed variant |
 | **Horse Age Issue** | per-runner | Thoroughbred only | Age > 10 years, and not manually confirmed-no-issue |
-| **Missing Runner Comment** | per-runner | Thoroughbred only | No `runnerComment` on the racecards join |
+| **Missing Runner Comment** | per-runner | Thoroughbred only | No `runnerComment` on the racecards join. The comment that names the horse ("RICO (10) ...") wins over the RunnerId match, since a racecard written before the field changed has its comments on the old tabs' RunnerIds (`runnerCommentFor`, 18 Oct 2026) |
 | **Missing Race Comment** | per-race | Thoroughbred only | No race-level narrative comment |
 | **Missing Video** | per-race, TODAY's date only | Thoroughbred, AUS/GB/SAF/IRE | No matching file in the S3 video listing |
 | **Missing Speed Map** | per-race | Greyhound only | The external Speed Map feed HAS a prediction for this race, but our own `speedMaps` collection doesn't (a genuine sync gap, not "no prediction made yet") |
