@@ -1769,18 +1769,52 @@ function pickBestFormLines(variants) {
 // whose comment names another horse is not this runner's.
 function commentHorseKey(comment) {
   const m = /^\s*([^()]+?)\s*\(\d{1,2}\)/.exec(comment || '');
-  if (!m || m[1] !== m[1].toUpperCase()) return null; // must be the CAPITALS name
+  if (!m) return null;
+  // The name is in CAPITALS (mostly -- "ELLE MCFEARsome (9)"), a sentence isn't.
+  const letters = m[1].replace(/[^A-Za-z]/g, '');
+  if (!letters || letters.replace(/[^A-Z]/g, '').length < letters.length / 2) return null;
   return horseKey(m[1]);
 }
 function horseKey(name) {
-  return String(name || '').replace(/\([^)]*\)/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
+  return String(name || '').replace(/\([^)]*\)/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
 }
-function runnerCommentFor(runner, byRunnerId, byName) {
+// Comments misspell names ("CORONATIONHERUCLES (7)" for Coronationhercules,
+// Horsham R6, 18 Oct 2026), so a name a couple of letters off still counts
+// as this horse -- unless it is exactly another runner in the race.
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function sameHorse(a, b) {
+  return a === b || editDistance(a, b) <= Math.max(2, Math.floor(Math.min(a.length, b.length) * 0.15));
+}
+// Only a comment that belongs to ANOTHER runner in this race is taken away
+// (per Dinesh, 18 Oct 2026: if Ctrl+F finds the horse in a comment it isn't
+// missing) -- a misspelt or unknown name, or the name further in ("On 02
+// October 2026, CHARGETHATMOUNTAIN ..."), stays. And a comment naming a
+// runner that already has its own is just a wrong name, it stays too
+// (Wodonga R2, 17 Oct: "DON'TPUSHSEND (6)" on Don'tmindameeting, tab 6,
+// while Don'tpushsend has its own "(10)" comment).
+// race = { keys: every runner's horseKey, selfNamed: runners whose own
+// RunnerId comment names them }.
+function runnerCommentFor(runner, byRunnerId, byName, race) {
   const own = horseKey(runner.horseName);
-  if (own && byName && byName.has(own)) return byName.get(own);
+  if (!own) return byRunnerId || null;
   const named = commentHorseKey(byRunnerId);
-  if (named && own && named !== own) return null;
-  return byRunnerId || null;
+  if (byRunnerId && named && sameHorse(named, own)) return byRunnerId;
+  if (byName && byName.has(own)) return byName.get(own);
+  const isOther = (key) => key !== own && race.keys.has(key);
+  if (byRunnerId && !(named && isOther(named) && !race.selfNamed.has(named))) return byRunnerId;
+  for (const [key, comment] of (byName || [])) {
+    if (!isOther(key) && (sameHorse(key, own) || horseKey(comment).includes(own))) return comment;
+  }
+  return null;
 }
 
 // Cross-references each race's runners against the `racecards` collection --
@@ -1940,6 +1974,15 @@ async function attachFormLineStatus(docs, options = {}) {
     doc.raceComment = raceCommentByRaceId.get(doc._id) || null;
     doc.hasRaceComment = doc.rDiscipline === 'T' ? Boolean(doc.raceComment) : null;
     doc.sexRestriction = sexRestrictionByRaceId.get(doc._id) || null;
+    const raceKeys = { keys: new Set(), selfNamed: new Set() };
+    for (const r of (doc.runners || [])) {
+      const key = horseKey(r.horseName);
+      if (!key) continue;
+      raceKeys.keys.add(key);
+      const enrich = enrichByRunnerId ? enrichByRunnerId.get(r.runnerId) : null;
+      const named = commentHorseKey(enrich && enrich.comment);
+      if (named && sameHorse(named, key)) raceKeys.selfNamed.add(key);
+    }
     for (const r of (doc.runners || [])) {
       const perClient = byRunnerId ? byRunnerId.get(r.runnerId) : null;
       r.formLinesByClient = perClient || null; // null -- no racecard found for this runner at all
@@ -1956,7 +1999,7 @@ async function attachFormLineStatus(docs, options = {}) {
       r.performanceStatistics = enrich ? enrich.performanceStatistics : null;
       r.currentOdds = enrich ? enrich.currentOdds : null;
       r.weightKg = enrich ? enrich.weightKg : null;
-      r.runnerComment = runnerCommentFor(r, enrich ? enrich.comment : null, commentByNameByRaceId.get(doc._id));
+      r.runnerComment = runnerCommentFor(r, enrich ? enrich.comment : null, commentByNameByRaceId.get(doc._id), raceKeys);
       r.formFigures = enrich ? enrich.form : null;
     }
   }
