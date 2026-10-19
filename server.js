@@ -1776,23 +1776,35 @@ function commentHorseKey(comment) {
   return horseKey(m[1]);
 }
 function horseKey(name) {
-  return String(name || '').replace(/\([^)]*\)/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(name || '').replace(/\([^)]*\)/g, '').replace(/ı/g, 'i').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
 }
 // Comments misspell names ("CORONATIONHERUCLES (7)" for Coronationhercules,
 // Horsham R6, 18 Oct 2026), so a name a couple of letters off still counts
 // as this horse -- unless it is exactly another runner in the race.
+// Letters added / dropped / changed / swapped ("AERAILZE" for AERIALIZE = 2).
 function editDistance(a, b) {
+  let prev2 = null;
   let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     const cur = [i];
-    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j], prev2[j - 2] + 1);
+    }
+    prev2 = prev;
     prev = cur;
   }
   return prev[b.length];
 }
 function sameHorse(a, b) {
-  return a === b || editDistance(a, b) <= Math.max(2, Math.floor(Math.min(a.length, b.length) * 0.15));
+  return a === b || editDistance(a, b) <= Math.max(2, Math.floor(Math.min(a.length, b.length) * 0.25));
+}
+// sameHorse, or a short form of the name ("CRAFTY" for I'm Crafty).
+function nameAlike(a, b, minPart) {
+  if (sameHorse(a, b)) return true;
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+  return s.length >= minPart && l.includes(s);
 }
 // The tab a runner comment gives its horse ("RICO (10) ..." -> 10) when the
 // comment names this runner, else null. raceView.js warns when the horse has
@@ -1827,6 +1839,71 @@ function runnerCommentFor(runner, byRunnerId, byName, race) {
   }
   return null;
 }
+// Comment name checks (19 Oct 2026, per Dinesh, after Comment Tab Wrong:
+// "Inda madhiri add pannunga"): race comment tab wrong, unknown horse in the
+// race comment, a runner comment about another horse, misspelt names.
+// Every CAPITALS name followed by a tab in brackets: "HARVEY'S TURN (2) ...".
+const COMMENT_MENTION_RE = /(\p{Lu}[\p{Lu}\d'’.\-]*(?:\s+[\p{Lu}\d'’.\-]+)*)\s*\((\d{1,2})\)/gu;
+function commentMentions(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(COMMENT_MENTION_RE)) out.push({ wrote: m[1].trim(), tab: Number(m[2]) });
+  return out;
+}
+// The runner a written name means: exact (the whole caps run, or its end
+// -- "G1. CEOLWULF"), else a couple of letters off / a short form, judged on
+// the part after the last full stop ("JIM MOLONEY. LARA ANTIPOVA").
+// { runner, exact, wrote } or { wrote } when no runner fits.
+function matchHorse(written, runners) {
+  const keys = runners.map((r) => ({ r, k: horseKey(r.horseName) })).filter((x) => x.k);
+  const words = written.split(/\s+/);
+  for (let i = 0; i < words.length; i++) {
+    const key = horseKey(words.slice(i).join(' '));
+    const hit = key && keys.find((x) => x.k === key);
+    if (hit) return { runner: hit.r, exact: true, wrote: words.slice(i).join(' ') };
+  }
+  const wrote = written.split(/\.\s+/).pop().trim();
+  const key = horseKey(wrote);
+  const near = key && keys.find((x) => sameHorse(x.k, key));
+  if (near) return { runner: near.r, exact: false, wrote };
+  // A short form ("DARCY" for Dominant Darcy) is that horse, not a misspelling.
+  const short = key && keys.find((x) => nameAlike(x.k, key, 4));
+  return short ? { runner: short.r, exact: true, wrote } : { wrote };
+}
+function raceCommentCheck(comment, runners) {
+  const tabWrong = [];
+  const unknown = [];
+  const misspelt = [];
+  const seen = new Set();
+  for (const m of commentMentions(comment)) {
+    if (seen.has(`${m.wrote}|${m.tab}`)) continue;
+    seen.add(`${m.wrote}|${m.tab}`);
+    const hit = matchHorse(m.wrote, runners);
+    if (!hit.runner) {
+      // 1-3 letters ("V", "ART") is too little to call it a horse.
+      if ((horseKey(hit.wrote) || '').length >= 4 && !unknown.includes(hit.wrote)) unknown.push(hit.wrote);
+      continue;
+    }
+    if (!hit.exact) misspelt.push({ wrote: hit.wrote, horse: hit.runner.horseName });
+    if (hit.runner.tabNo != null && Number(hit.runner.tabNo) !== m.tab) tabWrong.push({ name: hit.runner.horseName, says: m.tab, now: Number(hit.runner.tabNo) });
+  }
+  return { tabWrong, unknown, misspelt };
+}
+// A runner comment's lead name vs the horse: { misspelt } a couple of letters
+// off, { about } another horse (unless the horse is named further in).
+function runnerCommentCheck(runner, comment) {
+  const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(comment || '');
+  const own = horseKey(runner.horseName);
+  if (!m || !own) return {};
+  const caps = /(\p{Lu}[\p{Lu}\d'’.\-]*(?:\s+[\p{Lu}\d'’.\-]+)*)\s*$/u.exec(m[1]);
+  const wrote = (caps ? caps[1] : m[1]).trim();
+  const key = horseKey(wrote);
+  if (!key || key === own) return {};
+  if (sameHorse(key, own)) return { misspelt: wrote };
+  if (nameAlike(key, own, 3)) return {}; // a short form of the name
+  if (horseKey(comment).includes(own)) return {};
+  return { about: wrote };
+}
+
 // runnerId -> comment for one version (v = { byRunnerId, byName }) of a race.
 function runnerCommentsFrom(runners, v) {
   const race = { keys: new Set(), selfNamed: new Set() };
@@ -2031,6 +2108,8 @@ async function attachFormLineStatus(docs, options = {}) {
         if (p.missing.length || p.tabWrong.length) doc.commentVersionIssues.push({ style, ...p });
       }
     }
+    // Names in the (AU) race comment: tab wrong, unknown horse, misspelt.
+    doc.raceCommentCheck = doc.rDiscipline === 'T' && doc.raceComment ? raceCommentCheck(doc.raceComment, doc.runners || []) : null;
     for (const r of (doc.runners || [])) {
       const perClient = byRunnerId ? byRunnerId.get(r.runnerId) : null;
       r.formLinesByClient = perClient || null; // null -- no racecard found for this runner at all
@@ -2049,6 +2128,9 @@ async function attachFormLineStatus(docs, options = {}) {
       r.weightKg = enrich ? enrich.weightKg : null;
       r.runnerComment = shownComments.get(r.runnerId) || null;
       r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
+      const nameCheck = runnerCommentCheck(r, r.runnerComment);
+      r.commentAbout = nameCheck.about || null; // the comment is about another horse
+      r.commentMisspelt = nameCheck.misspelt || null; // this horse, misspelt
       r.formFigures = enrich ? enrich.form : null;
     }
   }
