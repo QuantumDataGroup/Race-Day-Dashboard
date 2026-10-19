@@ -1838,6 +1838,11 @@ function runnerCommentFor(runner, byRunnerId, byName, race) {
   for (const [key, comment] of (byName || [])) {
     if (!isOther(key) && (sameHorse(key, own) || horseKey(comment).includes(own))) return comment;
   }
+  // A name that is no runner here ("NINETYFIVEINA50 (8)") with this horse's tab.
+  for (const [key, comment] of (byName || [])) {
+    const tab = /^\s*[^()]+?\s*\((\d{1,2})\)/.exec(comment);
+    if (tab && runner.tabNo != null && Number(tab[1]) === Number(runner.tabNo) && !race.keys.has(key)) return comment;
+  }
   return null;
 }
 // Comment name checks (19 Oct 2026, per Dinesh, after Comment Tab Wrong:
@@ -1891,7 +1896,7 @@ function raceCommentCheck(comment, runners) {
 }
 // A runner comment's lead name vs the horse: { misspelt } a couple of letters
 // off, { about } another horse (unless the horse is named further in).
-function runnerCommentCheck(runner, comment) {
+function runnerCommentCheck(runner, comment, runners) {
   const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(comment || '');
   const own = horseKey(runner.horseName);
   if (!m || !own) return {};
@@ -1902,44 +1907,57 @@ function runnerCommentCheck(runner, comment) {
   if (sameHorse(key, own)) return { misspelt: wrote };
   if (nameAlike(key, own, 3)) return {}; // a short form of the name
   if (horseKey(comment).includes(own)) return {};
+  // A name that is no other runner here, with this horse's tab, is this horse
+  // badly spelt ("NINETYFIVEINA50 (8)" for Ninetyfiveinafifty, TAB 8).
+  const another = (runners || []).some((o) => o !== runner && horseKey(o.horseName) && sameHorse(horseKey(o.horseName), key));
+  if (!another && runner.tabNo != null && Number(m[2]) === Number(runner.tabNo)) return { misspelt: wrote };
   return { about: wrote };
 }
 
 // The AI race-card comments in llmContent (what the client API serves, per
-// Dinesh's paste 19 Oct 2026): runnerComments are keyed by number and the
-// API hands key "8" to TAB 8. At Echuca R2 the keys were 1, 2, 3 ... over the
-// runners left after the scratchings, so TAB 8 Ninetyfiveinafifty got
-// "VAULTED (11) ...". Our racecards copy was right, so nothing showed.
-// -> { wrong: [{ tab, horse, about }], none: [tabs with no comment] }.
+// Dinesh's paste 19 Oct 2026). Their runnerComments keys are 1, 2, 3 ... over
+// the runners left after the scratchings; the API first handed key "8" to
+// TAB 8 (Echuca R2: TAB 8 Ninetyfiveinafifty got "VAULTED (11) ..."), the
+// devs then fixed the API's matching, not the keys. So the keys are ignored
+// here: each comment is matched by the horse it names, and what's checked is
+// the text -- the tab it gives ("VELOCE VIXEN (6)" while she is 7), a running
+// horse "is SCRATCHED", and running horses no comment is about.
+// -> { tabWrong: [{ name, says, now }], saysScratched: [names], none: [names] }.
 function llmRunnerCommentCheck(runnerComments, runners) {
-  const byTab = new Map(runners.filter((r) => r.tabNo != null).map((r) => [Number(r.tabNo), r]));
-  const wrong = [];
-  const keys = new Set();
-  for (const [k, comment] of Object.entries(runnerComments || {})) {
-    const tab = Number(k);
-    if (!Number.isInteger(tab)) continue;
-    keys.add(tab);
-    const r = byTab.get(tab);
-    if (r && r.isScratched) continue;
-    if (!r) {
-      const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(String(comment || ''));
-      if (m) wrong.push({ tab, horse: null, about: m[1].trim() });
-      continue;
-    }
-    // A running horse handed "SCRATCHED" (Grafton R2 20 Oct, TAB 12 Dellucy).
-    if (/^\s*SCRATCHED\s*\.?\s*$/i.test(String(comment || ''))) {
-      wrong.push({ tab, horse: r.horseName, about: 'SCRATCHED' });
-      continue;
-    }
-    // Only when the comment is about ANOTHER runner here (a misspelling like
-    // "LUMINARY" for Luminaries is not this problem).
-    const check = runnerCommentCheck(r, String(comment || ''));
-    const aboutKey = check.about ? horseKey(check.about) : null;
-    const other = aboutKey && runners.find((o) => o !== r && horseKey(o.horseName) && sameHorse(horseKey(o.horseName), aboutKey));
-    if (other) wrong.push({ tab, horse: r.horseName, about: check.about });
+  const tabWrong = [];
+  const saysScratched = [];
+  const covered = new Set();
+  const unnamed = [];
+  // Comments per horse they name; two naming one horse ("DON'TPUSHSEND (6)"
+  // and "(10)", Wodonga R2): the one with its tab is its, the other is placed
+  // by its tab like an unknown name below.
+  const byRunner = new Map();
+  for (const comment of Object.values(runnerComments || {})) {
+    const text = String(comment || '');
+    const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(text);
+    if (!m) continue;
+    const hit = matchHorse(m[1].trim(), runners);
+    if (!hit.runner) { unnamed.push(Number(m[2])); continue; }
+    if (!byRunner.has(hit.runner)) byRunner.set(hit.runner, []);
+    byRunner.get(hit.runner).push({ text, tab: Number(m[2]) });
   }
-  const none = runners.filter((r) => !r.isScratched && r.tabNo != null && !keys.has(Number(r.tabNo))).map((r) => Number(r.tabNo));
-  return { wrong: wrong.sort((a, b) => a.tab - b.tab), none: none.sort((a, b) => a - b) };
+  for (const [r, list] of byRunner) {
+    const own = list.find((c) => r.tabNo != null && c.tab === Number(r.tabNo)) || list[0];
+    list.filter((c) => c !== own).forEach((c) => unnamed.push(c.tab));
+    covered.add(r);
+    if (r.isScratched) continue;
+    if (/\bSCRATCHED\b/.test(own.text)) saysScratched.push(r.horseName);
+    if (r.tabNo != null && own.tab !== Number(r.tabNo)) tabWrong.push({ name: r.horseName, says: own.tab, now: Number(r.tabNo) });
+  }
+  // A name we can't place ("NINETYFIVEINA50 (8)") is the comment of the horse
+  // with that tab, if no other comment is about it.
+  for (const tab of unnamed) {
+    const r = runners.find((x) => Number(x.tabNo) === tab && !covered.has(x));
+    if (r) covered.add(r);
+  }
+  const byTab = (a, b) => Number(a.tabNo) - Number(b.tabNo);
+  const none = runners.filter((r) => !r.isScratched && !covered.has(r)).sort(byTab).map((r) => r.horseName);
+  return { tabWrong: tabWrong.sort((a, b) => a.now - b.now), saysScratched, none };
 }
 function parseLlmContent(content) {
   try {
@@ -2176,7 +2194,7 @@ async function attachFormLineStatus(docs, options = {}) {
       r.weightKg = enrich ? enrich.weightKg : null;
       r.runnerComment = shownComments.get(r.runnerId) || null;
       r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
-      const nameCheck = runnerCommentCheck(r, r.runnerComment);
+      const nameCheck = runnerCommentCheck(r, r.runnerComment, doc.runners || []);
       r.commentAbout = nameCheck.about || null; // the comment is about another horse
       r.commentMisspelt = nameCheck.misspelt || null; // this horse, misspelt
       r.formFigures = enrich ? enrich.form : null;
@@ -2368,11 +2386,13 @@ const llmCheck = { byRace: new Map(), parsed: new Map(), lastRunAt: null, lastEr
 const LLM_CHECK_EVERY_MS = 10 * 60 * 1000;
 function applyLlmCheck(doc, check) {
   doc.llmCommentCheck = check || null;
-  const wrongByTab = new Map(((check && check.wrong) || []).map((w) => [w.tab, w.about]));
+  const says = new Map(((check && check.tabWrong) || []).map((w) => [w.name, w.says]));
+  const scratched = new Set((check && check.saysScratched) || []);
   const none = new Set((check && check.none) || []);
   for (const r of (doc.runners || [])) {
-    r.llmCommentAbout = wrongByTab.get(Number(r.tabNo)) || null;
-    r.llmCommentNone = none.has(Number(r.tabNo));
+    r.llmTabSays = says.has(r.horseName) ? says.get(r.horseName) : null;
+    r.llmSaysScratched = scratched.has(r.horseName);
+    r.llmCommentNone = none.has(r.horseName);
   }
 }
 function newestLlmByRace(rows) {
