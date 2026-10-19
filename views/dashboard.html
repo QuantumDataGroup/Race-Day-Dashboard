@@ -114,7 +114,7 @@
             <option value="racecommentunknown">Unknown Horse in Race Comment</option>
             <option value="commentwronghorse">Comment Names Wrong Horse</option>
             <option value="namemisspelt">Horse Name Misspelt</option>
-            <option value="commentwrongrunner">Runner Comment on Wrong Runner</option>
+            <option value="aicomment">AI Comment Problem</option>
             <option value="scheduleissue">Schedule Issue</option>
             <option value="hasissues">Meetings with Issues</option>
             <option value="healthy">Healthy Meetings</option>
@@ -966,7 +966,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'comment-wrong-runner'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'ai-comment'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -995,7 +995,7 @@
       'race-comment-unknown': { label: 'Unknown horse in race comment', code: 'racecommentunknown' },
       'comment-wrong-horse': { label: 'Comment names wrong horse', code: 'commentwronghorse' },
       'name-misspelt': { label: 'Horse name misspelt', code: 'namemisspelt' },
-      'comment-wrong-runner': { label: 'Runner comment on wrong runner', code: 'commentwrongrunner' },
+      'ai-comment': { label: 'AI comment problem', code: 'aicomment' },
     };
 
     // Every ignorable issue currently still active on one race cell, read
