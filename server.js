@@ -801,6 +801,7 @@ async function runHealthChecks() {
     `${ps.devices} device${ps.devices === 1 ? '' : 's'}`,
     [`${ps.users} user${ps.users === 1 ? '' : 's'} get pushed alerts · ${ps.sent} sent since start`,
       cu.chat ? `ClickUp Chat at 30 / 10 min · ${alertDispatch.chatSent} message${alertDispatch.chatSent === 1 ? '' : 's'}${alertDispatch.lastChatAt ? `, last ${new Date(alertDispatch.lastChatAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : ''}` : 'ClickUp Chat off',
+      `UK / US comment issues to admins: ${alertDispatch.commentVersionSent || 0}`,
       alertDispatch.lastError || ps.lastError || ''].filter(Boolean).join(' · '));
 
   // Weekly report (Oct 2026).
@@ -1826,6 +1827,33 @@ function runnerCommentFor(runner, byRunnerId, byName, race) {
   }
   return null;
 }
+// runnerId -> comment for one version (v = { byRunnerId, byName }) of a race.
+function runnerCommentsFrom(runners, v) {
+  const race = { keys: new Set(), selfNamed: new Set() };
+  for (const r of runners) {
+    const key = horseKey(r.horseName);
+    if (!key) continue;
+    race.keys.add(key);
+    const named = commentHorseKey(v && v.byRunnerId.get(r.runnerId));
+    if (named && sameHorse(named, key)) race.selfNamed.add(key);
+  }
+  const out = new Map();
+  for (const r of runners) out.set(r.runnerId, v ? runnerCommentFor(r, v.byRunnerId.get(r.runnerId) || null, v.byName, race) : null);
+  return out;
+}
+// Running horses with no comment, and comments giving the horse an old tab.
+function commentProblems(runners, comments) {
+  const missing = [];
+  const tabWrong = [];
+  for (const r of [...runners].sort((x, y) => Number(x.tabNo) - Number(y.tabNo))) {
+    if (r.isScratched) continue;
+    const comment = comments.get(r.runnerId);
+    if (!comment) { missing.push(r.horseName || `#${r.tabNo}`); continue; }
+    const says = commentNamedTab(comment, r.horseName);
+    if (says != null && r.tabNo != null && says !== Number(r.tabNo)) tabWrong.push({ name: r.horseName, says, now: Number(r.tabNo) });
+  }
+  return { missing, tabWrong: tabWrong.sort((x, y) => x.now - y.now) };
+}
 
 // Cross-references each race's runners against the `racecards` collection --
 // the same store TD admin's racecard export reads `FormLines` from
@@ -1910,8 +1938,8 @@ async function attachFormLineStatus(docs, options = {}) {
   // than picking a single winner (4 Sep 2026, per Dinesh -- wants country
   // code, pedigree, and full past-race history on click).
   const enrichByRaceId = new Map();
-  // raceId -> horse name key -> runner comment (see commentHorseKey).
-  const commentByNameByRaceId = new Map();
+  // raceId -> style ('AU' / 'UK' / 'US' / '*' = any) -> { byRunnerId, byName }.
+  const commentsByRaceId = new Map();
   for (const card of cards) {
     const clientLabel = card.Client || 'Default';
     if (!raceCommentByRaceId.has(card.RaceId) && card.RaceComment) raceCommentByRaceId.set(card.RaceId, card.RaceComment);
@@ -1951,14 +1979,20 @@ async function attachFormLineStatus(docs, options = {}) {
       // comments ongalukku access irukka"), a last-run summary distinct from
       // the race-level RaceComment above. Same "first variant found wins"
       // pattern as sire/dam.
-      if (!enrich.comment && r.Comment) enrich.comment = r.Comment;
-      // Also index it by the horse it names ("RICO (10) has been...") --
-      // see runnerCommentFor below.
-      const named = commentHorseKey(r.Comment);
-      if (named) {
-        if (!commentByNameByRaceId.has(card.RaceId)) commentByNameByRaceId.set(card.RaceId, new Map());
-        const byName = commentByNameByRaceId.get(card.RaceId);
-        if (!byName.has(named)) byName.set(named, r.Comment);
+      // Kept per Style (AU / UK / US) and merged ('*'), by RunnerId and by
+      // the horse the comment names ("RICO (10) has been...") -- see
+      // runnerCommentsFrom below. The dashboard shows AU; UK / US are only
+      // checked, for the admin notification (19 Oct 2026, per Dinesh).
+      if (r.Comment) {
+        const named = commentHorseKey(r.Comment);
+        for (const label of [card.Style || 'Default', '*']) {
+          if (!commentsByRaceId.has(card.RaceId)) commentsByRaceId.set(card.RaceId, new Map());
+          const styles = commentsByRaceId.get(card.RaceId);
+          if (!styles.has(label)) styles.set(label, { byRunnerId: new Map(), byName: new Map() });
+          const v = styles.get(label);
+          if (!v.byRunnerId.has(r.RunnerId)) v.byRunnerId.set(r.RunnerId, r.Comment);
+          if (named && !v.byName.has(named)) v.byName.set(named, r.Comment);
+        }
       }
       // Compact form-figures string (e.g. "8x61", "34350x153" -- 18 Sep
       // 2026, per Dinesh, a reference screenshot) -- distinct from FormLines
@@ -1984,14 +2018,18 @@ async function attachFormLineStatus(docs, options = {}) {
     doc.raceComment = raceCommentByRaceId.get(doc._id) || null;
     doc.hasRaceComment = doc.rDiscipline === 'T' ? Boolean(doc.raceComment) : null;
     doc.sexRestriction = sexRestrictionByRaceId.get(doc._id) || null;
-    const raceKeys = { keys: new Set(), selfNamed: new Set() };
-    for (const r of (doc.runners || [])) {
-      const key = horseKey(r.horseName);
-      if (!key) continue;
-      raceKeys.keys.add(key);
-      const enrich = enrichByRunnerId ? enrichByRunnerId.get(r.runnerId) : null;
-      const named = commentHorseKey(enrich && enrich.comment);
-      if (named && sameHorse(named, key)) raceKeys.selfNamed.add(key);
+    // Runner comments: the AU version (any version when the race has no AU
+    // card). UK / US problems go to commentVersionIssues for the admin
+    // notification only, not the dashboard warnings.
+    const styles = commentsByRaceId.get(doc._id) || new Map();
+    const shownComments = runnerCommentsFrom(doc.runners || [], styles.get('AU') || styles.get('*'));
+    doc.commentVersionIssues = [];
+    if (doc.rDiscipline === 'T') {
+      for (const style of ['UK', 'US']) {
+        if (!styles.has(style)) continue;
+        const p = commentProblems(doc.runners || [], runnerCommentsFrom(doc.runners || [], styles.get(style)));
+        if (p.missing.length || p.tabWrong.length) doc.commentVersionIssues.push({ style, ...p });
+      }
     }
     for (const r of (doc.runners || [])) {
       const perClient = byRunnerId ? byRunnerId.get(r.runnerId) : null;
@@ -2009,7 +2047,7 @@ async function attachFormLineStatus(docs, options = {}) {
       r.performanceStatistics = enrich ? enrich.performanceStatistics : null;
       r.currentOdds = enrich ? enrich.currentOdds : null;
       r.weightKg = enrich ? enrich.weightKg : null;
-      r.runnerComment = runnerCommentFor(r, enrich ? enrich.comment : null, commentByNameByRaceId.get(doc._id), raceKeys);
+      r.runnerComment = shownComments.get(r.runnerId) || null;
       r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
       r.formFigures = enrich ? enrich.form : null;
     }
@@ -4160,14 +4198,68 @@ async function dispatchAlerts() {
       : due;
     for (const p of batch) await push.sendTo(recipients, p);
   }
-  const cutoff = nowMs - 24 * 60 * 60 * 1000;
-  for (const [k, t] of Object.entries(alertsSent)) if (t < cutoff) delete alertsSent[k];
-  try { fs.writeFileSync(ALERTS_SENT_PATH, JSON.stringify(alertsSent), 'utf8'); } catch (err) { /* next run */ }
+  saveAlertsSent(nowMs);
   alertDispatch.lastRunAt = new Date().toISOString();
+}
+function saveAlertsSent(nowMs) {
+  // Comment-version keys (cv|) live 3 days: tomorrow's race is checked from today.
+  for (const [k, t] of Object.entries(alertsSent)) if (t < nowMs - (k.startsWith('cv|') ? 72 : 24) * 60 * 60 * 1000) delete alertsSent[k];
+  try { fs.writeFileSync(ALERTS_SENT_PATH, JSON.stringify(alertsSent), 'utf8'); } catch (err) { /* next run */ }
 }
 setInterval(() => {
   dispatchAlerts().catch((err) => { alertDispatch.lastError = err.message; console.warn(`[race-dashboard] WARNING: alert dispatch failed: ${err.message}`); });
 }, ALERT_DISPATCH_EVERY_MS);
+
+// UK / US runner-comment problems -> admins only (19 Oct 2026, per Dinesh:
+// "UK and US vertionla edawadu issue irunda enakku personal ha admin-ku
+// mattu oru notification podunga"). The dashboard shows the AU comments and
+// warns about those as usual. Every 5 minutes, today's and tomorrow's races
+// not run yet: one push per race + version, again only if what's wrong
+// changes. Pushed to the admins' devices that turned alerts on (bell).
+const COMMENT_VERSION_EVERY_MS = 5 * 60 * 1000;
+function commentVersionText(v) {
+  const parts = [];
+  if (v.tabWrong.length) parts.push(`Comment tab wrong: ${v.tabWrong.map((c) => `${c.name} says ${c.says}, now ${c.now}`).join('; ')}`);
+  if (v.missing.length) parts.push(`Missing comment: ${v.missing.join(', ')}`);
+  return parts.join(' · ');
+}
+async function dispatchCommentVersionAlerts() {
+  const admins = (authConfig.users || []).filter((u) => u.role === 'admin').map((u) => u.username).filter((u) => push.users().includes(u));
+  if (!admins.length) return;
+  const nowMs = Date.now();
+  const today = todayStr();
+  const due = [];
+  for (const dateStr of [today, shiftDate(today, 1)]) {
+    const { meetings } = await currentIssues(dateStr);
+    for (const m of meetings) {
+      for (const [rNo, race] of Object.entries(m.races)) {
+        if (!race || !race.commentVersionIssues || !race.commentVersionIssues.length || race.resultString) continue;
+        if (!(Date.parse(race.startUtc || '') > nowMs)) continue;
+        for (const v of race.commentVersionIssues) {
+          const text = commentVersionText(v);
+          const key = `cv|${race.id}|${v.style}|${crypto.createHash('sha1').update(text).digest('hex').slice(0, 12)}`;
+          if (alertsSent[key]) continue;
+          alertsSent[key] = nowMs;
+          due.push({
+            title: `${v.style} comments issue · ${m.meeting} R${rNo} (${m.country})`, body: text,
+            url: raceUrl({ discipline: m.discipline, country: m.country, meeting: m.meeting, date: dateStr, rNo: Number(rNo) }), tag: `cv-${race.id}-${v.style}`,
+          });
+        }
+      }
+    }
+  }
+  if (due.length) {
+    const batch = due.length > 3
+      ? [{ title: `${due.length} UK / US comment issues`, body: due.slice(0, 5).map((d) => d.title.replace(' comments issue', '')).join('\n') + (due.length > 5 ? '\n…' : ''), url: '/', tag: 'comment-versions' }]
+      : due;
+    for (const p of batch) await push.sendTo(admins, p);
+    alertDispatch.commentVersionSent = (alertDispatch.commentVersionSent || 0) + due.length;
+  }
+  saveAlertsSent(nowMs);
+}
+setInterval(() => {
+  dispatchCommentVersionAlerts().catch((err) => { alertDispatch.lastError = `UK/US comment check: ${err.message}`; });
+}, COMMENT_VERSION_EVERY_MS);
 
 // This browser's push subscription (bell panel → "Keep alerting when the tab is closed").
 app.get('/api/push/key', requirePermission('overview'), requireWork, (req, res) => {
