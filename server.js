@@ -1793,6 +1793,17 @@ function editDistance(a, b) {
 function sameHorse(a, b) {
   return a === b || editDistance(a, b) <= Math.max(2, Math.floor(Math.min(a.length, b.length) * 0.15));
 }
+// The tab a runner comment gives its horse ("RICO (10) ..." -> 10) when the
+// comment names this runner, else null. raceView.js warns when the horse has
+// another tab now (19 Oct 2026, per Dinesh -- the Moe R3 comments were
+// written before the field changed).
+function commentNamedTab(comment, horseName) {
+  const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(comment || '');
+  const own = horseKey(horseName);
+  const named = m ? horseKey(m[1]) : null;
+  return named && own && sameHorse(named, own) ? Number(m[2]) : null;
+}
+
 // Only a comment that belongs to ANOTHER runner in this race is taken away
 // (per Dinesh, 18 Oct 2026: if Ctrl+F finds the horse in a comment it isn't
 // missing) -- a misspelt or unknown name, or the name further in ("On 02
@@ -1999,6 +2010,7 @@ async function attachFormLineStatus(docs, options = {}) {
       r.currentOdds = enrich ? enrich.currentOdds : null;
       r.weightKg = enrich ? enrich.weightKg : null;
       r.runnerComment = runnerCommentFor(r, enrich ? enrich.comment : null, commentByNameByRaceId.get(doc._id), raceKeys);
+      r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
       r.formFigures = enrich ? enrich.form : null;
     }
   }

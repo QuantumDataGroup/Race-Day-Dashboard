@@ -109,6 +109,7 @@
             <option value="missingresults">Results Missing</option>
             <option value="missingracecomment">Missing Race Comment</option>
             <option value="scratchedincomment">Scratched Runner in Comment</option>
+            <option value="commenttab">Comment Tab Wrong</option>
             <option value="scheduleissue">Schedule Issue</option>
             <option value="hasissues">Meetings with Issues</option>
             <option value="healthy">Healthy Meetings</option>
@@ -960,7 +961,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -984,6 +985,7 @@
       'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
       'missing-race-comment': { label: 'Missing Race Comment', code: 'missingracecomment' },
       'scratched-in-comment': { label: 'Scratched runner in comment', code: 'scratchedincomment' },
+      'comment-tab': { label: 'Comment tab wrong', code: 'commenttab' },
     };
 
     // Every ignorable issue currently still active on one race cell, read
