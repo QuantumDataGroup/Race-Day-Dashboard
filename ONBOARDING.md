@@ -350,6 +350,16 @@ new tickets start in To Do; Backlog/To Do count as To Do, Need Update/On
 Hold as In Progress, and only a closed status as Done (ClickUp files Review
 under its "done" group — `statusKey`).
 
+### Runner comment versions (AU / UK / US, 19 Oct 2026)
+Racecards carry the runner comments in three Styles. The dashboard shows
+the **AU** ones (any Style when a race has no AU card) and its warnings
+(Missing Runner Comment, Comment Tab Wrong) are about those. UK and US are
+checked too (`commentVersionIssues`: running horses with no comment, old tab
+numbers) but only reach the **admins**: every 5 min `dispatchCommentVersionAlerts`
+pushes one notification per race + Style for today's and tomorrow's races not
+run yet, again only if the list changes (`cv|` keys in alerts-sent.json, kept
+3 days). Admins get it on the devices where they turned alerts on in the bell.
+
 ### Race alerts (bell + browser pop-ups, Oct 2026)
 For users with the **Overview** permission. `renderUserBlock` adds a bell
 and `public/alerts.js`, which polls `/api/alerts` every 60 s. The API lists

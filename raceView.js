@@ -273,7 +273,8 @@ function commentTabWrong(runners, discipline) {
   if (discipline !== 'T' || !Array.isArray(runners)) return [];
   return runners
     .filter((r) => !r.isScratched && r.runnerCommentTab != null && r.tabNo != null && Number(r.runnerCommentTab) !== Number(r.tabNo))
-    .map((r) => ({ name: r.horseName || '', says: Number(r.runnerCommentTab), now: Number(r.tabNo) }));
+    .map((r) => ({ name: r.horseName || '', says: Number(r.runnerCommentTab), now: Number(r.tabNo) }))
+    .sort((a, b) => a.now - b.now);
 }
 function commentTabText(list) {
   return list.map((c) => `${c.name} says ${c.says}, now ${c.now}`).join('; ');
@@ -444,6 +445,9 @@ function buildSchedule(docs, dateStr) {
       missingRaceComment: doc.hasRaceComment === false,
       scratchedInComment: commentScratchCheck(doc, dateStr),
       commentTabWrong: commentTabWrong(doc.runners, doc.rDiscipline),
+      // UK / US runner-comment problems (server.js) -- not a dashboard
+      // warning, only the admin notification (19 Oct 2026, per Dinesh).
+      commentVersionIssues: Array.isArray(doc.commentVersionIssues) ? doc.commentVersionIssues : [],
       status: deriveRaceStatus(doc),
       resultString: doc.resultString || '',
       isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
@@ -496,7 +500,7 @@ function buildSchedule(docs, dateStr) {
     for (const rNo of raceNos) {
       const {
         id, clock, startUtc, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
+        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, commentVersionIssues, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
         missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines,
       } = g.races.get(rNo);
 
@@ -552,6 +556,7 @@ function buildSchedule(docs, dateStr) {
             missingRaceComment,
             scratchedInComment,
             commentTabWrong,
+            commentVersionIssues,
             status,
             resultString,
             isTrial,
