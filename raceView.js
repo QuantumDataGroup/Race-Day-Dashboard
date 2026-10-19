@@ -280,6 +280,31 @@ function commentTabText(list) {
   return list.map((c) => `${c.name} says ${c.says}, now ${c.now}`).join('; ');
 }
 
+// Name checks on the comments (19 Oct 2026, per Dinesh: "Inda madhiri add
+// pannunga" after Comment Tab Wrong). Worked out server-side
+// (attachFormLineStatus: doc.raceCommentCheck, runner commentAbout /
+// commentMisspelt); here they become race issues. code -> grid filter code.
+const COMMENT_CHECKS = {
+  'race-comment-tab': { label: 'Race comment tab wrong', filter: 'racecommenttab' },
+  'race-comment-unknown': { label: 'Unknown horse in race comment', filter: 'racecommentunknown' },
+  'comment-wrong-horse': { label: 'Comment names wrong horse', filter: 'commentwronghorse' },
+  'name-misspelt': { label: 'Horse name misspelt', filter: 'namemisspelt' },
+};
+function commentChecks(doc) {
+  const out = [];
+  if (doc.rDiscipline !== 'T') return out;
+  const running = (doc.runners || []).filter((r) => !r.isScratched);
+  const rc = doc.raceCommentCheck || { tabWrong: [], unknown: [], misspelt: [] };
+  if (rc.tabWrong.length) out.push({ code: 'race-comment-tab', text: `Race comment tab wrong (${commentTabText(rc.tabWrong)})` });
+  if (rc.unknown.length) out.push({ code: 'race-comment-unknown', text: `Unknown horse in race comment (${rc.unknown.join(', ')})` });
+  const about = running.filter((r) => r.commentAbout).map((r) => `${r.horseName}'s comment is about ${r.commentAbout}`);
+  if (about.length) out.push({ code: 'comment-wrong-horse', text: `Comment names wrong horse (${about.join('; ')})` });
+  const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`)
+    .concat(running.filter((r) => r.commentMisspelt).map((r) => `${r.horseName}'s comment: ${r.commentMisspelt}`));
+  if (misspelt.length) out.push({ code: 'name-misspelt', text: `Horse name misspelt (${misspelt.join('; ')})` });
+  return out;
+}
+
 // --- Timezone/UTC cross-check: REMOVED 11 Aug 2026 -------------------------
 //
 // A whole timezone/UTC-offset validation feature (within-meeting peer
@@ -336,6 +361,8 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && isAgeIssue(runner)) parts.push(`Horse age issue (${runner.age} years, over ${MAX_EXPECTED_HORSE_AGE})`);
   if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
+  if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
+  if (discipline === 'T' && runner.commentMisspelt) parts.push(`Name misspelt in comment (${runner.commentMisspelt})`);
   // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
   // waranu... runner name pakkathula like Age, Formline issues" -- attached
   // server-side (attachScratchingStatus) when the external scratchings feed
@@ -445,6 +472,7 @@ function buildSchedule(docs, dateStr) {
       missingRaceComment: doc.hasRaceComment === false,
       scratchedInComment: commentScratchCheck(doc, dateStr),
       commentTabWrong: commentTabWrong(doc.runners, doc.rDiscipline),
+      commentChecks: commentChecks(doc),
       // UK / US runner-comment problems (server.js) -- not a dashboard
       // warning, only the admin notification (19 Oct 2026, per Dinesh).
       commentVersionIssues: Array.isArray(doc.commentVersionIssues) ? doc.commentVersionIssues : [],
@@ -500,7 +528,7 @@ function buildSchedule(docs, dateStr) {
     for (const rNo of raceNos) {
       const {
         id, clock, startUtc, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
-        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, commentVersionIssues, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
+        missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, commentChecks, commentVersionIssues, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
         missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines,
       } = g.races.get(rNo);
 
@@ -556,6 +584,7 @@ function buildSchedule(docs, dateStr) {
             missingRaceComment,
             scratchedInComment,
             commentTabWrong,
+            commentChecks,
             commentVersionIssues,
             status,
             resultString,
@@ -626,6 +655,7 @@ function buildSchedule(docs, dateStr) {
     let hasMissingRaceComment = false;
     let hasScratchedInComment = false;
     let hasCommentTabWrong = false;
+    const commentCheckCodes = new Set();
     let hasScheduleIssue = false;
     let hasAbandoned = false;
     for (const rNo of raceNos) {
@@ -646,14 +676,15 @@ function buildSchedule(docs, dateStr) {
       if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.scratchedInComment && race.scratchedInComment.length) hasScratchedInComment = true;
       if (race.commentTabWrong && race.commentTabWrong.length) hasCommentTabWrong = true;
+      (race.commentChecks || []).forEach((c) => commentCheckCodes.add(c.code));
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
       scheduleNote,
       races,
     });
@@ -1429,6 +1460,7 @@ function raceIssueList(race) {
     add('scratched-in-comment', `Scratched runner in comment (${race.scratchedInComment.map((s) => `${s.tab != null ? `#${s.tab} ` : ''}${s.name}`).join(', ')})`);
   }
   if (race.commentTabWrong && race.commentTabWrong.length) add('comment-tab', `Comment tab wrong (${commentTabText(race.commentTabWrong)})`);
+  (race.commentChecks || []).forEach((c) => add(c.code, c.text));
   if (race.badTime) add('schedule-issue', `Schedule Issue (${race.badTimeReason})`);
   else if (race.highlighted) add('schedule-issue', `Schedule Issue (${race.gapMinutes} min after the previous race)`);
   return out;
@@ -1477,6 +1509,7 @@ const ISSUE_LABELS = {
   'missing-scratching': 'Scratching not updated', 'runner-mismatch': 'Runner missing / mismatched', 'missing-results': 'Results missing',
   'missing-race-comment': 'Missing race comment', 'schedule-issue': 'Schedule issue',
   'scratched-in-comment': 'Scratched runner in comment', 'comment-tab': 'Comment tab wrong',
+  ...Object.fromEntries(Object.entries(COMMENT_CHECKS).map(([code, c]) => [code, c.label])),
 };
 
 // Every issue on a day's schedule, one entry per race + kind (several
@@ -1558,6 +1591,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingRaceComment) otherIssueFlags.push('missing-race-comment');
           if (race.scratchedInComment && race.scratchedInComment.length) otherIssueFlags.push('scratched-in-comment');
           if (race.commentTabWrong && race.commentTabWrong.length) otherIssueFlags.push('comment-tab');
+          (race.commentChecks || []).forEach((c) => otherIssueFlags.push(c.code));
 
           const titleParts = [];
           if (race.isTrial) titleParts.push('Trial race');
@@ -1626,6 +1660,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScratchedInComment) issueCodes.push('scratchedincomment');
         if (m.hasCommentTabWrong) issueCodes.push('commenttab');
+        (m.commentCheckCodes || []).forEach((code) => issueCodes.push(COMMENT_CHECKS[code].filter));
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
         // Tooltip lists exactly which category(ies) triggered the "Issue"
         // pill -- added 10 Aug 2026 after a real support ticket where the
@@ -1649,6 +1684,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScratchedInComment) issueReasons.push('Scratched runner in comment');
         if (m.hasCommentTabWrong) issueReasons.push('Comment tab wrong');
+        (m.commentCheckCodes || []).forEach((code) => issueReasons.push(COMMENT_CHECKS[code].label));
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
         // Trailing "Status" column (15 Sep 2026, per Dinesh, a reference
