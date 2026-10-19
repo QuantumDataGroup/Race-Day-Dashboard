@@ -289,6 +289,9 @@ const COMMENT_CHECKS = {
   'race-comment-unknown': { label: 'Unknown horse in race comment', filter: 'racecommentunknown' },
   'comment-wrong-horse': { label: 'Comment names wrong horse', filter: 'commentwronghorse' },
   'name-misspelt': { label: 'Horse name misspelt', filter: 'namemisspelt' },
+  // The AI comments the client API serves, keyed to the wrong TAB (server.js
+  // llmRunnerCommentCheck; Echuca R2 19 Oct: TAB 8 got "VAULTED (11) ...").
+  'comment-wrong-runner': { label: 'Runner comment on wrong runner', filter: 'commentwrongrunner' },
 };
 function commentChecks(doc) {
   const out = [];
@@ -302,6 +305,12 @@ function commentChecks(doc) {
   const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`)
     .concat(running.filter((r) => r.commentMisspelt).map((r) => `${r.horseName}'s comment: ${r.commentMisspelt}`));
   if (misspelt.length) out.push({ code: 'name-misspelt', text: `Horse name misspelt (${misspelt.join('; ')})` });
+  const llm = doc.llmCommentCheck || { wrong: [], none: [] };
+  if (llm.wrong.length || llm.none.length) {
+    const parts = llm.wrong.map((w) => `TAB ${w.tab}${w.horse ? ` ${w.horse}` : ''} ${w.about === 'SCRATCHED' ? 'gets "SCRATCHED"' : `gets ${w.about}'s comment`}`);
+    if (llm.none.length) parts.push(`no comment for TAB ${llm.none.join(', ')}`);
+    out.push({ code: 'comment-wrong-runner', text: `Runner comment on wrong runner (${parts.join('; ')})` });
+  }
   return out;
 }
 
@@ -363,6 +372,8 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
   if (discipline === 'T' && runner.commentMisspelt) parts.push(`Name misspelt in comment (${runner.commentMisspelt})`);
+  if (discipline === 'T' && runner.llmCommentAbout) parts.push(`Runner comment on wrong runner (${runner.llmCommentAbout === 'SCRATCHED' ? 'gets "SCRATCHED"' : `gets ${runner.llmCommentAbout}'s comment`})`);
+  if (discipline === 'T' && runner.llmCommentNone) parts.push('Runner comment on wrong runner (no comment for this TAB)');
   // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
   // waranu... runner name pakkathula like Age, Formline issues" -- attached
   // server-side (attachScratchingStatus) when the external scratchings feed
