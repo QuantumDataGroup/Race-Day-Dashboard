@@ -149,6 +149,8 @@ Every check below can be filtered on via the dashboard's **"All Issues"**
 dropdown, and a meeting's Status column (✓ / ⚠) opens a race-by-race
 breakdown of exactly which checks fired.
 
+**Abandoned races raise no issues** (20 Oct 2026, per Dinesh): `ABANDONED_QUIET` in raceView.js empties every issue field of an abandoned race in the schedule (grid, meeting Status, Data quality, alerts, UK/US notifications) and the popup shows no runner issues for it.
+
 | Check | Scope | Discipline | Trigger |
 |---|---|---|---|
 | **Missing Jockey** | per-runner (meeting flagged if >0 in any race) | Thoroughbred + Harness only | `jockey` field blank, and not manually confirmed-no-issue |
