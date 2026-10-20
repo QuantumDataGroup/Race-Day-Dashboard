@@ -298,10 +298,9 @@ const COMMENT_CHECKS = {
   'race-comment-unknown': { label: 'Unknown horse in race comment', filter: 'racecommentunknown' },
   'comment-wrong-horse': { label: 'Comment names wrong horse', filter: 'commentwronghorse' },
   'name-misspelt': { label: 'Horse name misspelt', filter: 'namemisspelt' },
-  // The AI comments the client API serves (server.js llmRunnerCommentCheck):
-  // a wrong tab in the text, a running horse "is SCRATCHED", no comment.
-  // Shown as "Runner comment problem" (20 Oct 2026, per Dinesh: "AI comment
-  // mention panna wena, runner comment-nu mention pannunga").
+  // A running horse whose runner comment says it is SCRATCHED. (The code
+  // name is from an earlier AI-comment check; shown as "Runner comment
+  // problem", per Dinesh 20 Oct 2026: never "AI".)
   'ai-comment': { label: 'Runner comment problem', filter: 'aicomment' },
 };
 function commentChecks(doc) {
@@ -313,18 +312,13 @@ function commentChecks(doc) {
   if (rc.unknown.length) out.push({ code: 'race-comment-unknown', text: `Unknown horse in race comment (${rc.unknown.join(', ')})` });
   const about = running.filter((r) => r.commentAbout).map((r) => `${r.horseName}'s comment is about ${r.commentAbout}`);
   if (about.length) out.push({ code: 'comment-wrong-horse', text: `Comment names wrong horse (${about.join('; ')})` });
-  // Race comment only: the racecard the clients get puts the right horse name
-  // at the start of each runner comment itself (Morioka R3 20 Oct, per Dinesh:
-  // "BENEFCTOR (1)" in the DB, "BENEFACTOR (1)" on the racecard).
-  const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`);
+  // Runner comments too again (20 Oct 2026, per Dinesh): the racecard API
+  // clients get says "BENEFCTOR (1)" for Benefactor as well.
+  const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`)
+    .concat(running.filter((r) => r.commentMisspelt).map((r) => `${r.horseName}'s comment: ${r.commentMisspelt}`));
   if (misspelt.length) out.push({ code: 'name-misspelt', text: `Horse name misspelt (${misspelt.join('; ')})` });
-  const llm = doc.llmCommentCheck || { tabWrong: [], saysScratched: [], none: [] };
-  if (llm.tabWrong.length || llm.saysScratched.length || llm.none.length) {
-    const parts = llm.tabWrong.map((w) => `${w.name} says ${w.says}, now ${w.now}`);
-    if (llm.saysScratched.length) parts.push(`says SCRATCHED but running: ${llm.saysScratched.join(', ')}`);
-    if (llm.none.length) parts.push(`no comment: ${llm.none.join(', ')}`);
-    out.push({ code: 'ai-comment', text: `Runner comment problem (${parts.join('; ')})` });
-  }
+  const saysScratched = running.filter((r) => r.commentSaysScratched).map((r) => r.horseName);
+  if (saysScratched.length) out.push({ code: 'ai-comment', text: `Runner comment problem (says SCRATCHED but running: ${saysScratched.join(', ')})` });
   return out;
 }
 
@@ -385,12 +379,8 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
-  // The racecard comments (llm*, server.js) -- not repeated when the line
-  // above already says the same.
-  const sameTab = runner.runnerCommentTab != null && Number(runner.runnerCommentTab) === Number(runner.llmTabSays);
-  if (discipline === 'T' && runner.llmTabSays != null && !sameTab) parts.push(`Runner comment tab wrong (says ${runner.llmTabSays}, now ${runner.tabNo})`);
-  if (discipline === 'T' && runner.llmSaysScratched) parts.push('Runner comment says SCRATCHED');
-  if (discipline === 'T' && runner.llmCommentNone && runner.runnerComment) parts.push('No runner comment');
+  if (discipline === 'T' && runner.commentMisspelt) parts.push(`Name misspelt in comment (${runner.commentMisspelt})`);
+  if (discipline === 'T' && runner.commentSaysScratched) parts.push('Runner comment says SCRATCHED');
   // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
   // waranu... runner name pakkathula like Age, Formline issues" -- attached
   // server-side (attachScratchingStatus) when the external scratchings feed
