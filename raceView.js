@@ -302,8 +302,10 @@ function commentChecks(doc) {
   if (rc.unknown.length) out.push({ code: 'race-comment-unknown', text: `Unknown horse in race comment (${rc.unknown.join(', ')})` });
   const about = running.filter((r) => r.commentAbout).map((r) => `${r.horseName}'s comment is about ${r.commentAbout}`);
   if (about.length) out.push({ code: 'comment-wrong-horse', text: `Comment names wrong horse (${about.join('; ')})` });
-  const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`)
-    .concat(running.filter((r) => r.commentMisspelt).map((r) => `${r.horseName}'s comment: ${r.commentMisspelt}`));
+  // Race comment only: the racecard the clients get puts the right horse name
+  // at the start of each runner comment itself (Morioka R3 20 Oct, per Dinesh:
+  // "BENEFCTOR (1)" in the DB, "BENEFACTOR (1)" on the racecard).
+  const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`);
   if (misspelt.length) out.push({ code: 'name-misspelt', text: `Horse name misspelt (${misspelt.join('; ')})` });
   const llm = doc.llmCommentCheck || { tabWrong: [], saysScratched: [], none: [] };
   if (llm.tabWrong.length || llm.saysScratched.length || llm.none.length) {
@@ -372,7 +374,6 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
-  if (discipline === 'T' && runner.commentMisspelt) parts.push(`Name misspelt in comment (${runner.commentMisspelt})`);
   if (discipline === 'T' && runner.llmTabSays != null) parts.push(`AI comment tab wrong (says ${runner.llmTabSays}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.llmSaysScratched) parts.push('AI comment says SCRATCHED');
   if (discipline === 'T' && runner.llmCommentNone) parts.push('No AI comment');
