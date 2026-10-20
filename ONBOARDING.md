@@ -164,8 +164,8 @@ breakdown of exactly which checks fired.
 | **Race Comment Tab Wrong** | per-race | Thoroughbred only | The (AU) race comment gives a horse another tab ("CITY GOLD SPEED (7)" while it is 8). Filter `racecommenttab` |
 | **Unknown Horse in Race Comment** | per-race | Thoroughbred only | A CAPITALS name + (tab) in the race comment that is no runner here, not even misspelt ("HORSE NAME (3)" templates, a copied comment). 4+ letters only. Filter `racecommentunknown` |
 | **Comment Names Wrong Horse** | per-runner | Thoroughbred only | The runner comment starts with another name ("HORSENAME (1)", "DON'TPUSHSEND (6)" on Don'tmindameeting) and does not name this horse further in. Filter `commentwronghorse` |
-| **Horse Name Misspelt** | race comment | Thoroughbred only | (Runner comments not since 20 Oct 2026: the racecard clients get puts the right name at the start of each runner comment itself, "BENEFCTOR (1)" in the DB shows as "BENEFACTOR (1)".) A name a few letters off ("HEADCUNTER" = Headhunter; up to 25% of the letters, swaps count once). A short form ("DARCY" for Dominant Darcy) is fine. Filter `namemisspelt`. All four: `raceCommentCheck` / `runnerCommentCheck` in server.js, `commentChecks` in raceView.js (19 Oct 2026) |
-| **Runner Comment Problem** (code `ai-comment`; shown as "Runner comment ...", never "AI", per Dinesh 20 Oct 2026) | per-runner | Thoroughbred only | The AI race-card comments the client API serves (`llmContent` RACE_CARD_COMMENTS, newest AU doc). Their runnerComments keys are 1, 2, 3 ... over the runners left after scratchings; the API first gave key "8" to TAB 8 (Echuca R2 19 Oct: TAB 8 got "VAULTED (11) ..."), the devs fixed the API's matching, so the keys are ignored: each comment is matched by the horse it names (two naming one horse: the one with its tab wins; a name that is no runner, e.g. "NINETYFIVEINA50 (8)", goes by its tab) and the TEXT is checked -- the tab it gives, a running horse "is SCRATCHED", running horses no comment is about. llmContent has no raceId index (~6 s a day), so `refreshLlmChecks` runs every 10 min for today + tomorrow; a popup checks its race fresh (attachSpotlights). Filter `aicomment` (19 Oct 2026) |
+| **Horse Name Misspelt** | race + runner comments | Thoroughbred only | A name a few letters off ("HEADCUNTER" = Headhunter; up to 25% of the letters, swaps count once). A short form ("DARCY" for Dominant Darcy) is fine. Filter `namemisspelt`. All four: `raceCommentCheck` / `runnerCommentCheck` in server.js, `commentChecks` in raceView.js (19 Oct 2026) |
+| **Runner Comment Problem** (code `ai-comment`; never shown as "AI") | per-runner | Thoroughbred only | A running horse whose runner comment says it is SCRATCHED ("SYDNEY DOLLARS (5) is SCRATCHED."). Filter `aicomment` |
 | **Missing Race Comment** | per-race | Thoroughbred only | No race-level narrative comment |
 | **Missing Video** | per-race, TODAY's date only | Thoroughbred, AUS/GB/SAF/IRE | No matching file in the S3 video listing |
 | **Missing Speed Map** | per-race | Greyhound only | The external Speed Map feed HAS a prediction for this race, but our own `speedMaps` collection doesn't (a genuine sync gap, not "no prediction made yet") |
@@ -356,6 +356,18 @@ Issues") has Backlog, To Do, In Progress, Need Update, On Hold, Review, Done:
 new tickets start in To Do; Backlog/To Do count as To Do, Need Update/On
 Hold as In Progress, and only a closed status as Done (ClickUp files Review
 under its "done" group — `statusKey`).
+
+### Comments from the racecard API (20 Oct 2026)
+The comment warnings check the comments **as clients get them**: the Troyen racecard API
+(`RACECARD_API_URL`, default `https://external.troyendata.com`, no key; the same API runs on
+this host at :7503, swagger at /swagger). `GET /api/v1/Race/racecard/{raceId}?language=EN&style=AU`
+gives `raceComment` and `runners[].{number, comment}`; a runner's comment is the one with
+`number` = its TAB (how the API matches them). `refreshRacecardApi` fetches today's and
+tomorrow's Thoroughbred races not run yet every 10 min, 4 at a time (~1 s each, ~460 races);
+a popup fetches its race fresh. `applyRacecardApi` swaps the comments in, then
+`applyCommentChecks` runs every comment check. Races with no card (older dates, API down)
+keep the racecards comments. System health row "Racecard API (comments)". The old
+llmContent scan (19 Oct) is gone: the API is what clients see.
 
 ### Runner comment versions (AU / UK / US, 19 Oct 2026)
 Racecards carry the runner comments in three Styles. The dashboard shows

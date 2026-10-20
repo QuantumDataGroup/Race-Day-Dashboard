@@ -796,6 +796,14 @@ async function runHealthChecks() {
   if (!cu.enabled) add('clickup', 'ClickUp tickets', 'ok', 'Not connected', 'Add CLICKUP_API_TOKEN and CLICKUP_LIST_ID to the server settings to turn tickets on');
   else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `List ${cu.listId} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
 
+  // Racecard API (20 Oct 2026): the comments the warnings check.
+  const rcFails = racecardApi.failed && (!racecardApi.races || racecardApi.failed > racecardApi.races / 4);
+  add('racecard-api', 'Racecard API (comments)', !racecardApi.lastRunAt ? 'ok' : rcFails ? 'warn' : 'ok',
+    racecardApi.lastRunAt ? `${racecardApi.races} races` : 'Starting',
+    [`${RACECARD_API_URL} · every ${RACECARD_API_EVERY_MS / 60000} min, today + tomorrow`,
+      racecardApi.lastRunAt ? `last ${new Date(racecardApi.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
+      racecardApi.failed ? `${racecardApi.failed} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
+
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
   const ps = push.status();
   add('alerts', 'Race alerts (push + ClickUp Chat)', alertDispatch.lastError || ps.lastError ? 'warn' : 'ok',
@@ -1914,57 +1922,36 @@ function runnerCommentCheck(runner, comment, runners) {
   return { about: wrote };
 }
 
-// The AI race-card comments in llmContent (what the client API serves, per
-// Dinesh's paste 19 Oct 2026). Their runnerComments keys are 1, 2, 3 ... over
-// the runners left after the scratchings; the API first handed key "8" to
-// TAB 8 (Echuca R2: TAB 8 Ninetyfiveinafifty got "VAULTED (11) ..."), the
-// devs then fixed the API's matching, not the keys. So the keys are ignored
-// here: each comment is matched by the horse it names, and what's checked is
-// the text -- the tab it gives ("VELOCE VIXEN (6)" while she is 7), a running
-// horse "is SCRATCHED", and running horses no comment is about.
-// -> { tabWrong: [{ name, says, now }], saysScratched: [names], none: [names] }.
-function llmRunnerCommentCheck(runnerComments, runners) {
-  const tabWrong = [];
-  const saysScratched = [];
-  const covered = new Set();
-  const unnamed = [];
-  // Comments per horse they name; two naming one horse ("DON'TPUSHSEND (6)"
-  // and "(10)", Wodonga R2): the one with its tab is its, the other is placed
-  // by its tab like an unknown name below.
-  const byRunner = new Map();
-  for (const comment of Object.values(runnerComments || {})) {
-    const text = String(comment || '');
-    const m = /^\s*([^()]+?)\s*\((\d{1,2})\)/.exec(text);
-    if (!m) continue;
-    const hit = matchHorse(m[1].trim(), runners);
-    if (!hit.runner) { unnamed.push(Number(m[2])); continue; }
-    if (!byRunner.has(hit.runner)) byRunner.set(hit.runner, []);
-    byRunner.get(hit.runner).push({ text, tab: Number(m[2]) });
+// The comment checks, on doc.raceComment and each runner's runnerComment:
+// race comment names (raceCommentCheck), the tab a runner comment gives,
+// a comment about another horse / misspelt, and a running horse whose
+// comment says SCRATCHED.
+function applyCommentChecks(doc) {
+  const runners = doc.runners || [];
+  doc.raceCommentCheck = doc.rDiscipline === 'T' && doc.raceComment ? raceCommentCheck(doc.raceComment, runners) : null;
+  for (const r of runners) {
+    r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
+    const nameCheck = runnerCommentCheck(r, r.runnerComment, runners);
+    r.commentAbout = nameCheck.about || null; // the comment is about another horse
+    r.commentMisspelt = nameCheck.misspelt || null; // this horse, misspelt
+    r.commentSaysScratched = !r.isScratched && /\bSCRATCHED\b/.test(r.runnerComment || '');
   }
-  for (const [r, list] of byRunner) {
-    const own = list.find((c) => r.tabNo != null && c.tab === Number(r.tabNo)) || list[0];
-    list.filter((c) => c !== own).forEach((c) => unnamed.push(c.tab));
-    covered.add(r);
-    if (r.isScratched) continue;
-    if (/\bSCRATCHED\b/.test(own.text)) saysScratched.push(r.horseName);
-    if (r.tabNo != null && own.tab !== Number(r.tabNo)) tabWrong.push({ name: r.horseName, says: own.tab, now: Number(r.tabNo) });
-  }
-  // A name we can't place ("NINETYFIVEINA50 (8)") is the comment of the horse
-  // with that tab, if no other comment is about it.
-  for (const tab of unnamed) {
-    const r = runners.find((x) => Number(x.tabNo) === tab && !covered.has(x));
-    if (r) covered.add(r);
-  }
-  const byTab = (a, b) => Number(a.tabNo) - Number(b.tabNo);
-  const none = runners.filter((r) => !r.isScratched && !covered.has(r)).sort(byTab).map((r) => r.horseName);
-  return { tabWrong: tabWrong.sort((a, b) => a.now - b.now), saysScratched, none };
 }
-function parseLlmContent(content) {
-  try {
-    return JSON.parse(String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
-  } catch (e) {
-    return null;
+// A race's comments from its racecard API card (racecardApi), matched the
+// way the API matches them: runner "number" = our TAB. No card: the
+// racecards comments stay. Then the checks.
+function applyRacecardApi(doc, card) {
+  doc.commentSource = card && doc.rDiscipline === 'T' ? 'racecard-api' : 'racecards';
+  if (card && doc.rDiscipline === 'T') {
+    const byNo = new Map(card.runners.map((x) => [x.number, x]));
+    for (const r of (doc.runners || [])) {
+      const x = byNo.get(Number(r.tabNo));
+      r.runnerComment = x && x.comment ? x.comment : null;
+    }
+    doc.raceComment = card.raceComment;
+    doc.hasRaceComment = Boolean(card.raceComment);
   }
+  applyCommentChecks(doc);
 }
 
 // runnerId -> comment for one version (v = { byRunnerId, byName }) of a race.
@@ -2171,11 +2158,6 @@ async function attachFormLineStatus(docs, options = {}) {
         if (p.missing.length || p.tabWrong.length) doc.commentVersionIssues.push({ style, ...p });
       }
     }
-    // Names in the (AU) race comment: tab wrong, unknown horse, misspelt.
-    doc.raceCommentCheck = doc.rDiscipline === 'T' && doc.raceComment ? raceCommentCheck(doc.raceComment, doc.runners || []) : null;
-    // AI comments keyed to the wrong TAB, from the background check (a popup
-    // refreshes it in attachSpotlights).
-    applyLlmCheck(doc, llmCheck.byRace.get(doc._id));
     for (const r of (doc.runners || [])) {
       const perClient = byRunnerId ? byRunnerId.get(r.runnerId) : null;
       r.formLinesByClient = perClient || null; // null -- no racecard found for this runner at all
@@ -2193,12 +2175,11 @@ async function attachFormLineStatus(docs, options = {}) {
       r.currentOdds = enrich ? enrich.currentOdds : null;
       r.weightKg = enrich ? enrich.weightKg : null;
       r.runnerComment = shownComments.get(r.runnerId) || null;
-      r.runnerCommentTab = commentNamedTab(r.runnerComment, r.horseName);
-      const nameCheck = runnerCommentCheck(r, r.runnerComment, doc.runners || []);
-      r.commentAbout = nameCheck.about || null; // the comment is about another horse
-      r.commentMisspelt = nameCheck.misspelt || null; // this horse, misspelt
       r.formFigures = enrich ? enrich.form : null;
     }
+    // The racecard API's comments when we have them (what clients get), then
+    // the comment checks on whichever comments the race shows.
+    applyRacecardApi(doc, racecardApi.byRace.get(doc._id));
   }
 }
 
@@ -2328,6 +2309,7 @@ async function loadRaceById(id) {
     // whole grid), same as the racecards/video joins above. Everything
     // below runs in parallel -- each is a separate round trip to the remote
     // DB or a (cached) feed.
+    const freshCard = doc.rDiscipline === 'T' ? fetchRacecardCard(doc._id).catch(() => racecardApi.byRace.get(doc._id) || null) : null;
     await Promise.all([
       client.db().collection('speedMaps').findOne({ rId: doc._id }, { projection: { predictions: 1 } }).then((speedMapDoc) => {
         doc.speedMapPredictions = speedMapDoc && Array.isArray(speedMapDoc.predictions) ? speedMapDoc.predictions : null;
@@ -2345,6 +2327,9 @@ async function loadRaceById(id) {
       attachSpotlights(doc),
       attachCommentsV2(doc),
     ]);
+    // The racecard API's comments, fresh for the race being opened (fetched
+    // alongside the rest above; the background copy if the API doesn't answer).
+    if (doc.rDiscipline === 'T') applyRacecardApi(doc, await freshCard);
     attachRunnersCheck([doc]);
   }
   return doc;
@@ -2378,66 +2363,63 @@ async function attachCommentsV2(doc) {
 // the newest wins. Kept per style here; buildRaceDetail picks the race
 // country's. llmContent has no raceId index, so this is a collection scan
 // (~0.4 s), only done for the one race a popup opens.
-// AI runner comments keyed to the wrong TAB (llmRunnerCommentCheck). The
-// newest AU llmContent doc per race; llmContent has no raceId index, so a
-// whole day costs ~6 s -- done every 10 minutes for today and tomorrow in the
-// background, cached here, and fresh for the one race a popup opens.
-const llmCheck = { byRace: new Map(), parsed: new Map(), lastRunAt: null, lastError: null };
-const LLM_CHECK_EVERY_MS = 10 * 60 * 1000;
-function applyLlmCheck(doc, check) {
-  doc.llmCommentCheck = check || null;
-  const says = new Map(((check && check.tabWrong) || []).map((w) => [w.name, w.says]));
-  const scratched = new Set((check && check.saysScratched) || []);
-  const none = new Set((check && check.none) || []);
-  for (const r of (doc.runners || [])) {
-    r.llmTabSays = says.has(r.horseName) ? says.get(r.horseName) : null;
-    r.llmSaysScratched = scratched.has(r.horseName);
-    r.llmCommentNone = none.has(r.horseName);
-  }
+// Runner and race comments as the clients get them (20 Oct 2026, per Dinesh:
+// "API-ku maathunga"): the Troyen racecard API, no key needed
+// (RACECARD_API_URL, default the public external.troyendata.com; the same
+// API runs on this host at :7503). It can differ from our racecards copy
+// (the API matches comments to runners itself), so the comment warnings
+// follow it. Today's and tomorrow's Thoroughbred races not run yet, every
+// 10 minutes, 4 at a time (~1 s each); a popup fetches its race fresh.
+// Races it has no card for keep the racecards comments.
+const RACECARD_API_URL = (process.env.RACECARD_API_URL || 'https://external.troyendata.com').replace(/\/$/, '');
+const RACECARD_API_EVERY_MS = 10 * 60 * 1000;
+const racecardApi = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, failed: 0, running: false };
+async function fetchRacecardCard(raceId) {
+  const res = await fetch(`${RACECARD_API_URL}/api/v1/Race/racecard/${encodeURIComponent(raceId)}?language=EN&style=AU`, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`racecard API HTTP ${res.status}`);
+  const j = await res.json();
+  const card = {
+    at: Date.now(),
+    raceComment: j.raceComment ? String(j.raceComment) : null,
+    runners: (Array.isArray(j.runners) ? j.runners : []).map((x) => ({ number: Number(x.number), comment: x.comment ? String(x.comment) : null })),
+  };
+  racecardApi.byRace.set(raceId, card);
+  while (racecardApi.byRace.size > 3000) racecardApi.byRace.delete(racecardApi.byRace.keys().next().value);
+  return card;
 }
-function newestLlmByRace(rows) {
-  const out = new Map();
-  for (const r of rows) if (!out.has(r.raceId) || String(r.updatedAt || '') > String(out.get(r.raceId).updatedAt || '')) out.set(r.raceId, r);
-  return out;
-}
-async function refreshLlmChecks() {
-  const db = (await getClient()).db();
-  const today = todayStr();
-  for (const dateStr of [today, shiftDate(today, 1)]) {
-    const docs = (await fetchRaceDocs(dateStr, false)).filter((d) => d.rDiscipline === 'T');
-    if (!docs.length) continue;
-    const light = await db.collection('llmContent')
-      .find({ raceId: { $in: docs.map((d) => d._id) }, contentType: 'RACE_CARD_COMMENTS', 'contentInfo.style': 'AU' })
-      .project({ raceId: 1, updatedAt: 1 }).toArray();
-    const latest = newestLlmByRace(light);
-    const need = [...latest.values()].map((r) => r._id).filter((id) => !llmCheck.parsed.has(id));
-    for (let i = 0; i < need.length; i += 100) {
-      const rows = await db.collection('llmContent').find({ _id: { $in: need.slice(i, i + 100) } }).project({ content: 1 }).toArray();
-      for (const row of rows) {
-        const parsed = parseLlmContent(row.content);
-        llmCheck.parsed.set(row._id, parsed && parsed.runnerComments ? parsed.runnerComments : null);
+async function refreshRacecardApi() {
+  if (racecardApi.running) return;
+  racecardApi.running = true;
+  try {
+    const today = todayStr();
+    let races = 0;
+    let failed = 0;
+    let lastError = null;
+    for (const dateStr of [today, shiftDate(today, 1)]) {
+      const docs = (await fetchRaceDocs(dateStr, false))
+        .filter((d) => d.rDiscipline === 'T' && !d.resultString && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED');
+      for (let i = 0; i < docs.length; i += 4) {
+        await Promise.all(docs.slice(i, i + 4).map(async (d) => {
+          try {
+            applyRacecardApi(d, await fetchRacecardCard(d._id)); // the cached day docs show it straight away
+            races++;
+          } catch (err) {
+            failed++;
+            lastError = err.message;
+          }
+        }));
       }
     }
-    for (const d of docs) {
-      const row = latest.get(d._id);
-      const comments = row ? llmCheck.parsed.get(row._id) : null;
-      if (comments) llmCheck.byRace.set(d._id, llmRunnerCommentCheck(comments, d.runners || []));
-      else llmCheck.byRace.delete(d._id);
-      applyLlmCheck(d, llmCheck.byRace.get(d._id)); // the cached day docs show it straight away
-    }
+    Object.assign(racecardApi, { lastRunAt: new Date().toISOString(), races, failed, lastError });
+  } catch (err) {
+    racecardApi.lastError = err.message;
+    console.warn(`[race-dashboard] WARNING: racecard API check failed: ${err.message}`);
+  } finally {
+    racecardApi.running = false;
   }
-  for (const m of [llmCheck.parsed, llmCheck.byRace]) while (m.size > 5000) m.delete(m.keys().next().value);
-  llmCheck.lastRunAt = new Date().toISOString();
-  llmCheck.lastError = null;
 }
-function runLlmChecks() {
-  refreshLlmChecks().catch((err) => {
-    llmCheck.lastError = err.message;
-    console.warn(`[race-dashboard] WARNING: AI runner comment check failed: ${err.message}`);
-  });
-}
-setTimeout(runLlmChecks, 2 * 60 * 1000);
-setInterval(runLlmChecks, LLM_CHECK_EVERY_MS);
+setTimeout(refreshRacecardApi, 60 * 1000);
+setInterval(refreshRacecardApi, RACECARD_API_EVERY_MS);
 
 async function attachSpotlights(doc) {
   doc.llmSpotlights = null;
@@ -2459,12 +2441,6 @@ async function attachSpotlights(doc) {
         .filter((s) => s && (s.horse || s.name))
         .map((s) => ({ horse: String(s.horse || ''), name: String(s.name || ''), explanation: String(s.explanation || '') }));
       if (spotlights.length) byStyle[String((row.contentInfo || {}).style || 'AU').toUpperCase()] = spotlights;
-      // Rows are oldest first, so the last AU one wins: the wrong-TAB check, fresh.
-      if (doc.rDiscipline === 'T' && String((row.contentInfo || {}).style || '').toUpperCase() === 'AU' && parsed && parsed.runnerComments) {
-        const check = llmRunnerCommentCheck(parsed.runnerComments, doc.runners || []);
-        llmCheck.byRace.set(doc._id, check); // attachFormLineStatus runs alongside and reads this
-        applyLlmCheck(doc, check);
-      }
     }
     if (Object.keys(byStyle).length) doc.llmSpotlights = byStyle;
   } catch (err) {
