@@ -300,7 +300,9 @@ const COMMENT_CHECKS = {
   'name-misspelt': { label: 'Horse name misspelt', filter: 'namemisspelt' },
   // The AI comments the client API serves (server.js llmRunnerCommentCheck):
   // a wrong tab in the text, a running horse "is SCRATCHED", no comment.
-  'ai-comment': { label: 'AI comment problem', filter: 'aicomment' },
+  // Shown as "Runner comment problem" (20 Oct 2026, per Dinesh: "AI comment
+  // mention panna wena, runner comment-nu mention pannunga").
+  'ai-comment': { label: 'Runner comment problem', filter: 'aicomment' },
 };
 function commentChecks(doc) {
   const out = [];
@@ -321,7 +323,7 @@ function commentChecks(doc) {
     const parts = llm.tabWrong.map((w) => `${w.name} says ${w.says}, now ${w.now}`);
     if (llm.saysScratched.length) parts.push(`says SCRATCHED but running: ${llm.saysScratched.join(', ')}`);
     if (llm.none.length) parts.push(`no comment: ${llm.none.join(', ')}`);
-    out.push({ code: 'ai-comment', text: `AI comment problem (${parts.join('; ')})` });
+    out.push({ code: 'ai-comment', text: `Runner comment problem (${parts.join('; ')})` });
   }
   return out;
 }
@@ -383,9 +385,12 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && !runner.runnerComment) parts.push('Missing runner comment');
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
-  if (discipline === 'T' && runner.llmTabSays != null) parts.push(`AI comment tab wrong (says ${runner.llmTabSays}, now ${runner.tabNo})`);
-  if (discipline === 'T' && runner.llmSaysScratched) parts.push('AI comment says SCRATCHED');
-  if (discipline === 'T' && runner.llmCommentNone) parts.push('No AI comment');
+  // The racecard comments (llm*, server.js) -- not repeated when the line
+  // above already says the same.
+  const sameTab = runner.runnerCommentTab != null && Number(runner.runnerCommentTab) === Number(runner.llmTabSays);
+  if (discipline === 'T' && runner.llmTabSays != null && !sameTab) parts.push(`Runner comment tab wrong (says ${runner.llmTabSays}, now ${runner.tabNo})`);
+  if (discipline === 'T' && runner.llmSaysScratched) parts.push('Runner comment says SCRATCHED');
+  if (discipline === 'T' && runner.llmCommentNone && runner.runnerComment) parts.push('No runner comment');
   // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
   // waranu... runner name pakkathula like Age, Formline issues" -- attached
   // server-side (attachScratchingStatus) when the external scratchings feed
