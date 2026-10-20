@@ -54,6 +54,15 @@ const STATUS_LABELS = {
 //   - rStatus "INTERIM"                                -> completed (provisional, pending confirmation)
 //   - isOpen === false (none of the above matched)     -> running (betting closed, no result yet -- in/near its live window)
 //   - anything else (isOpen true or missing)           -> upcoming
+// Every issue field of a schedule race, emptied -- what an abandoned race
+// gets (buildSchedule; schedule issues are dropped there too).
+const ABANDONED_QUIET = {
+  missingJockeyCount: 0, duplicateJockeyCount: 0, tabIssueCount: 0, missingTrainerCount: 0, missingFormCount: 0,
+  ageIssueCount: 0, missingRunnerCommentCount: 0, missingRaceComment: false, scratchedInComment: [], commentTabWrong: [],
+  commentChecks: [], commentVersionIssues: [], missingVideo: false, missingSpeedMap: false, missingScratching: false,
+  missingScratchingNames: [], runnerMismatch: false, runnerMismatchCount: 0, runnerCheckLines: [],
+};
+
 function deriveRaceStatus(doc) {
   if (doc.isAbandoned) return 'abandoned';
   const rStatus = String(doc.rStatus || '').trim().toUpperCase();
@@ -464,7 +473,7 @@ function buildSchedule(docs, dateStr) {
     if (existingRace && ingestTime(existingRace.createdAt) >= ingestTime(doc.createdAt)) {
       continue;
     }
-    group.races.set(doc.rNo, {
+    const entry = {
       id: doc._id,
       createdAt: doc.createdAt || null,
       clock: parseClock(doc.rScheduleTime),
@@ -519,7 +528,12 @@ function buildSchedule(docs, dateStr) {
       runnerMismatch: Boolean(doc.runnerMismatch),
       runnerMismatchCount: (doc.runners || []).filter((r) => Array.isArray(r.runnerCheckDiffs) && !r.isScratched).length,
       runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
-    });
+    };
+    // An abandoned race raises no issues at all (20 Oct 2026, per Dinesh:
+    // "Abandoned meeting-la edawadu issue irunda ignore pannunga, Missing
+    // Jockey and Scratching anda madhiri enda issue wandalu").
+    if (entry.status === 'abandoned') Object.assign(entry, ABANDONED_QUIET);
+    group.races.set(doc.rNo, entry);
   }
 
   const meetings = [];
@@ -572,6 +586,7 @@ function buildSchedule(docs, dateStr) {
           badTimeReason = `${Math.floor(gapMinutes / 60)}h ${String(gapMinutes % 60).padStart(2, '0')}m after R${prevRNo} (${prevLabel})`;
         }
       }
+      if (status === 'abandoned') { badTimeReason = null; highlighted = false; }
 
       races[rNo] = clock
         ? {
@@ -846,6 +861,8 @@ function pickSpotlights(byStyle, country) {
 // "fp" present), runners are sorted by finishing position instead of tab
 // number, and each runner carries its finishing position for display.
 function buildRaceDetail(doc) {
+  // Abandoned: no issues in the popup either (see ABANDONED_QUIET).
+  const abandoned = deriveRaceStatus(doc) === 'abandoned';
   const counts = jockeyCounts(doc.runners);
   const tabCounts = tabNoCounts(doc.runners);
   const clock = parseClock(doc.rScheduleTime);
@@ -909,9 +926,9 @@ function buildRaceDetail(doc) {
       // Thoroughbred only (18 Sep 2026, per Dinesh).
       formFigures: r.formFigures || null,
       isScratched: Boolean(r.isScratched),
-      issue: issueForRunner(r, doc.rDiscipline, counts, tabCounts),
+      issue: abandoned ? '' : issueForRunner(r, doc.rDiscipline, counts, tabCounts),
       // Runner check issues with their keys (popup Ignore buttons).
-      runnerCheckItems: Array.isArray(r.runnerCheckItems) && !r.isScratched ? r.runnerCheckItems : [],
+      runnerCheckItems: Array.isArray(r.runnerCheckItems) && !r.isScratched && !abandoned ? r.runnerCheckItems : [],
     }));
 
   // Marks the single lowest-priced non-scratched runner as the market
@@ -950,19 +967,19 @@ function buildRaceDetail(doc) {
     isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
     // Matches buildSchedule's rule: the "missing" warning only applies to
     // today's races (videos only ever get uploaded same-day).
-    missingVideo: doc.hasVideo === false && doc.rDate === todayStr(),    videoUrl: doc.videoUrl || null,
+    missingVideo: !abandoned && doc.hasVideo === false && doc.rDate === todayStr(),    videoUrl: doc.videoUrl || null,
     // Race-level runners check differences (a runner absent or scratched on one
     // side); per-runner ones are in each runner's issue text.
-    runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
-    runnerCheckLineItems: Array.isArray(doc.runnerCheckLineItems) ? doc.runnerCheckLineItems : [],
+    runnerCheckLines: Array.isArray(doc.runnerCheckLines) && !abandoned ? doc.runnerCheckLines : [],
+    runnerCheckLineItems: Array.isArray(doc.runnerCheckLineItems) && !abandoned ? doc.runnerCheckLineItems : [],
     runnersCheckedAt: doc.runnersCheckedAt || null,
     // Race-level preview commentary from the racecards join (Thoroughbred
     // only -- see server.js's attachFormLineStatus). `hasRaceComment` is
     // null (not false) for non-T races, so this stays false for them too.
     raceComment: doc.raceComment || null,
-    missingRaceComment: doc.hasRaceComment === false,
+    missingRaceComment: !abandoned && doc.hasRaceComment === false,
     // Scratched runners the comment still mentions (15 Oct 2026): warned and highlighted in the popup.
-    scratchedInComment: commentScratchCheck(doc),
+    scratchedInComment: abandoned ? [] : commentScratchCheck(doc),
     // Spotlights from `llmContent` (server.js's attachSpotlights), in the
     // race country's style, falling back to any style the race has:
     // [{ horse, name, explanation }].
