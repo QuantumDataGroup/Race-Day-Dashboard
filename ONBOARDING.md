@@ -360,7 +360,7 @@ under its "done" group — `statusKey`).
 ### Comments from the racecard API (20 Oct 2026)
 The comment warnings check the comments **as clients get them**: the Troyen racecard API
 (`RACECARD_API_URL`, default `https://external.troyendata.com`, no key; the same API runs on
-this host at :7503, swagger at /swagger). `GET /api/v1/Race/racecard/{raceId}?language=EN&style=AU`
+this host at :7503, swagger at /swagger). `GET /api/v1/Race/racecard/{raceId}?language=EN&style=AU&ignoreCache=true` (ignoreCache=true since 21 Oct 2026: each URL form has its own cached copy, Cloudflare too, and a re-scraped fix kept its old text in ours -- Mombetsu R6 "REDFEET (10)")
 gives `raceComment` and `runners[].{number, comment}`; a runner's comment is the one with
 `number` = its TAB (how the API matches them). `refreshRacecardApi` fetches today's and
 tomorrow's Thoroughbred races not run yet every 10 min, 4 at a time (~1 s each, ~460 races), and the races jumping in the next 3 hours every 2 min (~45; 21 Oct 2026);

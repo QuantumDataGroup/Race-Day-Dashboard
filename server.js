@@ -2374,7 +2374,10 @@ const RACECARD_API_URL = (process.env.RACECARD_API_URL || 'https://external.troy
 const RACECARD_API_EVERY_MS = 10 * 60 * 1000;
 const racecardApi = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, failed: 0, running: false };
 async function fetchRacecardCard(raceId) {
-  const res = await fetch(`${RACECARD_API_URL}/api/v1/Race/racecard/${encodeURIComponent(raceId)}?language=EN&style=AU`, { signal: AbortSignal.timeout(15000) });
+  // ignoreCache=true (21 Oct 2026, per Dinesh / the devs): each URL form has
+  // its own cached copy, and a race fixed after a re-scrape kept its old text
+  // in ours ("REDFEET (10)" for Redcoat, Mombetsu R6) -- fresh is ~0.7 s too.
+  const res = await fetch(`${RACECARD_API_URL}/api/v1/Race/racecard/${encodeURIComponent(raceId)}?language=EN&style=AU&ignoreCache=true`, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`racecard API HTTP ${res.status}`);
   const j = await res.json();
   const card = {
