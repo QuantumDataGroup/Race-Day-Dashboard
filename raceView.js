@@ -864,6 +864,23 @@ function pickSpotlights(byStyle, country) {
 // When the race has finished (resultString and/or per-runner finish position
 // "fp" present), runners are sorted by finishing position instead of tab
 // number, and each runner carries its finishing position for display.
+// The popup's own race issues, worked out from the race it just loaded (the
+// grid cell's copy can be minutes old -- Te Aroha R8 21 Oct 2026 offered a
+// "Horse name missing" ticket the fresh popup no longer had). Kinds that
+// need the whole meeting (gaps between races, later races' results) are
+// left out; the page keeps those from the grid.
+const MEETING_WIDE_ISSUES = new Set(['schedule-issue', 'missing-results']);
+function popupIssues(doc) {
+  try {
+    const schedule = buildSchedule([doc], doc.rDate);
+    const race = Object.values(schedule.byDiscipline).flatMap((x) => x.meetings)
+      .flatMap((m) => Object.values(m.races)).find((r) => r && r.id === doc._id);
+    return race ? raceIssueList(race).filter((i) => !MEETING_WIDE_ISSUES.has(i.code)) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function buildRaceDetail(doc) {
   // Abandoned: no issues in the popup either (see ABANDONED_QUIET).
   const abandoned = deriveRaceStatus(doc) === 'abandoned';
@@ -984,6 +1001,8 @@ function buildRaceDetail(doc) {
     missingRaceComment: !abandoned && doc.hasRaceComment === false,
     // Scratched runners the comment still mentions (15 Oct 2026): warned and highlighted in the popup.
     scratchedInComment: abandoned ? [] : commentScratchCheck(doc),
+    // This race's issues, fresh (ticket buttons; see popupIssues).
+    issues: abandoned ? [] : popupIssues(doc),
     // Spotlights from `llmContent` (server.js's attachSpotlights), in the
     // race country's style, falling back to any style the race has:
     // [{ horse, name, explanation }].
