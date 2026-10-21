@@ -157,7 +157,7 @@ breakdown of exactly which checks fired.
 | **Duplicate Jockey** | per-runner | T + H only | Same (non-placeholder) jockey name assigned to more than one runner in the same race |
 | **Missing/Duplicate TAB number** | per-runner | all | Runner has no tab number, or shares one with another runner in the race |
 | **Missing Trainer** | per-runner | all | `trainer` field blank |
-| **Missing Form Lines** | per-race count, meeting flagged if count > 3 | Thoroughbred only | Runner has no racecards FormLines data from ANY feed variant |
+| **Missing Form Lines** | per-race count, meeting flagged if count > 3 | Thoroughbred only | Runner has no racecards FormLines data from ANY feed variant. First starters (racecard career `0:0-0-0`) are skipped |
 | **Horse Age Issue** | per-runner | Thoroughbred only | Age > 10 years, and not manually confirmed-no-issue |
 | **Missing Runner Comment** | per-runner | Thoroughbred only | No `runnerComment` on the racecards join. The comment that names the horse ("RICO (10) ...") wins over the RunnerId match, since a racecard written before the field changed has its comments on the old tabs' RunnerIds (`runnerCommentFor`, 18 Oct 2026) |
 | **Comment Tab Wrong** | per-runner | Thoroughbred only | The runner comment names this horse with another tab number ("RICO (10)" while Rico is now 13) -- written before the field changed. `commentNamedTab` (server.js) reads the number, `commentTabWrong` (raceView.js) compares; filter code `commenttab` (19 Oct 2026) |
