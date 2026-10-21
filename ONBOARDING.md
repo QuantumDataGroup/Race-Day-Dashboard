@@ -364,7 +364,7 @@ The comment warnings check the comments **as clients get them**: the Troyen race
 this host at :7503, swagger at /swagger). `GET /api/v1/Race/racecard/{raceId}?language=EN&style=AU&ignoreCache=true` (ignoreCache=true since 21 Oct 2026: each URL form has its own cached copy, Cloudflare too, and a re-scraped fix kept its old text in ours -- Mombetsu R6 "REDFEET (10)")
 gives `raceComment` and `runners[].{number, comment}`; a runner's comment is the one with
 `number` = its TAB (how the API matches them). `refreshRacecardApi` fetches today's and
-tomorrow's Thoroughbred races not run yet every 10 min, 4 at a time (~1 s each, ~460 races), and the races jumping in the next 3 hours every 2 min (~45; 21 Oct 2026);
+tomorrow's Thoroughbred races (today's resulted ones too) every 10 min, 4 at a time (~1 s each, ~550 races), and the races jumping in the next 3 hours every 2 min (~45; 21 Oct 2026); a copy older than 25 min is not used -- the racecards copy can keep "HORSENAME (n)" after the API is fixed (Te Aroha R8). The popup returns its own `issues` (raceView popupIssues) and its ticket buttons use them, not the grid cell's copy;
 a popup fetches its race fresh. `applyRacecardApi` swaps the comments in, then
 `applyCommentChecks` runs every comment check. Races with no card (older dates, API down)
 keep the racecards comments. System health row "Racecard API (comments)". The old
