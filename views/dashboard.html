@@ -1536,10 +1536,21 @@
       list.forEach(function (i) { (byCode[i.code] = byCode[i.code] || []).push(i.text); });
       return Object.keys(byCode).map(function (code) { return { code: code, texts: byCode[code] }; });
     }
+    // The popup's own fresh issues (race.issues from the server) when it has
+    // them; only the meeting-wide kinds still come from the grid cell (21 Oct
+    // 2026: the cell's copy can be minutes old).
+    function raceIssuesForTickets(race) {
+      if (!Array.isArray(race.issues)) return raceIssuesFromGrid(race.id);
+      var meetingWide = { 'schedule-issue': true, 'missing-results': true };
+      var byCode = {};
+      race.issues.forEach(function (i) { (byCode[i.code] = byCode[i.code] || []).push(i.text); });
+      return Object.keys(byCode).map(function (code) { return { code: code, texts: byCode[code] }; })
+        .concat(raceIssuesFromGrid(race.id).filter(function (i) { return meetingWide[i.code]; }));
+    }
     function renderTicketBar(race) {
       var bar = document.getElementById('tkRaise');
       if (!bar) return;
-      var issues = raceIssuesFromGrid(race.id);
+      var issues = raceIssuesForTickets(race);
       if (!issues.length) return;
       _ticketCtx = { race: race, issues: issues, tickets: {}, members: [], enabled: null };
       var draw = function () {

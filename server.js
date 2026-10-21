@@ -2183,9 +2183,13 @@ async function attachFormLineStatus(docs, options = {}) {
       r.runnerComment = shownComments.get(r.runnerId) || null;
       r.formFigures = enrich ? enrich.form : null;
     }
-    // The racecard API's comments when we have them (what clients get), then
-    // the comment checks on whichever comments the race shows.
-    applyRacecardApi(doc, racecardApi.byRace.get(doc._id));
+    // The racecard API's comments when we have a recent copy (what clients
+    // get), then the comment checks on whichever comments the race shows.
+    // Only recent: a resulted race is no longer fetched, and its last copy
+    // kept a "HORSENAME (n)" version long after the card was fixed (Te
+    // Aroha R8 21 Oct 2026, per Dinesh) -- then the racecards copy is used.
+    const card = racecardApi.byRace.get(doc._id);
+    applyRacecardApi(doc, card && Date.now() - card.at < RACECARD_API_FRESH_MS ? card : null);
   }
 }
 
@@ -2374,11 +2378,13 @@ async function attachCommentsV2(doc) {
 // (RACECARD_API_URL, default the public external.troyendata.com; the same
 // API runs on this host at :7503). It can differ from our racecards copy
 // (the API matches comments to runners itself), so the comment warnings
-// follow it. Today's and tomorrow's Thoroughbred races not run yet, every
-// 10 minutes, 4 at a time (~1 s each); a popup fetches its race fresh.
-// Races it has no card for keep the racecards comments.
+// follow it. Today's and tomorrow's Thoroughbred races (today's resulted
+// ones too), every 10 minutes, 4 at a time (~1 s each); a popup fetches its
+// race fresh. Races with no recent card (older dates) keep the racecards
+// comments, which can be out of date.
 const RACECARD_API_URL = (process.env.RACECARD_API_URL || 'https://external.troyendata.com').replace(/\/$/, '');
 const RACECARD_API_EVERY_MS = 10 * 60 * 1000;
+const RACECARD_API_FRESH_MS = 25 * 60 * 1000; // older copies aren't used (see attachFormLineStatus)
 const racecardApi = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, failed: 0, running: false };
 async function fetchRacecardCard(raceId) {
   // ignoreCache=true (21 Oct 2026, per Dinesh / the devs): each URL form has
@@ -2411,10 +2417,14 @@ async function refreshRacecardApi(soonOnly) {
     let failed = 0;
     let lastError = null;
     for (const dateStr of [today, shiftDate(today, 1)]) {
+      // Today's resulted races too in the full pass: without a card they fall
+      // back to the racecards copy, which can keep "HORSENAME (n)" after the
+      // API is fixed (Te Aroha R8 21 Oct 2026).
       const docs = (await fetchRaceDocs(dateStr, false))
-        .filter((d) => d.rDiscipline === 'T' && !d.resultString && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED')
+        .filter((d) => d.rDiscipline === 'T' && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED')
         .filter((d) => {
           if (!soonOnly) return true;
+          if (d.resultString) return false;
           const raw = String(d.rScheduleTimeUTC || '');
           const start = Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`); // UTC, with or without the zone
           return Number.isFinite(start) && start > now - 10 * 60 * 1000 && start < now + RACECARD_API_SOON_WINDOW_MS;
