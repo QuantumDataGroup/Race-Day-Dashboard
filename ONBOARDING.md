@@ -385,7 +385,9 @@ For users with the **Overview** permission. `renderUserBlock` adds a bell
 and `public/alerts.js`, which polls `/api/alerts` every 60 s. The API lists
 races (today + tomorrow, Sri Lanka day) that jump within 3 h and still have
 an issue not marked fixed, plus any late scratching not yet updated
-(`missing-scratching`) whatever the time. Missing jockeys carry a source
+(`missing-scratching`) whatever the time, and today's **Results missing**
+(`missing-results`: a race run with no results while a later race at the
+meeting has them), which pops up / pushes once straight away. Missing jockeys carry a source
 hint from the Runners check state ("Source (Neds) has: …" / "Not on the
 source (Neds) either"). Pop-ups fire once per race at **3 h, 2 h, 1 h,
 30 min, 10 min** before the jump and once straight away for a late
