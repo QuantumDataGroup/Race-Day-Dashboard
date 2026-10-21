@@ -799,7 +799,7 @@ async function runHealthChecks() {
   const rcFails = racecardApi.failed && (!racecardApi.races || racecardApi.failed > racecardApi.races / 4);
   add('racecard-api', 'Racecard API (comments)', !racecardApi.lastRunAt ? 'ok' : rcFails ? 'warn' : 'ok',
     racecardApi.lastRunAt ? `${racecardApi.races} races` : 'Starting',
-    [`${RACECARD_API_URL} · every ${RACECARD_API_EVERY_MS / 60000} min, today + tomorrow`,
+    [`${RACECARD_API_URL} · every ${RACECARD_API_EVERY_MS / 60000} min, today + tomorrow; races in the next 3 h every ${RACECARD_API_SOON_EVERY_MS / 60000} min${racecardApi.lastSoonAt ? ` (${racecardApi.soonRaces || 0} last time)` : ''}`,
       racecardApi.lastRunAt ? `last ${new Date(racecardApi.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
       racecardApi.failed ? `${racecardApi.failed} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
 
@@ -2386,17 +2386,29 @@ async function fetchRacecardCard(raceId) {
   while (racecardApi.byRace.size > 3000) racecardApi.byRace.delete(racecardApi.byRace.keys().next().value);
   return card;
 }
-async function refreshRacecardApi() {
+// soonOnly: just the races jumping in the next 3 hours (every 2 minutes, per
+// Dinesh 21 Oct 2026: "10 mts time a reduce panna"); the full pass stays
+// every 10 minutes.
+const RACECARD_API_SOON_EVERY_MS = 2 * 60 * 1000;
+const RACECARD_API_SOON_WINDOW_MS = 3 * 60 * 60 * 1000;
+async function refreshRacecardApi(soonOnly) {
   if (racecardApi.running) return;
   racecardApi.running = true;
   try {
     const today = todayStr();
+    const now = Date.now();
     let races = 0;
     let failed = 0;
     let lastError = null;
     for (const dateStr of [today, shiftDate(today, 1)]) {
       const docs = (await fetchRaceDocs(dateStr, false))
-        .filter((d) => d.rDiscipline === 'T' && !d.resultString && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED');
+        .filter((d) => d.rDiscipline === 'T' && !d.resultString && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED')
+        .filter((d) => {
+          if (!soonOnly) return true;
+          const raw = String(d.rScheduleTimeUTC || '');
+          const start = Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`); // UTC, with or without the zone
+          return Number.isFinite(start) && start > now - 10 * 60 * 1000 && start < now + RACECARD_API_SOON_WINDOW_MS;
+        });
       for (let i = 0; i < docs.length; i += 4) {
         await Promise.all(docs.slice(i, i + 4).map(async (d) => {
           try {
@@ -2409,7 +2421,8 @@ async function refreshRacecardApi() {
         }));
       }
     }
-    Object.assign(racecardApi, { lastRunAt: new Date().toISOString(), races, failed, lastError });
+    if (soonOnly) Object.assign(racecardApi, { lastSoonAt: new Date().toISOString(), soonRaces: races });
+    else Object.assign(racecardApi, { lastRunAt: new Date().toISOString(), races, failed, lastError });
   } catch (err) {
     racecardApi.lastError = err.message;
     console.warn(`[race-dashboard] WARNING: racecard API check failed: ${err.message}`);
@@ -2417,8 +2430,9 @@ async function refreshRacecardApi() {
     racecardApi.running = false;
   }
 }
-setTimeout(refreshRacecardApi, 60 * 1000);
-setInterval(refreshRacecardApi, RACECARD_API_EVERY_MS);
+setTimeout(() => refreshRacecardApi(false), 60 * 1000);
+setInterval(() => refreshRacecardApi(false), RACECARD_API_EVERY_MS);
+setInterval(() => refreshRacecardApi(true), RACECARD_API_SOON_EVERY_MS);
 
 async function attachSpotlights(doc) {
   doc.llmSpotlights = null;

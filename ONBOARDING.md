@@ -363,7 +363,7 @@ The comment warnings check the comments **as clients get them**: the Troyen race
 this host at :7503, swagger at /swagger). `GET /api/v1/Race/racecard/{raceId}?language=EN&style=AU`
 gives `raceComment` and `runners[].{number, comment}`; a runner's comment is the one with
 `number` = its TAB (how the API matches them). `refreshRacecardApi` fetches today's and
-tomorrow's Thoroughbred races not run yet every 10 min, 4 at a time (~1 s each, ~460 races);
+tomorrow's Thoroughbred races not run yet every 10 min, 4 at a time (~1 s each, ~460 races), and the races jumping in the next 3 hours every 2 min (~45; 21 Oct 2026);
 a popup fetches its race fresh. `applyRacecardApi` swaps the comments in, then
 `applyCommentChecks` runs every comment check. Races with no card (older dates, API down)
 keep the racecards comments. System health row "Racecard API (comments)". The old
