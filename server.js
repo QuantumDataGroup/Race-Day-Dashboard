@@ -1886,10 +1886,12 @@ function raceCommentCheck(comment, runners) {
   const tabWrong = [];
   const unknown = [];
   const misspelt = [];
+  let placeholders = 0; // "HORSE NAME (3)": the template word, no name
   const seen = new Set();
   for (const m of commentMentions(comment)) {
     if (seen.has(`${m.wrote}|${m.tab}`)) continue;
     seen.add(`${m.wrote}|${m.tab}`);
+    if (horseKey(m.wrote.split(/\.\s+/).pop()) === 'HORSENAME') { placeholders++; continue; }
     const hit = matchHorse(m.wrote, runners);
     if (!hit.runner) {
       // 1-3 letters ("V", "ART") is too little to call it a horse.
@@ -1899,7 +1901,7 @@ function raceCommentCheck(comment, runners) {
     if (!hit.exact) misspelt.push({ wrote: hit.wrote, horse: hit.runner.horseName });
     if (hit.runner.tabNo != null && Number(hit.runner.tabNo) !== m.tab) tabWrong.push({ name: hit.runner.horseName, says: m.tab, now: Number(hit.runner.tabNo) });
   }
-  return { tabWrong, unknown, misspelt };
+  return { tabWrong, unknown, misspelt, placeholders };
 }
 // A runner comment's lead name vs the horse: { misspelt } a couple of letters
 // off, { about } another horse (unless the horse is named further in).
@@ -1911,6 +1913,9 @@ function runnerCommentCheck(runner, comment, runners) {
   const wrote = (caps ? caps[1] : m[1]).trim();
   const key = horseKey(wrote);
   if (!key || key === own) return {};
+  // The template word left in, no name at all (Strathalbyn R5 21 Oct 2026:
+  // "HORSENAME (1) was always chasing ...").
+  if (key === 'HORSENAME') return { placeholder: true };
   if (sameHorse(key, own)) return { misspelt: wrote };
   if (nameAlike(key, own, 3)) return {}; // a short form of the name
   if (horseKey(comment).includes(own)) return {};
@@ -1933,6 +1938,7 @@ function applyCommentChecks(doc) {
     const nameCheck = runnerCommentCheck(r, r.runnerComment, runners);
     r.commentAbout = nameCheck.about || null; // the comment is about another horse
     r.commentMisspelt = nameCheck.misspelt || null; // this horse, misspelt
+    r.commentPlaceholder = Boolean(nameCheck.placeholder); // "HORSENAME (n)", no name
     r.commentSaysScratched = !r.isScratched && /\bSCRATCHED\b/.test(r.runnerComment || '');
   }
 }

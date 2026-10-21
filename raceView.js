@@ -298,6 +298,9 @@ const COMMENT_CHECKS = {
   'race-comment-unknown': { label: 'Unknown horse in race comment', filter: 'racecommentunknown' },
   'comment-wrong-horse': { label: 'Comment names wrong horse', filter: 'commentwronghorse' },
   'name-misspelt': { label: 'Horse name misspelt', filter: 'namemisspelt' },
+  // "HORSENAME (1) ..." -- the template word, the name never filled in
+  // (Strathalbyn R5 21 Oct 2026, per Dinesh: not a misspelling).
+  'name-missing': { label: 'Horse name missing in comment', filter: 'namemissing' },
   // A running horse whose runner comment says it is SCRATCHED. (The code
   // name is from an earlier AI-comment check; shown as "Runner comment
   // problem", per Dinesh 20 Oct 2026: never "AI".)
@@ -317,6 +320,11 @@ function commentChecks(doc) {
   const misspelt = rc.misspelt.map((x) => `race comment: ${x.wrote} = ${x.horse}`)
     .concat(running.filter((r) => r.commentMisspelt).map((r) => `${r.horseName}'s comment: ${r.commentMisspelt}`));
   if (misspelt.length) out.push({ code: 'name-misspelt', text: `Horse name misspelt (${misspelt.join('; ')})` });
+  const noName = running.filter((r) => r.commentPlaceholder).map((r) => r.horseName);
+  if (noName.length || rc.placeholders) {
+    const where = (rc.placeholders ? ['race comment'] : []).concat(noName.length ? [`runner comments of ${noName.join(', ')}`] : []);
+    out.push({ code: 'name-missing', text: `Horse name missing in comment ("HORSENAME" instead of the name: ${where.join('; ')})` });
+  }
   const saysScratched = running.filter((r) => r.commentSaysScratched).map((r) => r.horseName);
   if (saysScratched.length) out.push({ code: 'ai-comment', text: `Runner comment problem (says SCRATCHED but running: ${saysScratched.join(', ')})` });
   return out;
@@ -380,6 +388,7 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (discipline === 'T' && commentTabWrong([runner], discipline).length) parts.push(`Comment tab wrong (says ${runner.runnerCommentTab}, now ${runner.tabNo})`);
   if (discipline === 'T' && runner.commentAbout) parts.push(`Comment names wrong horse (${runner.commentAbout})`);
   if (discipline === 'T' && runner.commentMisspelt) parts.push(`Name misspelt in comment (${runner.commentMisspelt})`);
+  if (discipline === 'T' && runner.commentPlaceholder) parts.push('Horse name missing in comment (says "HORSENAME")');
   if (discipline === 'T' && runner.commentSaysScratched) parts.push('Runner comment says SCRATCHED');
   // 22 Sep 2026, per Dinesh: "Scratching update aagi illanna warning
   // waranu... runner name pakkathula like Age, Formline issues" -- attached
