@@ -3017,6 +3017,13 @@
       for (var i = 0; i < openMenus.length; i++) {
         if (!openMenus[i].contains(e.target)) openMenus[i].removeAttribute('open');
       }
+      // Status column race-by-race issue lists too (21 Oct 2026, per Dinesh:
+      // opening a second one left the first open on top of it) -- only one
+      // stays open, and a click anywhere else closes it.
+      var openIssueLists = document.querySelectorAll('details.status-detail[open]');
+      for (var j = 0; j < openIssueLists.length; j++) {
+        if (!openIssueLists[j].contains(e.target)) openIssueLists[j].removeAttribute('open');
+      }
       // Same outside-click-to-close idea for the date picker.
       var pickerWrap = document.getElementById('datePickerWrap');
       if (pickerWrap && !pickerWrap.contains(e.target)) {
