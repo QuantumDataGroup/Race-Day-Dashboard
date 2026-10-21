@@ -5,7 +5,9 @@
 // - Races starting in the next 3 hours with an open issue pop up once at 3h,
 //   2h, 1h, 30 min and 10 min to the jump. An issue marked "Not at source yet"
 //   only pops up again at 30 and 10 min.
-// - A late scratching not yet updated in ours pops up straight away.
+// - A late scratching not yet updated in ours pops up straight away, and so
+//   do results missing (a race run with no results while a later race at the
+//   meeting has them, 21 Oct 2026).
 // - Each alert: Updated (marks it fixed) / Not at source yet, and the race.
 // - Pop-ups and sound are per browser (on/off in the bell panel). Pop-ups
 //   only work while a dashboard tab is open.
@@ -54,6 +56,7 @@
   }
   function inText(m) {
     if (m == null) return '';
+    if (m < -5) return 'ran';
     if (m < 0) return 'started';
     if (m < 60) return 'in ' + Math.max(1, Math.round(m)) + ' min';
     return 'in ' + Math.floor(m / 60) + ' h ' + String(Math.round(m % 60)).padStart(2, '0') + ' m';
@@ -183,6 +186,10 @@
           seen['ls|' + i.key] = Date.now();
           due.push({ title: 'Late scratching not updated · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + inText(m) + ': ' + i.detail, url: race.raceUrl, tag: 'ls-' + race.raceId });
         }
+        if (i.missingResult && i.workflow !== 'fixed' && !seen['mr|' + i.key]) {
+          seen['mr|' + i.key] = Date.now();
+          due.push({ title: 'Results missing · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + (race.time || '') + ': no results yet, a later race already has them', url: race.raceUrl, tag: 'mr-' + race.raceId });
+        }
       });
       var milestone = milestoneFor(m);
       if (milestone == null || m < -5) return;
@@ -212,7 +219,7 @@
     if (!data) return 0;
     return data.races.filter(function (race) {
       var m = minsTo(race);
-      return liveIssues(race, milestoneFor(m)).length || race.issues.some(function (i) { return i.lateScratching && i.workflow !== 'fixed'; });
+      return liveIssues(race, milestoneFor(m)).length || race.issues.some(function (i) { return (i.lateScratching || i.missingResult) && i.workflow !== 'fixed'; });
     }).length;
   }
 

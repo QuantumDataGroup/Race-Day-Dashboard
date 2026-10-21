@@ -4310,7 +4310,11 @@ async function buildAlerts() {
       // the 3-hour window like the rest (12 Oct 2026: a race 19 h away
       // looked like a wrong time).
       const anyTime = lateScratching && dateStr === today;
-      if (mins < -5 || (mins > ALERT_WINDOW_MIN && !anyTime)) continue;
+      // Results missing (21 Oct 2026, per Dinesh): a race that has run with
+      // no result while a later race at the meeting has one -- alerted
+      // straight away, after the jump, like a late scratching.
+      const missingResult = i.code === 'missing-results' && dateStr === today;
+      if ((mins < -5 && !missingResult) || (mins > ALERT_WINDOW_MIN && !anyTime && !missingResult)) continue;
       const w = issueTracker.statusOf(i.key);
       if (w.status === 'fixed') continue;
       const race = byRace.get(i.raceId) || {
@@ -4320,7 +4324,7 @@ async function buildAlerts() {
         issues: [],
       };
       race.issues.push({
-        key: i.key, code: i.code, label: i.label, detail: i.detail, lateScratching,
+        key: i.key, code: i.code, label: i.label, detail: i.detail, lateScratching, missingResult,
         workflow: w.status, owner: w.owner || null, note: w.note || '', updatedBy: w.updatedBy || null,
         source: i.code === 'missing-jockey' ? jockeySourceHint(i.raceId) : null,
       });
@@ -4405,7 +4409,13 @@ async function dispatchAlerts() {
         alertsSent[`ls|${i.key}`] = nowMs;
         due.push({ title: `Late scratching not updated · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${minutesText(mins)}: ${i.detail}`, url: race.raceUrl, tag: `ls-${race.raceId}` });
       }
+      if (i.missingResult && i.workflow !== 'fixed' && !alertsSent[`mr|${i.key}`]) {
+        alertsSent[`mr|${i.key}`] = nowMs;
+        due.push({ title: `Results missing · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${race.time || ''}: no results yet, a later race already has them`, url: race.raceUrl, tag: `mr-${race.raceId}` });
+      }
     }
+    // A race that has run only had its results-missing alert above.
+    if (mins < -5) continue;
     const milestone = milestoneFor(mins);
     if (milestone == null || mins < -5) continue;
     const list = liveAlertIssues(race, milestone);
