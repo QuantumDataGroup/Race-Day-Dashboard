@@ -1945,8 +1945,19 @@ function applyCommentChecks(doc) {
 // A race's comments from its racecard API card (racecardApi), matched the
 // way the API matches them: runner "number" = our TAB. No card: the
 // racecards comments stay. Then the checks.
-function applyRacecardApi(doc, card) {
+// pending: the racecard API hasn't been read yet since a restart -- the
+// racecards copy can be out of date ("HORSENAME (1)" on Te Aroha R8 after
+// the card was fixed), so its comments show but raise no comment warnings
+// until the API's copy comes (21 Oct 2026, per Dinesh).
+function applyRacecardApi(doc, card, pending) {
   doc.commentSource = card && doc.rDiscipline === 'T' ? 'racecard-api' : 'racecards';
+  if (!card && pending && doc.rDiscipline === 'T') {
+    doc.raceCommentCheck = null;
+    for (const r of (doc.runners || [])) {
+      Object.assign(r, { runnerCommentTab: null, commentAbout: null, commentMisspelt: null, commentPlaceholder: false, commentSaysScratched: false });
+    }
+    return;
+  }
   if (card && doc.rDiscipline === 'T') {
     const byNo = new Map(card.runners.map((x) => [x.number, x]));
     for (const r of (doc.runners || [])) {
@@ -2199,7 +2210,7 @@ async function attachFormLineStatus(docs, options = {}) {
     // kept a "HORSENAME (n)" version long after the card was fixed (Te
     // Aroha R8 21 Oct 2026, per Dinesh) -- then the racecards copy is used.
     const card = racecardApi.byRace.get(doc._id);
-    applyRacecardApi(doc, card && Date.now() - card.at < RACECARD_API_FRESH_MS ? card : null);
+    applyRacecardApi(doc, card && Date.now() - card.at < RACECARD_API_FRESH_MS ? card : null, racecardApiPending(doc));
   }
 }
 
@@ -2270,7 +2281,7 @@ async function loadRaceDocs(dateStr, includeTrials) {
     .find(filter)
     .project({
       _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1,
-      meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1, rScheduleTimeUTC: 1,
+      meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1, rScheduleTimeUTC: 1, rDate: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
       'runners.trainer': 1, 'runners.horseName': 1, 'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1,
       'runners.weight': 1, // runners check weight issues (attachRunnersCheck)
@@ -2396,6 +2407,14 @@ const RACECARD_API_URL = (process.env.RACECARD_API_URL || 'https://external.troy
 const RACECARD_API_EVERY_MS = 10 * 60 * 1000;
 const RACECARD_API_FRESH_MS = 25 * 60 * 1000; // older copies aren't used (see attachFormLineStatus)
 const racecardApi = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, failed: 0, running: false };
+// The first full pass after a restart hasn't finished, and this race is one
+// it reads (today / tomorrow). Not past 15 minutes, in case the pass never
+// finishes -- then the racecards copy's warnings show again.
+function racecardApiPending(doc) {
+  if (racecardApi.lastRunAt || Date.now() - SERVER_STARTED_AT.getTime() > 15 * 60 * 1000) return false;
+  const today = todayStr();
+  return doc.rDate === today || doc.rDate === shiftDate(today, 1);
+}
 async function fetchRacecardCard(raceId) {
   // ignoreCache=true (21 Oct 2026, per Dinesh / the devs): each URL form has
   // its own cached copy, and a race fixed after a re-scrape kept its old text
@@ -2460,7 +2479,7 @@ async function refreshRacecardApi(soonOnly) {
     racecardApi.running = false;
   }
 }
-setTimeout(() => refreshRacecardApi(false), 60 * 1000);
+setTimeout(() => refreshRacecardApi(false), 15 * 1000);
 setInterval(() => refreshRacecardApi(false), RACECARD_API_EVERY_MS);
 setInterval(() => refreshRacecardApi(true), RACECARD_API_SOON_EVERY_MS);
 

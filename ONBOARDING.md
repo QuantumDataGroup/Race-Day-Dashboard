@@ -367,7 +367,10 @@ gives `raceComment` and `runners[].{number, comment}`; a runner's comment is the
 tomorrow's Thoroughbred races (today's resulted ones too) every 10 min, 4 at a time (~1 s each, ~550 races), and the races jumping in the next 3 hours every 2 min (~45; 21 Oct 2026); a copy older than 25 min is not used -- the racecards copy can keep "HORSENAME (n)" after the API is fixed (Te Aroha R8). The popup returns its own `issues` (raceView popupIssues) and its ticket buttons use them, not the grid cell's copy;
 a popup fetches its race fresh. `applyRacecardApi` swaps the comments in, then
 `applyCommentChecks` runs every comment check. Races with no card (older dates, API down)
-keep the racecards comments. System health row "Racecard API (comments)". The old
+keep the racecards comments. After a restart, until the first full pass finishes (starts
+15 s in, ~1 min; at most 15 min), today's and tomorrow's races raise **no comment warnings**
+from the racecards copy (`racecardApiPending`) -- it showed a stale "Horse name missing" on
+every deploy. System health row "Racecard API (comments)". The old
 llmContent scan (19 Oct) is gone: the API is what clients see.
 
 ### Runner comment versions (AU / UK / US, 19 Oct 2026)
