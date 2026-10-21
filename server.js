@@ -2028,6 +2028,7 @@ async function attachFormLineStatus(docs, options = {}) {
         RaceId: 1, Client: 1, Style: 1, RaceComment: 1, SexRestriction: 1,
         Runners: { $map: { input: { $ifNull: ['$Runners', []] }, as: 'r', in: {
           RunnerId: '$$r.RunnerId', Comment: '$$r.Comment', formLineCount: { $size: { $ifNull: ['$$r.FormLines', []] } },
+          career: '$$r.PerformanceStatistics.career',
         } } },
       } },
     ]).toArray()
@@ -2072,6 +2073,8 @@ async function attachFormLineStatus(docs, options = {}) {
   const enrichByRaceId = new Map();
   // raceId -> style ('AU' / 'UK' / 'US' / '*' = any) -> { byRunnerId, byName }.
   const commentsByRaceId = new Map();
+  // runnerId -> true when the racecard says no career starts yet.
+  const firstStarter = new Map();
   for (const card of cards) {
     const clientLabel = card.Client || 'Default';
     if (!raceCommentByRaceId.has(card.RaceId) && card.RaceComment) raceCommentByRaceId.set(card.RaceId, card.RaceComment);
@@ -2088,6 +2091,12 @@ async function attachFormLineStatus(docs, options = {}) {
       // -- OR them together rather than letting whichever comes back last win.
       const perRunner = byRunnerId.get(r.RunnerId);
       perRunner[clientLabel] = perRunner[clientLabel] || hasLines;
+      // First starter (21 Oct 2026, per Dinesh): career "0:0-0-0" -- no
+      // past races, so no form lines is expected, not missing. Any variant
+      // showing a start wins over one showing none.
+      const careerText = options.light ? r.career : r.PerformanceStatistics && r.PerformanceStatistics.career;
+      const starts = /^\s*(\d+)\s*:/.exec(careerText || '');
+      if (starts) firstStarter.set(r.RunnerId, Number(starts[1]) === 0 && firstStarter.get(r.RunnerId) !== false);
 
       if (!enrichByRunnerId.has(r.RunnerId)) {
         enrichByRunnerId.set(r.RunnerId, { region: null, sire: null, dam: null, colour: null, formLinesVariants: [], performanceStatistics: null, currentOdds: null, weightKg: null, comment: null, form: null });
@@ -2168,7 +2177,9 @@ async function attachFormLineStatus(docs, options = {}) {
       r.formLinesByClient = perClient || null; // null -- no racecard found for this runner at all
       // no racecard data -> can't confirm a gap, don't flag. The manual
       // "confirm no form" override is applied on top by applyFormLineIgnores.
-      r.hasFormLinesRaw = perClient ? Boolean(perClient.Default) : true;
+      // A first starter has no form lines to miss.
+      r.firstStarter = firstStarter.get(r.runnerId) === true;
+      r.hasFormLinesRaw = perClient && !r.firstStarter ? Boolean(perClient.Default) : true;
 
       const enrich = enrichByRunnerId ? enrichByRunnerId.get(r.runnerId) : null;
       r.region = enrich ? enrich.region : null;
