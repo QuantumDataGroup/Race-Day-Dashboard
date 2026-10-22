@@ -822,7 +822,7 @@ async function runHealthChecks() {
 
   // RAS times (22 Oct 2026): the Time mismatch check.
   add('ras-times', 'Race times (RAS)', rasTimes.lastError ? 'warn' : 'ok',
-    rasTimes.lastRunAt ? `${rasTimes.races} races` : 'Starting',
+    rasTimes.lastRunAt ? `${rasTimes.races} races` : rasTimes.lastError ? 'Failed' : 'Starting',
     [`${TIME_CHECK_COUNTRIES.join(', ')} · every ${RAS_TIMES_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
       rasTimes.lastRunAt ? `last ${new Date(rasTimes.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
       rasTimes.lastError ? `failed: ${rasTimes.lastError}` : ''].filter(Boolean).join(' · '));
@@ -2534,8 +2534,7 @@ async function refreshRasTimes() {
     const byRace = new Map();
     let races = 0;
     for (const dateStr of [today, shiftDate(today, 1)]) {
-      const res = await fetch(`${RUNNERS_API_URL}?date=${dateStr}`, { signal: AbortSignal.timeout(90000) });
-      if (!res.ok) throw new Error(`RAS API HTTP ${res.status}`);
+      const res = await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`);
       const j = await res.json();
       const rasByKey = new Map();
       for (const m of (j.meetings || [])) {
