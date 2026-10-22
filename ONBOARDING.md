@@ -173,6 +173,7 @@ breakdown of exactly which checks fired.
 | **Scratching Not Updated** | per-race AND per-runner | all | The external Scratchings feed lists a runner (by tab/box number) as scratched, but our own race doc doesn't have that runner marked `isScratched` yet |
 | **Scratched Runner in Comment** (15 Oct 2026) | per-race: every race from tomorrow on, plus today's races still more than 12 h from the jump (a runner scratched closer to the race is a late scratching, not an issue) | Thoroughbred (wherever there's a race comment) | The race comment still mentions a runner scratched in our race doc — by tab number in brackets "(8)" or by the horse's name in capitals (`scratchedInComment` in raceView.js). The popup shows a warning and strikes the name through in the comment |
 | **Results Missing** | per-race | all | This race has no result, but a LATER race (higher race number) at the SAME meeting already does — abandoned races and trials are excluded (no result is ever expected there) |
+| **Time Mismatch** | per-race | all, AUS/MEX/PAN/SPA/CHI/ARG/URU/BRZ/SAU/GB/IRE | A race not run yet whose RAS API start time is more than 2 min from ours. Popup **Ignore** (per race + that RAS time). See "Time mismatch (RAS)" below |
 | **Schedule Issue** | per-race | all | Either: (a) scheduled time is a placeholder `00:00`, (b) two races at the same meeting share the exact same scheduled time, or (c) this race is scheduled less than 15 minutes after the previous race at the same meeting |
 
 Two meeting-level filter options aggregate the above: **"Meetings with
@@ -382,6 +383,20 @@ numbers) but only reach the **admins**: every 5 min `dispatchCommentVersionAlert
 pushes one notification per race + Style for today's and tomorrow's races not
 run yet, again only if the list changes (`cv|` keys in alerts-sent.json, kept
 3 days). Admins get it on the devices where they turned alerts on in the bell.
+
+### Time mismatch (RAS, 22 Oct 2026)
+`refreshRasTimes` reads the RAS meetings API (`RUNNERS_API_URL?date=`, same as the runners
+check) for today and tomorrow every 10 min. Its `start_time` is UTC. The reply for a date
+**mixes the day before and after** (Healesville came twice: the 22nd's and the 23rd's), so
+only meetings whose `local_race_dates` has the date are used, and of two with the same name
+the one closest to our times. Matched on country (RAS `UK` = our `GB`) + course name
+(letters/digits only; `RAS_COURSE_ALIAS` for Panama) + discipline, then race number.
+`applyTimeMismatch` (in `applyAllIgnores`, so on every read) flags a race not started,
+resulted or abandoned whose RAS time is more than `TIME_MISMATCH_MIN` (2) min from ours,
+unless ignored: `POST /api/race/:raceId/time-mismatch-ignore` stores raceId + RAS time in
+`time-mismatch-ignores.json` (`TIME_MISMATCH_IGNORE_PATH`), so a new RAS time warns again.
+After the jump RAS shows the real start time, so run races aren't compared. Countries:
+`TIME_CHECK_COUNTRIES`. System health row "Race times (RAS)".
 
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into

@@ -107,6 +107,7 @@
             <option value="missingscratching">Scratching Not Updated</option>
             <option value="runnermismatch">Runner Missing / Mismatched</option>
             <option value="missingresults">Results Missing</option>
+            <option value="timemismatch">Time Mismatch</option>
             <option value="missingracecomment">Missing Race Comment</option>
             <option value="scratchedincomment">Scratched Runner in Comment</option>
             <option value="commenttab">Comment Tab Wrong</option>
@@ -967,7 +968,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'name-missing', 'ai-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'time-mismatch', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'name-missing', 'ai-comment'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -987,6 +988,7 @@
       'missing-scratching': { label: 'Scratching Not Updated', code: 'missingscratching' },
       'runner-mismatch': { label: 'Runner Missing / Mismatched', code: 'runnermismatch' },
       'missing-results': { label: 'Results Missing', code: 'missingresults' },
+      'time-mismatch': { label: 'Time Mismatch', code: 'timemismatch' },
       'horse-age-issue': { label: 'Horse Age Issue', code: 'ageissue' },
       'missing-runner-comment': { label: 'Missing Runner Comment', code: 'missingrunnercomment' },
       'missing-race-comment': { label: 'Missing Race Comment', code: 'missingracecomment' },
@@ -1440,6 +1442,11 @@
               : '');
           }).join(' &middot; ') + '</p>'
         : '';
+      // Our time vs the RAS API's (22 Oct 2026), with Ignore.
+      var timeMismatchLine = race.timeMismatch
+        ? '<p class="modal-runner-check"><i class="fa-solid fa-clock"></i> ' + escapeHtmlClient(race.timeMismatch.text) +
+          ' <button type="button" class="missing-jockey-ignore-btn" data-ras="' + escapeHtmlClient(race.timeMismatch.rasUtc) + '" onclick="ignoreTimeMismatch(this)">&#10003; Ignore</button></p>'
+        : '';
       var formIgnoreAllLine = _currentFormFlaggedRunners.length
         ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
         : '';
@@ -1512,6 +1519,7 @@
         (race.raceComment ? raceCommentHtml(race) : '') +
         resultLine +
         runnerCheckLine +
+        timeMismatchLine +
         '<div class="tk-raise" id="tkRaise" hidden></div>' +
         popupTabsHtml +
         '<div id="raceFieldView" class="popup-tab-panel">' +
@@ -2941,6 +2949,43 @@
           var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + raceId + '"]');
           if (cell && !left) {
             cell.setAttribute('data-otherissue-flags', (cell.getAttribute('data-otherissue-flags') || '').split(' ').filter(function (f) { return f && f !== 'runner-mismatch'; }).join(' '));
+            refreshIssueIcons(cell);
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.innerHTML = '&#10003; Ignore';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // "Time mismatch" Ignore (22 Oct 2026): for this race and this RAS time;
+    // the grid cell drops the warning straight away.
+    function ignoreTimeMismatch(btn) {
+      var race = _currentRaceData;
+      if (!race || !_currentRaceId) return;
+      if (!window.confirm('Ignore the time mismatch for ' + race.meeting + ' R' + race.rNo + '? It comes back if the RAS time changes again.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/time-mismatch-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, rasUtc: btn.getAttribute('data-ras'), race: race.meeting + ' R' + race.rNo + ' (' + race.country + ')' }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          var line = btn.parentNode;
+          if (line) line.remove();
+          var cell = document.querySelector('td[data-race-id="' + _currentRaceId + '"]');
+          if (cell) {
+            setOtherIssueFlag(cell, 'time-mismatch', false);
+            try {
+              var list = JSON.parse(cell.getAttribute('data-issues') || '[]').filter(function (i) { return i.code !== 'time-mismatch'; });
+              cell.setAttribute('data-issues', JSON.stringify(list));
+            } catch (e) { /* the next refresh redraws it */ }
             refreshIssueIcons(cell);
           }
         })

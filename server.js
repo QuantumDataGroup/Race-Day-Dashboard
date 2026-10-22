@@ -123,6 +123,7 @@ const FORM_IGNORE_PATH = process.env.FORM_IGNORE_PATH || 'C:\\Thilina\\Dinesh pr
 const AGE_IGNORE_PATH = process.env.AGE_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\age-ignores.json';
 const DUP_JOCKEY_IGNORE_PATH = process.env.DUP_JOCKEY_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\dup-jockey-ignores.json';
 const MISSING_JOCKEY_IGNORE_PATH = process.env.MISSING_JOCKEY_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\missing-jockey-ignores.json';
+const TIME_MISMATCH_IGNORE_PATH = process.env.TIME_MISMATCH_IGNORE_PATH || 'C:\\Thilina\\Dinesh project\\project - 1\\time-mismatch-ignores.json';
 const PORT = process.env.PORT || 3000;
 // The dashboard's public address, for links in ClickUp messages and reports.
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://racedaydashboard.troyendata.com').replace(/\/$/, '');
@@ -300,6 +301,20 @@ function applyFormLineIgnores(docs) {
   }
 }
 
+// "Time mismatch" ignores (22 Oct 2026, per Dinesh): keyed by raceId + the
+// RAS time ignored, so a RAS time that changes again warns again.
+let timeMismatchIgnores = {};
+try {
+  if (fs.existsSync(TIME_MISMATCH_IGNORE_PATH)) timeMismatchIgnores = JSON.parse(fs.readFileSync(TIME_MISMATCH_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${TIME_MISMATCH_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function saveTimeMismatchIgnores() {
+  const dir = path.dirname(TIME_MISMATCH_IGNORE_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(TIME_MISMATCH_IGNORE_PATH, JSON.stringify(timeMismatchIgnores, null, 2), 'utf8');
+}
+
 // Every manual "Confirm / Checked" override, applied fresh on each read so
 // cached race data reflects a confirm straight away.
 function applyAllIgnores(docs) {
@@ -307,6 +322,7 @@ function applyAllIgnores(docs) {
   applyAgeIgnores(docs);
   applyDupJockeyIgnores(docs);
   applyMissingJockeyIgnores(docs);
+  applyTimeMismatch(docs);
 }
 
 // --- Response cache (1 Oct 2026, per Dinesh: "site a konjo optimize panni
@@ -803,6 +819,13 @@ async function runHealthChecks() {
     [`${RACECARD_API_URL} · every ${RACECARD_API_EVERY_MS / 60000} min, today + tomorrow; races in the next 3 h every ${RACECARD_API_SOON_EVERY_MS / 60000} min${racecardApi.lastSoonAt ? ` (${racecardApi.soonRaces || 0} last time)` : ''}`,
       racecardApi.lastRunAt ? `last ${new Date(racecardApi.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
       racecardApi.failed ? `${racecardApi.failed} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
+
+  // RAS times (22 Oct 2026): the Time mismatch check.
+  add('ras-times', 'Race times (RAS)', rasTimes.lastError ? 'warn' : 'ok',
+    rasTimes.lastRunAt ? `${rasTimes.races} races` : 'Starting',
+    [`${TIME_CHECK_COUNTRIES.join(', ')} · every ${RAS_TIMES_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
+      rasTimes.lastRunAt ? `last ${new Date(rasTimes.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
+      rasTimes.lastError ? `failed: ${rasTimes.lastError}` : ''].filter(Boolean).join(' · '));
 
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
   const ps = push.status();
@@ -2481,6 +2504,91 @@ async function refreshRacecardApi(soonOnly) {
   }
 }
 setTimeout(() => refreshRacecardApi(false), 15 * 1000);
+
+// --- Time mismatch: our race times vs the RAS API (22 Oct 2026, per Dinesh:
+// "Time mismatch warning podunga, and Ignore option podunga") -------------
+// The RAS meetings API (RUNNERS_API_URL, same one the runners check reads)
+// gives every race's start_time in UTC. Its ?date= reply mixes the day
+// before and after (Healesville twice: the 22nd's and the 23rd's), so only
+// meetings whose local_race_dates has the date are used, and of two with the
+// same name the one closest to our times. A race not run yet whose RAS time
+// is more than 2 minutes from ours is flagged; once it has started the RAS
+// time is its real jump, not a schedule. These countries only.
+const TIME_CHECK_COUNTRIES = (process.env.TIME_CHECK_COUNTRIES || 'AUS,MEX,PAN,SPA,CHI,ARG,URU,BRZ,SAU,GB,IRE').split(',').map((s) => s.trim()).filter(Boolean);
+const RAS_COUNTRY_ALIAS = { UK: 'GB', ESP: 'SPA', BRA: 'BRZ', URY: 'URU', KSA: 'SAU' };
+// RAS course name -> ours, where they differ (checked 22 Oct 2026).
+const RAS_COURSE_ALIAS = { 'PAN|PANAMA': 'HIPODROMOPRESIDENTEREMON' };
+const TIME_MISMATCH_MIN = 2;
+const RAS_TIMES_EVERY_MS = 10 * 60 * 1000;
+const rasTimes = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, mismatches: 0, running: false };
+const courseKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function utcMs(raw) {
+  const s = String(raw || '');
+  return Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(s) ? s : `${s.replace(' ', 'T')}Z`);
+}
+async function refreshRasTimes() {
+  if (rasTimes.running) return;
+  rasTimes.running = true;
+  try {
+    const today = todayStr();
+    const byRace = new Map();
+    let races = 0;
+    for (const dateStr of [today, shiftDate(today, 1)]) {
+      const res = await fetch(`${RUNNERS_API_URL}?date=${dateStr}`, { signal: AbortSignal.timeout(90000) });
+      if (!res.ok) throw new Error(`RAS API HTTP ${res.status}`);
+      const j = await res.json();
+      const rasByKey = new Map();
+      for (const m of (j.meetings || [])) {
+        const country = RAS_COUNTRY_ALIAS[m.country] || m.country;
+        if (!TIME_CHECK_COUNTRIES.includes(country) || !(m.local_race_dates || []).includes(dateStr)) continue;
+        const course = RAS_COURSE_ALIAS[`${country}|${courseKey(m.course)}`] || courseKey(m.course);
+        const k = `${country}|${course}|${m.discipline}`;
+        if (!rasByKey.has(k)) rasByKey.set(k, []);
+        rasByKey.get(k).push(m);
+      }
+      const ours = new Map();
+      for (const d of await fetchRaceDocs(dateStr, false)) {
+        const k = `${d.rCountry}|${courseKey(d.rCourseDisplayName)}|${d.rDiscipline}`;
+        if (!rasByKey.has(k)) continue;
+        if (!ours.has(k)) ours.set(k, []);
+        ours.get(k).push(d);
+      }
+      for (const [k, docs] of ours) {
+        const timeOf = (m, rNo) => { const e = (m.events || []).find((x) => x.race_no === rNo); return e ? utcMs(e.start_time) : NaN; };
+        const cost = (m) => docs.reduce((t, d) => { const diff = Math.abs(timeOf(m, d.rNo) - utcMs(d.rScheduleTimeUTC)) / 60000; return t + (Number.isFinite(diff) ? Math.min(diff, 600) : 600); }, 0);
+        const ras = rasByKey.get(k).slice().sort((a, b) => cost(a) - cost(b))[0];
+        for (const d of docs) {
+          const rasAt = timeOf(ras, d.rNo);
+          const ourAt = utcMs(d.rScheduleTimeUTC);
+          if (!Number.isFinite(rasAt) || !Number.isFinite(ourAt)) continue;
+          races++;
+          byRace.set(d._id, { rasUtc: new Date(rasAt).toISOString(), mins: Math.round((rasAt - ourAt) / 60000) });
+        }
+      }
+    }
+    Object.assign(rasTimes, { byRace, races, lastRunAt: new Date().toISOString(), lastError: null });
+  } catch (err) {
+    rasTimes.lastError = err.message;
+    console.warn(`[race-dashboard] WARNING: RAS times check failed: ${err.message}`);
+  } finally {
+    rasTimes.running = false;
+  }
+}
+// Applied on every read (applyAllIgnores): races not started yet, not
+// resulted or abandoned, more than TIME_MISMATCH_MIN out, not ignored.
+function applyTimeMismatch(docs) {
+  const now = Date.now();
+  for (const doc of docs) {
+    doc.timeMismatch = null;
+    const t = rasTimes.byRace.get(doc._id);
+    if (!t || Math.abs(t.mins) <= TIME_MISMATCH_MIN || doc.resultString || doc.isAbandoned) continue;
+    if (!(utcMs(doc.rScheduleTimeUTC) > now)) continue;
+    if (timeMismatchIgnores[`${doc._id}|${t.rasUtc}`]) continue;
+    doc.timeMismatch = { rasUtc: t.rasUtc, mins: t.mins };
+  }
+}
+setTimeout(refreshRasTimes, 30 * 1000);
+setInterval(refreshRasTimes, RAS_TIMES_EVERY_MS);
 setInterval(() => refreshRacecardApi(false), RACECARD_API_EVERY_MS);
 setInterval(() => refreshRacecardApi(true), RACECARD_API_SOON_EVERY_MS);
 
@@ -3759,6 +3867,25 @@ app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', requireWork
   }
   try {
     saveMissingJockeyIgnores();
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  res.json({ ok: true, ignored: Boolean(ignored) });
+});
+
+// "Time mismatch" Ignore (22 Oct 2026): for this race and this RAS time.
+app.post('/api/race/:raceId/time-mismatch-ignore', requireWork, (req, res) => {
+  const { raceId } = req.params;
+  const { ignored, rasUtc, race } = req.body || {};
+  if (!rasUtc) return res.status(400).json({ error: 'rasUtc is required' });
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Time mismatch ignored: ${race || raceId}` });
+  const key = `${raceId}|${rasUtc}`;
+  if (ignored) timeMismatchIgnores[key] = { race: race || null, ignoredAt: new Date().toISOString(), ignoredBy: req.session.username };
+  else delete timeMismatchIgnores[key];
+  // Older than 3 days: the race is long gone.
+  for (const [k, v] of Object.entries(timeMismatchIgnores)) if (Date.parse(v.ignoredAt) < Date.now() - 3 * 86400000) delete timeMismatchIgnores[k];
+  try {
+    saveTimeMismatchIgnores();
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }
