@@ -1336,6 +1336,8 @@
       // (no weight carried, sulky-drawn) and Greyhound (not tracked here)
       // don't need the column (15 Sep 2026, per Dinesh).
       var showWeight = race.discipline === 'T';
+      // Greyhounds have no jockey (22 Oct 2026, per Dinesh).
+      var showJockey = race.discipline !== 'G';
       var rows = race.runners.map(function (r) {
         var issueClass = '';
         if (r.issue.indexOf('tab number') !== -1) issueClass = 'issue-cell tab-issue';
@@ -1414,7 +1416,7 @@
           '<td class="tab-cell">' + (r.tabNo != null ? r.tabNo : '-') + '</td>' +
           '<td class="silk-cell">' + silkHtml + '</td>' +
           '<td class="horse-cell">' + horseNameHtml + regionHtml + '</td>' +
-          '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' +
+          (showJockey ? '<td>' + (r.jockey ? escapeHtmlClient(r.jockey) : '<em>none</em>') + '</td>' : '') +
           '<td>' + (r.trainer ? escapeHtmlClient(r.trainer) : '<em>none</em>') + '</td>' +
           '<td class="barrier-cell">' + (r.barrierPosition != null ? r.barrierPosition : '-') + '</td>' +
           (showWeight ? '<td class="weight-cell">' + (r.weightKg ? escapeHtmlClient(r.weightKg) + 'kg' : '-') + '</td>' : '') +
@@ -1514,7 +1516,7 @@
         popupTabsHtml +
         '<div id="raceFieldView" class="popup-tab-panel">' +
           formIgnoreAllLine +
-          '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th><th>Jockey</th><th>Trainer</th><th>BP</th>' + (showWeight ? '<th>Wgt</th><th>Form</th>' : '') + '<th>Odds</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<table><thead><tr>' + positionHeader + '<th class="tab-cell">Tab</th><th></th><th>Horse</th>' + (showJockey ? '<th>Jockey</th>' : '') + '<th>Trainer</th><th>BP</th>' + (showWeight ? '<th>Wgt</th><th>Form</th>' : '') + '<th>Odds</th><th>Issue</th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
         (hasSpeedMap ? '<div id="speedMapView" class="popup-tab-panel" hidden></div>' : '') +
         (hasSpotlights ? '<div id="spotlightsView" class="popup-tab-panel" hidden>' + spotlightsPanelHtml(race) + '</div>' : '') +
@@ -2500,7 +2502,7 @@
         ['Trainer', r.trainer], ['Jockey', r.jockey], ['Colour', r.colour],
         ['Sex', r.sex], ['Age', r.age != null ? r.age + ' yo' : null], ['Last Run', lastRunDate],
         ['Sire', r.sire], ['Dam', r.dam], ['Weight', r.weightKg != null ? r.weightKg + 'kg' : null],
-      ];
+      ].filter(function (f) { return !(f[0] === 'Jockey' && _currentRaceData.discipline === 'G'); }); // no jockey on a greyhound
       var detailGridHtml = '<div class="horse-detail-grid">' + DETAIL_FIELDS.map(function (f) {
         return '<div class="horse-detail-cell"><span class="horse-detail-label">' + f[0] + ':</span> ' +
           '<span class="horse-detail-value">' + escapeHtmlClient(f[1] || '-') + '</span></div>';
