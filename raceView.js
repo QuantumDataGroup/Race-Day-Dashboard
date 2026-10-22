@@ -60,7 +60,7 @@ const ABANDONED_QUIET = {
   missingJockeyCount: 0, duplicateJockeyCount: 0, tabIssueCount: 0, missingTrainerCount: 0, missingFormCount: 0,
   ageIssueCount: 0, missingRunnerCommentCount: 0, missingRaceComment: false, scratchedInComment: [], commentTabWrong: [],
   commentChecks: [], commentVersionIssues: [], missingVideo: false, missingSpeedMap: false, missingScratching: false,
-  missingScratchingNames: [], runnerMismatch: false, runnerMismatchCount: 0, runnerCheckLines: [],
+  missingScratchingNames: [], runnerMismatch: false, runnerMismatchCount: 0, runnerCheckLines: [], timeMismatch: null,
 };
 
 function deriveRaceStatus(doc) {
@@ -532,6 +532,8 @@ function buildSchedule(docs, dateStr) {
       runnerMismatch: Boolean(doc.runnerMismatch),
       runnerMismatchCount: (doc.runners || []).filter((r) => Array.isArray(r.runnerCheckDiffs) && !r.isScratched).length,
       runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
+      // Our time vs the RAS API's, a race not run yet (server.js applyTimeMismatch).
+      timeMismatch: doc.timeMismatch || null,
     };
     // An abandoned race raises no issues at all (20 Oct 2026, per Dinesh:
     // "Abandoned meeting-la edawadu issue irunda ignore pannunga, Missing
@@ -561,7 +563,7 @@ function buildSchedule(docs, dateStr) {
       const {
         id, clock, startUtc, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
         missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, commentChecks, commentVersionIssues, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
-        missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines,
+        missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines, timeMismatch,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -630,6 +632,7 @@ function buildSchedule(docs, dateStr) {
             runnerMismatch,
             runnerMismatchCount,
             runnerCheckLines,
+            timeMismatch,
           }
         : null;
       if (clock) {
@@ -685,6 +688,7 @@ function buildSchedule(docs, dateStr) {
     let hasMissingScratching = false;
     let hasRunnerMismatch = false;
     let hasMissingResults = false;
+    let hasTimeMismatch = false;
     let hasMissingRaceComment = false;
     let hasScratchedInComment = false;
     let hasCommentTabWrong = false;
@@ -706,6 +710,7 @@ function buildSchedule(docs, dateStr) {
       if (race.missingScratching) hasMissingScratching = true;
       if (race.runnerMismatch) hasRunnerMismatch = true;
       if (race.missingResult) hasMissingResults = true;
+      if (race.timeMismatch) hasTimeMismatch = true;
       if (race.missingRaceComment) hasMissingRaceComment = true;
       if (race.scratchedInComment && race.scratchedInComment.length) hasScratchedInComment = true;
       if (race.commentTabWrong && race.commentTabWrong.length) hasCommentTabWrong = true;
@@ -713,11 +718,11 @@ function buildSchedule(docs, dateStr) {
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasTimeMismatch || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasTimeMismatch, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
       scheduleNote,
       races,
     });
@@ -1001,6 +1006,8 @@ function buildRaceDetail(doc) {
     missingRaceComment: !abandoned && doc.hasRaceComment === false,
     // Scratched runners the comment still mentions (15 Oct 2026): warned and highlighted in the popup.
     scratchedInComment: abandoned ? [] : commentScratchCheck(doc),
+    // Time mismatch with the RAS API (22 Oct 2026): the popup's line and Ignore button.
+    timeMismatch: !abandoned && doc.timeMismatch ? { ...doc.timeMismatch, text: timeMismatchText(clock ? clock.label : null, doc.timeMismatch) } : null,
     // This race's issues, fresh (ticket buttons; see popupIssues).
     issues: abandoned ? [] : popupIssues(doc),
     // Spotlights from `llmContent` (server.js's attachSpotlights), in the
@@ -1498,6 +1505,18 @@ function renderTemplate(template, vars) {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => (key in allVars ? allVars[key] : match));
 }
 
+// "Time mismatch (ours 14:25, RAS 14:37, +12 min)" -- both in the venue's
+// local time: the RAS one is ours moved by the difference.
+function timeMismatchText(label, t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(label || '');
+  let ras = `${String(t.rasUtc).slice(11, 16)} UTC`;
+  if (m) {
+    const x = (((Number(m[1]) * 60 + Number(m[2]) + t.mins) % 1440) + 1440) % 1440;
+    ras = `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+  }
+  return `Time mismatch (ours ${label || '?'}, RAS ${ras}, ${t.mins > 0 ? '+' : ''}${t.mins} min)`;
+}
+
 // One race's data issues as { code, text } -- the grid's issue icon/tooltip
 // and the Overview page / issue workflow / tickets (Oct 2026) all use this,
 // so they always agree. `code` is stable per kind of issue (it keys the
@@ -1521,6 +1540,7 @@ function raceIssueList(race) {
     lines.forEach((line) => add('runner-mismatch', line));
   }
   if (race.missingResult) add('missing-results', 'Results Missing');
+  if (race.timeMismatch) add('time-mismatch', timeMismatchText(race.label, race.timeMismatch));
   if (race.missingRaceComment) add('missing-race-comment', 'Missing Race Comment');
   if (race.scratchedInComment && race.scratchedInComment.length) {
     add('scratched-in-comment', `Scratched runner in comment (${race.scratchedInComment.map((s) => `${s.tab != null ? `#${s.tab} ` : ''}${s.name}`).join(', ')})`);
@@ -1572,7 +1592,7 @@ const ISSUE_LABELS = {
   'missing-jockey': 'Missing jockey', 'duplicate-jockey': 'Duplicate jockey', 'tab-issue': 'Missing/duplicate TAB number',
   'missing-trainer': 'Missing trainer', 'missing-form': 'Missing form lines', 'age-issue': 'Horse age issue',
   'missing-runner-comment': 'Missing runner comment', 'missing-video': 'Missing video', 'missing-speed-map': 'Missing speed map',
-  'missing-scratching': 'Scratching not updated', 'runner-mismatch': 'Runner missing / mismatched', 'missing-results': 'Results missing',
+  'missing-scratching': 'Scratching not updated', 'runner-mismatch': 'Runner missing / mismatched', 'missing-results': 'Results missing', 'time-mismatch': 'Time mismatch',
   'missing-race-comment': 'Missing race comment', 'schedule-issue': 'Schedule issue',
   'scratched-in-comment': 'Scratched runner in comment', 'comment-tab': 'Comment tab wrong',
   ...Object.fromEntries(Object.entries(COMMENT_CHECKS).map(([code, c]) => [code, c.label])),
@@ -1652,6 +1672,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.missingScratching) otherIssueFlags.push('missing-scratching');
           if (race.runnerMismatch) otherIssueFlags.push('runner-mismatch');
           if (race.missingResult) otherIssueFlags.push('missing-results');
+          if (race.timeMismatch) otherIssueFlags.push('time-mismatch');
           if (race.ageIssueFlagged) otherIssueFlags.push('horse-age-issue');
           if (race.missingRunnerCommentFlagged) otherIssueFlags.push('missing-runner-comment');
           if (race.missingRaceComment) otherIssueFlags.push('missing-race-comment');
@@ -1723,6 +1744,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingScratching) issueCodes.push('missingscratching');
         if (m.hasRunnerMismatch) issueCodes.push('runnermismatch');
         if (m.hasMissingResults) issueCodes.push('missingresults');
+        if (m.hasTimeMismatch) issueCodes.push('timemismatch');
         if (m.hasMissingRaceComment) issueCodes.push('missingracecomment');
         if (m.hasScratchedInComment) issueCodes.push('scratchedincomment');
         if (m.hasCommentTabWrong) issueCodes.push('commenttab');
@@ -1747,6 +1769,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasMissingScratching) issueReasons.push('Scratching Not Updated');
         if (m.hasRunnerMismatch) issueReasons.push('Runner Missing / Mismatched');
         if (m.hasMissingResults) issueReasons.push('Results Missing');
+        if (m.hasTimeMismatch) issueReasons.push('Time mismatch');
         if (m.hasMissingRaceComment) issueReasons.push('Missing Race Comment');
         if (m.hasScratchedInComment) issueReasons.push('Scratched runner in comment');
         if (m.hasCommentTabWrong) issueReasons.push('Comment tab wrong');
