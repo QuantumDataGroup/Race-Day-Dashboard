@@ -95,7 +95,7 @@ const { KEEP_DAYS: CHANGE_KEEP_DAYS, meetingSnap, raceSnap, diffMeeting, diffRac
 const {
   buildSchedule, buildRaceDetail, renderHtml, renderLoginPage, todayStr, escapeHtml, buildIssuesReport, issuesReportToCsv,
   slugify, countrySlug, raceUrl, DISCIPLINE_SLUGS,
-  buildMeetingDetailsReport, meetingDetailsReportToCsv, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
+  buildMeetingDetailsReport, meetingDetailsReportToCsv, reportHasJockey, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
   renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
   renderOverviewPage, renderTicketsPage, collectIssues, ISSUE_LABELS,
@@ -2756,11 +2756,11 @@ async function buildMeetingDetailsXlsxBuffer(rows, meeting, dateStr) {
     { header: 'Trainer', key: 'trainer', width: 20 },
     { header: 'Scratched', key: 'scratched', width: 11 },
     { header: 'Position', key: 'position', width: 10 },
-  ];
+  ].filter((c) => c.key !== 'jockey' || reportHasJockey(rows)); // greyhounds: no jockey
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   rows.forEach((r) => sheet.addRow(r));
-  if (rows.length) sheet.autoFilter = { from: 'A1', to: 'M1' };
+  if (rows.length) sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: sheet.columns.length } };
   return workbook.xlsx.writeBuffer();
 }
 
@@ -2779,9 +2779,12 @@ function buildMeetingDetailsPdfBuffer(rows, meeting, country, discipline, dateSt
       const startX = doc.page.margins.left;
       const usableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       // Race No, Time, Class, Result, Tab, Horse, Jockey, Trainer, Scr, Pos
-      const colWidths = [30, 45, 70, 55, 30, 110, 90, 90, 40, usableWidth];
+      // Greyhounds: no Jockey column (index 6), its width goes to Horse.
+      const withJockey = reportHasJockey(rows);
+      const pick = (list) => (withJockey ? list : list.filter((x, i) => i !== 6));
+      const colWidths = withJockey ? [30, 45, 70, 55, 30, 110, 90, 90, 40, usableWidth] : [30, 45, 70, 55, 30, 200, 90, 40, usableWidth];
       colWidths[colWidths.length - 1] = usableWidth - colWidths.slice(0, -1).reduce((a, b) => a + b, 0);
-      const headers = ['R#', 'Time', 'Class', 'Result', 'Tab', 'Horse', 'Jockey', 'Trainer', 'Scr', 'Pos'];
+      const headers = pick(['R#', 'Time', 'Class', 'Result', 'Tab', 'Horse', 'Jockey', 'Trainer', 'Scr', 'Pos']);
       let y = doc.y;
 
       function drawRow(cells, bold) {
@@ -2819,7 +2822,7 @@ function buildMeetingDetailsPdfBuffer(rows, meeting, country, discipline, dateSt
           doc.moveTo(startX, y - 2).lineTo(startX + colWidths.reduce((a, b) => a + b, 0), y - 2).strokeColor('#ddd').stroke();
         }
         currentRaceNo = r.rNo;
-        drawRow([r.rNo, r.scheduledTime, r.rClass, r.resultString, r.tabNo, r.horseName, r.jockey, r.trainer, r.scratched, r.position], false);
+        drawRow(pick([r.rNo, r.scheduledTime, r.rClass, r.resultString, r.tabNo, r.horseName, r.jockey, r.trainer, r.scratched, r.position]), false);
       });
 
       doc.end();
