@@ -1347,6 +1347,12 @@ html.is-app .install-app-btn { display: none; }
 .al-note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
 /* Race popup: raise a ClickUp ticket from an issue. */
 .tk-raise { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; font-size: 13px; }
+/* Race popup header: title on the left, "Open in Admin" on the right (22 Oct 2026, per Dinesh). */
+.modal-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-head-row > div:first-child { min-width: 0; }
+.modal-admin-slot { flex: none; }
+.modal-admin-slot:empty { display: none; }
+@media (max-width: 640px) { .modal-head-row { flex-direction: column; align-items: flex-start; } }
 .tk-raise .adm-btn { display: inline-flex; align-items: center; gap: 5px; }
 .tk-mark { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--adm-info); text-decoration: none; }
 .tk-dialog { position: fixed; inset: 0; z-index: 3000; background: var(--modal-overlay); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; overflow-y: auto; }
