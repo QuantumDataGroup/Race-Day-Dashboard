@@ -251,6 +251,8 @@
             '<div class="al-actions">' +
             '<button type="button" class="adm-btn primary" data-al-key="' + esc(i.key) + '" data-al-to="fixed"><i class="fa-solid fa-check"></i> Updated</button>' +
             (i.workflow === 'waiting_source' ? '' : '<button type="button" class="adm-btn" data-al-key="' + esc(i.key) + '" data-al-to="waiting_source"><i class="fa-regular fa-hourglass-half"></i> Not at source yet</button>') +
+            // The race in the Troyen admin, to fix it in the DB (22 Oct 2026, per Dinesh).
+            '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(race.raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Admin</a>' +
             '</div></div>';
         }).join('') + '</article>';
     }).join('') || '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>';
