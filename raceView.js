@@ -1264,35 +1264,47 @@ function buildMeetingDetailsReport(docs, dateStr) {
     if (!runners.length) {
       // Still emit one row so a race with zero runner records isn't
       // silently dropped from the export.
-      rows.push(Object.assign({}, base, { tabNo: '', horseName: '', jockey: '', trainer: '', scratched: '', position: '' }));
+      const row = Object.assign({}, base, { tabNo: '', horseName: '', jockey: '', trainer: '', scratched: '', position: '' });
+      if (doc.rDiscipline === 'G') delete row.jockey;
+      rows.push(row);
       continue;
     }
 
     for (const r of runners) {
-      rows.push(Object.assign({}, base, {
+      const row = Object.assign({}, base, {
         tabNo: r.tabNo != null ? r.tabNo : '',
         horseName: r.horseName || '',
         jockey: r.jockey || '',
         trainer: r.trainer || '',
         scratched: r.isScratched ? 'Yes' : 'No',
         position: r.fp != null ? r.fp : '',
-      }));
+      });
+      // Greyhounds have no jockey (22 Oct 2026, per Dinesh): no field, and
+      // the CSV / Excel / PDF leave the column out (reportHasJockey).
+      if (doc.rDiscipline === 'G') delete row.jockey;
+      rows.push(row);
     }
   }
 
   return rows;
 }
 
+// The Jockey column, unless every row is a greyhound's (no jockey field).
+function reportHasJockey(rows) {
+  return !rows.length || rows.some((r) => 'jockey' in r);
+}
+
 function meetingDetailsReportToCsv(rows) {
+  const withJockey = reportHasJockey(rows);
   const headers = [
     'Date', 'Country', 'Discipline', 'Meeting', 'Race No', 'Race Name', 'Class', 'Prize Money',
-    'Scheduled Time', 'Status', 'Result', 'Tab No', 'Horse', 'Jockey', 'Trainer', 'Scratched', 'Position',
+    'Scheduled Time', 'Status', 'Result', 'Tab No', 'Horse', ...(withJockey ? ['Jockey'] : []), 'Trainer', 'Scratched', 'Position',
   ];
   const lines = [headers.map(csvEscape).join(',')];
   for (const r of rows) {
     lines.push([
       r.date, r.country, r.discipline, r.meeting, r.rNo, r.raceName, r.rClass, r.prizeMoney,
-      r.scheduledTime, r.status, r.resultString, r.tabNo, r.horseName, r.jockey, r.trainer, r.scratched, r.position,
+      r.scheduledTime, r.status, r.resultString, r.tabNo, r.horseName, ...(withJockey ? [r.jockey] : []), r.trainer, r.scratched, r.position,
     ].map(csvEscape).join(','));
   }
   return lines.join('\r\n');
@@ -2082,7 +2094,7 @@ module.exports = {
   countMissingJockeys, hasDuplicateJockey, countDuplicateJockeyGroups, issueForRunner, jockeyCounts,
   tabNoCounts, hasDuplicateTabNo, countTabNoIssues, tabIssueForRunner,
   countMissingTrainers,
-  buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, deriveRaceStatus,
+  buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, reportHasJockey, deriveRaceStatus,
   buildMeetingsListReport, meetingsListReportToCsv,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
   renderOverviewPage, renderTicketsPage, raceIssueList, collectIssues, ISSUE_LABELS,
