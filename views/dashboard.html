@@ -1547,6 +1547,11 @@
       return Object.keys(byCode).map(function (code) { return { code: code, texts: byCode[code] }; })
         .concat(raceIssuesFromGrid(race.id).filter(function (i) { return meetingWide[i.code]; }));
     }
+    // The race in the Troyen admin, where a fix goes into the DB (22 Oct
+    // 2026, per Dinesh: a race with an issue gets a button straight to it).
+    function adminRaceLink(raceId) {
+      return '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Open in Admin</a>';
+    }
     function renderTicketBar(race) {
       var bar = document.getElementById('tkRaise');
       if (!bar) return;
@@ -1558,7 +1563,7 @@
           var t = _ticketCtx.tickets[i.code];
           if (t) return '<a class="tk-mark" href="' + escapeHtmlClient(t.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> ' + escapeHtmlClient(i.texts[0].split(' (')[0]) + ': ticket open (' + escapeHtmlClient(t.statusLabel || 'to do') + ')</a>';
           return '<button type="button" class="adm-btn" onclick="openTicketDialog(\'' + escapeHtmlClient(i.code) + '\')"><i class="fa-solid fa-plus"></i> ' + escapeHtmlClient(i.texts[0].split(' (')[0]) + '</button>';
-        }).join('');
+        }).join('') + adminRaceLink(race.id);
         bar.hidden = false;
       };
       // Drawn once the server answers: a view user gets 403 and no ticket bar

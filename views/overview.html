@@ -161,6 +161,8 @@
     function actionButtons(i) {
       var key = esc(i.key);
       var btns = '<a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener">Open race</a>';
+      // The race in the Troyen admin, to fix it in the DB (22 Oct 2026, per Dinesh).
+      if (i.raceId) btns += '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(i.raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Admin</a>';
       if (i.ticketId) btns += '<a class="adm-btn" href="https://app.clickup.com/t/' + esc(i.ticketId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket</a>';
       if (i.workflow === 'open') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="in_progress">Start fixing</button>';
       if (i.workflow === 'in_progress' || i.workflow === 'waiting_source') btns += '<button type="button" class="adm-btn primary" data-key="' + key + '" data-to="fixed">Mark fixed</button>';

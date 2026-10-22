@@ -383,6 +383,12 @@ pushes one notification per race + Style for today's and tomorrow's races not
 run yet, again only if the list changes (`cv|` keys in alerts-sent.json, kept
 3 days). Admins get it on the devices where they turned alerts on in the bell.
 
+### Open in Admin (22 Oct 2026)
+A race with an issue links straight to it in the Troyen admin, where fixes go into
+the DB: `https://troyendata.com/Race?raceId=<race _id>` (same id as ours). The race
+popup's ticket bar ("Open in Admin", not for view users), each Overview issue row and
+each bell alert ("Admin"). The admin needs its own login.
+
 ### Race alerts (bell + browser pop-ups, Oct 2026)
 For users with the **Overview** permission. `renderUserBlock` adds a bell
 and `public/alerts.js`, which polls `/api/alerts` every 60 s. The API lists
