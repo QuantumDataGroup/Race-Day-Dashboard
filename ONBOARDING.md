@@ -386,7 +386,7 @@ run yet, again only if the list changes (`cv|` keys in alerts-sent.json, kept
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into
 the DB: `https://troyendata.com/Race?raceId=<race _id>` (same id as ours). The race
-popup header, right of the race name ("Open in Admin", not for view users), each Overview issue row and
+popup header, right of the race name, on every race ("Open in Admin", not for view users), each Overview issue row and
 each bell alert ("Admin"). The admin needs its own login.
 
 ### Race alerts (bell + browser pop-ups, Oct 2026)

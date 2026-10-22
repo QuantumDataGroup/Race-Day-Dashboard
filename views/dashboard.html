@@ -1557,6 +1557,11 @@
     function renderTicketBar(race) {
       var bar = document.getElementById('tkRaise');
       if (!bar) return;
+      // On every race, not only ones with an issue found here (22 Oct 2026,
+      // per Dinesh: a race opened from a notification had none) -- view
+      // logins don't get it.
+      var slot = document.getElementById('adminSlot');
+      if (slot && !document.documentElement.classList.contains('view-only')) slot.innerHTML = adminRaceLink(race.id);
       var issues = raceIssuesForTickets(race);
       if (!issues.length) return;
       _ticketCtx = { race: race, issues: issues, tickets: {}, members: [], enabled: null };
@@ -1567,8 +1572,6 @@
           return '<button type="button" class="adm-btn" onclick="openTicketDialog(\'' + escapeHtmlClient(i.code) + '\')"><i class="fa-solid fa-plus"></i> ' + escapeHtmlClient(i.texts[0].split(' (')[0]) + '</button>';
         }).join('');
         bar.hidden = false;
-        var slot = document.getElementById('adminSlot');
-        if (slot) slot.innerHTML = adminRaceLink(race.id);
       };
       // Drawn once the server answers: a view user gets 403 and no ticket bar
       // (12 Oct 2026, per Dinesh: view users see the dashboard only).
