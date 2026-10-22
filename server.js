@@ -820,11 +820,14 @@ async function runHealthChecks() {
       racecardApi.lastRunAt ? `last ${new Date(racecardApi.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
       racecardApi.failed ? `${racecardApi.failed} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
 
-  // RAS times (22 Oct 2026): the Time mismatch check.
-  add('ras-times', 'Race times (RAS)', rasTimes.lastError ? 'warn' : 'ok',
-    rasTimes.lastRunAt ? `${rasTimes.races} races` : rasTimes.lastError ? 'Failed' : 'Starting',
-    [`${TIME_CHECK_COUNTRIES.join(', ')} · every ${RAS_TIMES_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
+  // RAS times (22 Oct 2026): the Time mismatch check; Neds when RAS fails.
+  const viaNeds = rasTimes.source === 'Neds';
+  add('ras-times', 'Race times (RAS / Neds)', rasTimes.lastError || (rasTimes.nedsPageErrors || []).length ? 'warn' : 'ok',
+    rasTimes.lastRunAt ? `${rasTimes.races} races${viaNeds ? ' via Neds' : ''}` : rasTimes.lastError ? 'Failed' : 'Starting',
+    [`${TIME_CHECK_COUNTRIES.join(', ')} · RAS every ${RAS_TIMES_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
+      viaNeds && rasTimes.rasError ? `RAS not reachable (${rasTimes.rasError}), so Neds day pages every ${NEDS_TIMES_EVERY_MS / 60000} min (no MEX/SPA/ARG/URU/BRZ/SAU there)` : '',
       rasTimes.lastRunAt ? `last ${new Date(rasTimes.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
+      (rasTimes.nedsPageErrors || []).length ? `Neds pages failed: ${rasTimes.nedsPageErrors.join('; ')}` : '',
       rasTimes.lastError ? `failed: ${rasTimes.lastError}` : ''].filter(Boolean).join(' · '));
 
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
@@ -1349,13 +1352,13 @@ function saveJockeyCheckState() {
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchNeds(url) {
+async function fetchNeds(url, timeoutMs = RUNNERS_API_TIMEOUT_MS) {
   if (Date.now() < (jockeyCheckState.nedsPausedUntil || 0)) {
     throw Object.assign(new Error(`${RUNNERS_SOURCES.neds} paused until ${new Date(jockeyCheckState.nedsPausedUntil).toISOString()} (it asked us to slow down)`), { paused: true });
   }
   let res;
   try {
-    res = await fetch(url, { headers: NEDS_SITE_HEADERS, signal: AbortSignal.timeout(RUNNERS_API_TIMEOUT_MS) });
+    res = await fetch(url, { headers: NEDS_SITE_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     throw new Error(`${RUNNERS_SOURCES.neds} not reachable: ${networkReason(err)}`);
   }
@@ -2526,49 +2529,94 @@ function utcMs(raw) {
   const s = String(raw || '');
   return Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(s) ? s : `${s.replace(' ', 'T')}Z`);
 }
+// Neds fallback (22 Oct 2026, per Dinesh: "Neds fallback build pannunga"):
+// production can't reach the RAS API ("fetch failed"), so when it fails the
+// times come from the Neds day pages instead. Neds has no MEX/SPA/ARG/URU/
+// BRZ/SAU, dates overseas meetings by the Australian day (the UK's evening of
+// the 22nd is on its 23rd page) and a page takes 40-140 s, so: three pages
+// (today to +2), at most every 30 min, through fetchNeds (its 6 h pause).
+const NEDS_TIMES_EVERY_MS = 30 * 60 * 1000;
+const NEDS_TIMES_TIMEOUT_MS = 150 * 1000;
+const sourceKey = (country, course, discipline) => `${country}|${RAS_COURSE_ALIAS[`${country}|${courseKey(course)}`] || courseKey(course)}|${discipline}`;
+// Each of our meetings takes the source meeting of its name closest to our
+// times; a race over 3 h from ours (MAX_RACE_START_GAP_MS) is another day's.
+async function matchSourceTimes(dateStr, meetings, src, byRace) {
+  const byKey = new Map();
+  for (const m of meetings) {
+    if (!byKey.has(m.key)) byKey.set(m.key, []);
+    byKey.get(m.key).push(m);
+  }
+  const ours = new Map();
+  for (const d of await fetchRaceDocs(dateStr, false)) {
+    const k = `${d.rCountry}|${courseKey(d.rCourseDisplayName)}|${d.rDiscipline}`;
+    if (!byKey.has(k)) continue;
+    if (!ours.has(k)) ours.set(k, []);
+    ours.get(k).push(d);
+  }
+  let races = 0;
+  for (const [k, docs] of ours) {
+    const timeOf = (m, rNo) => { const r = m.races.find((x) => x.rNo === rNo); return r ? r.at : NaN; };
+    const cost = (m) => docs.reduce((t, d) => { const diff = Math.abs(timeOf(m, d.rNo) - utcMs(d.rScheduleTimeUTC)) / 60000; return t + (Number.isFinite(diff) ? Math.min(diff, 600) : 600); }, 0);
+    const best = byKey.get(k).slice().sort((a, b) => cost(a) - cost(b))[0];
+    for (const d of docs) {
+      const at = timeOf(best, d.rNo);
+      const ourAt = utcMs(d.rScheduleTimeUTC);
+      if (!Number.isFinite(at) || !Number.isFinite(ourAt) || Math.abs(at - ourAt) > MAX_RACE_START_GAP_MS) continue;
+      races++;
+      byRace.set(d._id, { rasUtc: new Date(at).toISOString(), mins: Math.round((at - ourAt) / 60000), src });
+    }
+  }
+  return races;
+}
 async function refreshRasTimes() {
   if (rasTimes.running) return;
   rasTimes.running = true;
   try {
     const today = todayStr();
+    const dates = [today, shiftDate(today, 1)];
     const byRace = new Map();
     let races = 0;
-    for (const dateStr of [today, shiftDate(today, 1)]) {
-      const res = await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`);
-      const j = await res.json();
-      const rasByKey = new Map();
-      for (const m of (j.meetings || [])) {
-        const country = RAS_COUNTRY_ALIAS[m.country] || m.country;
-        if (!TIME_CHECK_COUNTRIES.includes(country) || !(m.local_race_dates || []).includes(dateStr)) continue;
-        const course = RAS_COURSE_ALIAS[`${country}|${courseKey(m.course)}`] || courseKey(m.course);
-        const k = `${country}|${course}|${m.discipline}`;
-        if (!rasByKey.has(k)) rasByKey.set(k, []);
-        rasByKey.get(k).push(m);
+    let rasMeetings = null;
+    try {
+      rasMeetings = [];
+      for (const dateStr of dates) {
+        const j = await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json();
+        rasMeetings.push((j.meetings || [])
+          .map((m) => ({ ...m, country: RAS_COUNTRY_ALIAS[m.country] || m.country }))
+          .filter((m) => TIME_CHECK_COUNTRIES.includes(m.country) && (m.local_race_dates || []).includes(dateStr))
+          .map((m) => ({ key: sourceKey(m.country, m.course, m.discipline), races: (m.events || []).map((e) => ({ rNo: e.race_no, at: utcMs(e.start_time) })) })));
       }
-      const ours = new Map();
-      for (const d of await fetchRaceDocs(dateStr, false)) {
-        const k = `${d.rCountry}|${courseKey(d.rCourseDisplayName)}|${d.rDiscipline}`;
-        if (!rasByKey.has(k)) continue;
-        if (!ours.has(k)) ours.set(k, []);
-        ours.get(k).push(d);
-      }
-      for (const [k, docs] of ours) {
-        const timeOf = (m, rNo) => { const e = (m.events || []).find((x) => x.race_no === rNo); return e ? utcMs(e.start_time) : NaN; };
-        const cost = (m) => docs.reduce((t, d) => { const diff = Math.abs(timeOf(m, d.rNo) - utcMs(d.rScheduleTimeUTC)) / 60000; return t + (Number.isFinite(diff) ? Math.min(diff, 600) : 600); }, 0);
-        const ras = rasByKey.get(k).slice().sort((a, b) => cost(a) - cost(b))[0];
-        for (const d of docs) {
-          const rasAt = timeOf(ras, d.rNo);
-          const ourAt = utcMs(d.rScheduleTimeUTC);
-          if (!Number.isFinite(rasAt) || !Number.isFinite(ourAt)) continue;
-          races++;
-          byRace.set(d._id, { rasUtc: new Date(rasAt).toISOString(), mins: Math.round((rasAt - ourAt) / 60000) });
-        }
+      rasTimes.rasError = null;
+    } catch (err) {
+      rasMeetings = null;
+      rasTimes.rasError = err.message;
+    }
+    if (rasMeetings) {
+      for (const [i, dateStr] of dates.entries()) races += await matchSourceTimes(dateStr, rasMeetings[i], 'RAS', byRace);
+      Object.assign(rasTimes, { byRace, races, source: 'RAS', lastRunAt: new Date().toISOString(), lastError: null, nedsPageErrors: [] });
+      return;
+    }
+    if (rasTimes.nedsTriedAt && Date.now() - rasTimes.nedsTriedAt < NEDS_TIMES_EVERY_MS) return;
+    rasTimes.nedsTriedAt = Date.now();
+    const pool = [];
+    const pageErrors = [];
+    for (const [i, dateStr] of [today, shiftDate(today, 1), shiftDate(today, 2)].entries()) {
+      if (i) await sleep(1000);
+      try {
+        pool.push(...parseNedsSiteMeetings(await fetchNeds(`${NEDS_SITE_BASE}/${dateStr}`, NEDS_TIMES_TIMEOUT_MS))
+          .filter((m) => TIME_CHECK_COUNTRIES.includes(m.country))
+          .map((m) => ({ key: sourceKey(m.country, m.track, m.discipline), races: m.races.map((r) => ({ rNo: r.rNo, at: r.start || NaN })) })));
+      } catch (err) {
+        pageErrors.push(`${dateStr}: ${err.message}`);
+        if (err.paused) break;
       }
     }
-    Object.assign(rasTimes, { byRace, races, lastRunAt: new Date().toISOString(), lastError: null });
+    if (!pool.length) throw new Error(`RAS: ${rasTimes.rasError}; Neds: ${pageErrors.join('; ') || 'no meetings'}`);
+    for (const dateStr of dates) races += await matchSourceTimes(dateStr, pool, 'Neds', byRace);
+    Object.assign(rasTimes, { byRace, races, source: 'Neds', lastRunAt: new Date().toISOString(), lastError: null, nedsPageErrors: pageErrors });
   } catch (err) {
     rasTimes.lastError = err.message;
-    console.warn(`[race-dashboard] WARNING: RAS times check failed: ${err.message}`);
+    console.warn(`[race-dashboard] WARNING: race times check failed: ${err.message}`);
   } finally {
     rasTimes.running = false;
   }
@@ -2583,7 +2631,7 @@ function applyTimeMismatch(docs) {
     if (!t || Math.abs(t.mins) <= TIME_MISMATCH_MIN || doc.resultString || doc.isAbandoned) continue;
     if (!(utcMs(doc.rScheduleTimeUTC) > now)) continue;
     if (timeMismatchIgnores[`${doc._id}|${t.rasUtc}`]) continue;
-    doc.timeMismatch = { rasUtc: t.rasUtc, mins: t.mins };
+    doc.timeMismatch = { rasUtc: t.rasUtc, mins: t.mins, src: t.src };
   }
 }
 setTimeout(refreshRasTimes, 30 * 1000);

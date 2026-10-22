@@ -2964,7 +2964,7 @@
     function ignoreTimeMismatch(btn) {
       var race = _currentRaceData;
       if (!race || !_currentRaceId) return;
-      if (!window.confirm('Ignore the time mismatch for ' + race.meeting + ' R' + race.rNo + '? It comes back if the RAS time changes again.')) return;
+      if (!window.confirm('Ignore the time mismatch for ' + race.meeting + ' R' + race.rNo + '? It comes back if the ' + ((race.timeMismatch && race.timeMismatch.src) || 'RAS') + ' time changes again.')) return;
       btn.disabled = true;
       btn.textContent = 'Saving...';
       fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/time-mismatch-ignore', {
