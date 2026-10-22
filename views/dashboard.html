@@ -1495,6 +1495,7 @@
         '</div>';
       content.innerHTML =
         popupTopRowHtml +
+        '<div class="modal-head-row"><div>' +
         '<h2>' + countryFlagImg(race.country) + ' ' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
         (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
         '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
@@ -1505,6 +1506,7 @@
           (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
           (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
           (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
+        '</div><div class="modal-admin-slot" id="adminSlot"></div></div>' +
         (race.raceComment ? raceCommentHtml(race) : '') +
         resultLine +
         runnerCheckLine +
@@ -1563,8 +1565,10 @@
           var t = _ticketCtx.tickets[i.code];
           if (t) return '<a class="tk-mark" href="' + escapeHtmlClient(t.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> ' + escapeHtmlClient(i.texts[0].split(' (')[0]) + ': ticket open (' + escapeHtmlClient(t.statusLabel || 'to do') + ')</a>';
           return '<button type="button" class="adm-btn" onclick="openTicketDialog(\'' + escapeHtmlClient(i.code) + '\')"><i class="fa-solid fa-plus"></i> ' + escapeHtmlClient(i.texts[0].split(' (')[0]) + '</button>';
-        }).join('') + adminRaceLink(race.id);
+        }).join('');
         bar.hidden = false;
+        var slot = document.getElementById('adminSlot');
+        if (slot) slot.innerHTML = adminRaceLink(race.id);
       };
       // Drawn once the server answers: a view user gets 403 and no ticket bar
       // (12 Oct 2026, per Dinesh: view users see the dashboard only).
