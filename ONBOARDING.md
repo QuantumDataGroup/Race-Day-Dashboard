@@ -173,7 +173,7 @@ breakdown of exactly which checks fired.
 | **Scratching Not Updated** | per-race AND per-runner | all | The external Scratchings feed lists a runner (by tab/box number) as scratched, but our own race doc doesn't have that runner marked `isScratched` yet |
 | **Scratched Runner in Comment** (15 Oct 2026) | per-race: every race from tomorrow on, plus today's races still more than 12 h from the jump (a runner scratched closer to the race is a late scratching, not an issue) | Thoroughbred (wherever there's a race comment) | The race comment still mentions a runner scratched in our race doc — by tab number in brackets "(8)" or by the horse's name in capitals (`scratchedInComment` in raceView.js). The popup shows a warning and strikes the name through in the comment |
 | **Results Missing** | per-race | all | This race has no result, but a LATER race (higher race number) at the SAME meeting already does — abandoned races and trials are excluded (no result is ever expected there) |
-| **Time Mismatch** | per-race | all, AUS/MEX/PAN/SPA/CHI/ARG/URU/BRZ/SAU/GB/IRE | A race not run yet whose RAS API start time is more than 2 min from ours. Popup **Ignore** (per race + that RAS time). See "Time mismatch (RAS)" below |
+| **Time Mismatch** | per-race | all, AUS/MEX/PAN/SPA/CHI/ARG/URU/BRZ/SAU/GB/IRE | A race not run yet whose RAS API start time (Neds day page when RAS fails) is more than 2 min from ours. Popup **Ignore** (per race + that RAS time). See "Time mismatch (RAS)" below |
 | **Schedule Issue** | per-race | all | Either: (a) scheduled time is a placeholder `00:00`, (b) two races at the same meeting share the exact same scheduled time, or (c) this race is scheduled less than 15 minutes after the previous race at the same meeting |
 
 Two meeting-level filter options aggregate the above: **"Meetings with
@@ -396,7 +396,17 @@ resulted or abandoned whose RAS time is more than `TIME_MISMATCH_MIN` (2) min fr
 unless ignored: `POST /api/race/:raceId/time-mismatch-ignore` stores raceId + RAS time in
 `time-mismatch-ignores.json` (`TIME_MISMATCH_IGNORE_PATH`), so a new RAS time warns again.
 After the jump RAS shows the real start time, so run races aren't compared. Countries:
-`TIME_CHECK_COUNTRIES`. System health row "Race times (RAS)".
+`TIME_CHECK_COUNTRIES`. System health row "Race times (RAS / Neds)".
+
+**Neds fallback (22 Oct 2026):** production can't reach the RAS API ("fetch failed"), so when
+RAS fails the times come from the Neds day pages (`NEDS_SITE_BASE/<date>`, `parseNedsSiteMeetings`)
+for today, +1 and +2, at most every `NEDS_TIMES_EVERY_MS` (30 min), through `fetchNeds` (its
+6 h pause on 429/403) with a 150 s timeout (a page takes 40-140 s). Neds dates overseas meetings
+by the Australian day, so the pages are pooled and each of our meetings takes the one closest to
+our times; a race over 3 h out (`MAX_RACE_START_GAP_MS`) is skipped (also for RAS). Neds has no
+MEX/SPA/ARG/URU/BRZ/SAU. The warning says which source ("Neds 19:02"); the health row says
+"N races via Neds". RAS and Neds don't always agree (22 Oct: RAS had all 7 Northam races out,
+Neds only R2-R4).
 
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into

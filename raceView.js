@@ -1514,7 +1514,7 @@ function timeMismatchText(label, t) {
     const x = (((Number(m[1]) * 60 + Number(m[2]) + t.mins) % 1440) + 1440) % 1440;
     ras = `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
   }
-  return `Time mismatch (ours ${label || '?'}, RAS ${ras}, ${t.mins > 0 ? '+' : ''}${t.mins} min)`;
+  return `Time mismatch (ours ${label || '?'}, ${t.src || 'RAS'} ${ras}, ${t.mins > 0 ? '+' : ''}${t.mins} min)`;
 }
 
 // One race's data issues as { code, text } -- the grid's issue icon/tooltip
