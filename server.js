@@ -3250,6 +3250,39 @@ async function attachMeetingRunnerChecks(db, rows, dates) {
   }
 }
 
+// "In feed since" (25 Oct 2026, per Dinesh: WOODBINE was missed and nobody
+// knew when it came to the feed). The feed has no timestamps, so the server
+// keeps when its own check first saw each feed MeetingID. One first seen on
+// the server's first check of that date (after a restart or deploy) may have
+// come earlier: firstSeenBefore marks it ("before 14:05").
+const MISSING_MEETING_SEEN_PATH = path.join(ACTIVITY_LOG_DIR, 'missing-meeting-seen.json');
+let missingMeetingSeen = {};
+try {
+  if (fs.existsSync(MISSING_MEETING_SEEN_PATH)) missingMeetingSeen = JSON.parse(fs.readFileSync(MISSING_MEETING_SEEN_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${MISSING_MEETING_SEEN_PATH}: ${err.message} -- starting fresh`);
+}
+const missingSeenDates = new Set();
+function noteFirstSeen(rows, checkedDates) {
+  const now = new Date().toISOString();
+  let changed = false;
+  for (const row of rows) {
+    for (const id of row.sourceMeetingIds) {
+      if (missingMeetingSeen[id]) continue;
+      missingMeetingSeen[id] = { at: now, before: !missingSeenDates.has(row.date), date: row.date };
+      changed = true;
+    }
+    const first = row.sourceMeetingIds.map((id) => missingMeetingSeen[id]).sort((a, b) => a.at.localeCompare(b.at))[0];
+    row.firstSeenAt = first.at;
+    row.firstSeenBefore = first.before;
+  }
+  checkedDates.forEach((d) => missingSeenDates.add(d));
+  if (!changed) return;
+  const cutoff = shiftDate(todayStr(), -7);
+  for (const [id, e] of Object.entries(missingMeetingSeen)) if (!e.date || e.date < cutoff) delete missingMeetingSeen[id];
+  try { fs.writeFileSync(MISSING_MEETING_SEEN_PATH, JSON.stringify(missingMeetingSeen), 'utf8'); } catch (err) { /* next check */ }
+}
+
 async function getMissingMeetings(fresh) {
   const dates = trackedDates().slice(1); // today, tomorrow, day after
   if (fresh) dates.forEach((d) => memoCache.delete(`feed-scratchings|${d}`));
@@ -3284,6 +3317,7 @@ async function getMissingMeetings(fresh) {
     const ignore = row.status === 'missing' && row.sourceMeetingIds.map((id) => missingMeetingIgnores[String(id)]).find(Boolean);
     if (ignore) Object.assign(row, { status: 'ignored', ignoredBy: ignore.ignoredBy, ignoredAt: ignore.ignoredAt });
   }
+  noteFirstSeen(rows, dates.filter((d, i) => feeds[i].status === 'fulfilled'));
   await attachMeetingRunnerChecks(db, rows, dates);
   return {
     dates,
@@ -4536,7 +4570,8 @@ async function buildAlerts() {
 
 app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
   try {
-    res.json(await buildAlerts());
+    // Missing meetings (25 Oct 2026) only for users with that section.
+    res.json({ ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4643,13 +4678,72 @@ async function dispatchAlerts() {
   alertDispatch.lastRunAt = new Date().toISOString();
 }
 function saveAlertsSent(nowMs) {
-  // Comment-version keys (cv|) live 3 days: tomorrow's race is checked from today.
-  for (const [k, t] of Object.entries(alertsSent)) if (t < nowMs - (k.startsWith('cv|') ? 72 : 24) * 60 * 60 * 1000) delete alertsSent[k];
+  // Comment-version keys (cv|) live 3 days: tomorrow's race is checked from
+  // today; missing meetings (mm|) 4, as they go up to the day after tomorrow.
+  for (const [k, t] of Object.entries(alertsSent)) if (t < nowMs - (k.startsWith('mm|') ? 96 : k.startsWith('cv|') ? 72 : 24) * 60 * 60 * 1000) delete alertsSent[k];
   try { fs.writeFileSync(ALERTS_SENT_PATH, JSON.stringify(alertsSent), 'utf8'); } catch (err) { /* next run */ }
 }
 setInterval(() => {
   dispatchAlerts().catch((err) => { alertDispatch.lastError = err.message; console.warn(`[race-dashboard] WARNING: alert dispatch failed: ${err.message}`); });
 }, ALERT_DISPATCH_EVERY_MS);
+
+// Missing meeting alerts (25 Oct 2026, per Dinesh: WOODBINE was in the feed
+// and nobody picked it up -- "meetings vandu edukkama irunda oru notification
+// warning podunga", click -> Missing Meetings page, naming the meeting).
+// Every 5 min the server runs the Missing Meetings check; a feed meeting
+// still not on the dashboard (and not ignored) MISSING_ALERT_AFTER_MS after
+// it first showed in the feed is pushed once to the users with the Missing
+// Meetings section, and stays in their bell (/api/alerts) until it's added
+// or ignored. The wait lets the scraper add a new meeting the normal way.
+const MISSING_ALERT_EVERY_MS = 5 * 60 * 1000;
+const MISSING_ALERT_AFTER_MS = Number(process.env.MISSING_ALERT_AFTER_MIN || 30) * 60 * 1000;
+const missingAlertState = { lastRunAt: null, lastError: null, open: [] };
+function missingMeetingRecipients() {
+  return (authConfig.users || [])
+    .filter((u) => u.role === 'admin' || (userType(u) !== 'view' && Array.isArray(u.permissions) && u.permissions.includes('missing')))
+    .map((u) => u.username);
+}
+function feedDayText(dateStr) {
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
+}
+function feedSeenText(m) {
+  const t = new Date(m.firstSeenAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' });
+  return `${m.firstSeenBefore ? 'in the feed before' : 'in the feed since'} ${t}`;
+}
+async function dispatchMissingMeetingAlerts() {
+  const data = await getMissingMeetings(false);
+  const nowMs = Date.now();
+  const open = data.meetings
+    .filter((m) => m.status === 'missing' && nowMs - Date.parse(m.firstSeenAt) >= MISSING_ALERT_AFTER_MS)
+    .map((m) => ({
+      key: `mm|${m.date}|${m.sourceMeetingId}`,
+      date: m.date,
+      country: m.country,
+      course: m.course,
+      title: `Missing meeting · ${m.course} (${m.country})`,
+      body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''} · ${feedSeenText(m)}`,
+    }));
+  const due = open.filter((a) => !alertsSent[a.key]);
+  Object.assign(missingAlertState, { open, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
+  if (!due.length) return;
+  due.forEach((a) => { alertsSent[a.key] = nowMs; });
+  const recipients = missingMeetingRecipients().filter((u) => push.users().includes(u));
+  if (recipients.length) {
+    const batch = due.length > 3
+      ? [{ title: `${due.length} missing meetings`, body: due.slice(0, 4).map((a) => `${a.course} (${a.country}) ${feedDayText(a.date)}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/missing-meetings', tag: 'missing-meetings' }]
+      : due.map((a) => ({ title: a.title, body: a.body, url: '/missing-meetings', tag: `mm-${a.key}` }));
+    for (const p of batch) await push.sendTo(recipients, p);
+  }
+  saveAlertsSent(nowMs);
+}
+function runMissingMeetingAlerts() {
+  dispatchMissingMeetingAlerts().catch((err) => {
+    missingAlertState.lastError = err.message;
+    console.warn(`[race-dashboard] WARNING: missing meeting alerts failed: ${err.message}`);
+  });
+}
+setTimeout(runMissingMeetingAlerts, 45 * 1000);
+setInterval(runMissingMeetingAlerts, MISSING_ALERT_EVERY_MS);
 
 // UK / US runner-comment problems -> admins only (19 Oct 2026, per Dinesh:
 // "UK and US vertionla edawadu issue irunda enakku personal ha admin-ku

@@ -261,6 +261,19 @@ meetings in the feed that aren't checked are offered as quick-add chips.
 An earlier version used RAS `GetMeetingsByCountry` on
 nextdc.racingandsports.com.au:8813, which production can't reach.
 
+**Missing meeting alerts (25 Oct 2026):** WOODBINE was in the feed and nobody
+picked it up. The feed has no timestamps, so `noteFirstSeen` keeps when our
+check first saw each feed MeetingID (`missing-meeting-seen.json` in the data
+folder, 7 days); the page shows "In feed since …", or "In feed before …" when
+it was already there on the server's first check of that date (restart /
+deploy). Every 5 min `dispatchMissingMeetingAlerts` runs the check: a meeting
+still missing (not ignored) 30 min after it first showed (`MISSING_ALERT_AFTER_MIN`,
+time for the scraper to add it normally) is pushed once (`mm|` in
+`alerts-sent.json`, 4 days) to admins and users with the Missing Data section,
+naming the meeting, click → `/missing-meetings`; over 3 at once become one
+summary. `/api/alerts` also returns them (`missingMeetings`) for those users,
+so the bell lists them at the top and pops them up, until added or ignored.
+
 ### Runners check (`runners-check.js`)
 Every 8 hours the server compares runners with ours, for today to 2 days
 ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing
