@@ -3129,7 +3129,9 @@ app.use(express.json());
 // callers see a clear failure rather than the login page's HTML.
 // A session whose user has since been removed with setup-auth.js is
 // treated as logged out on its next request.
-const PUBLIC_PATHS = new Set(['/login', '/logout', '/health']);
+// /api/alerts/snooze-push: a notification's Snooze button, which may come
+// with no login cookie -- the device's push subscription says who it is.
+const PUBLIC_PATHS = new Set(['/login', '/logout', '/health', '/api/alerts/snooze-push']);
 app.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();
   refreshAuthConfig();
@@ -4582,7 +4584,7 @@ async function buildAlerts() {
 app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
   try {
     // Missing meetings (25 Oct 2026) only for users with that section.
-    res.json({ ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [] });
+    res.json({ ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [], ...snoozeInfo(req.session.username) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4639,7 +4641,7 @@ function chatMessage(race, milestone, issues) {
 }
 
 async function dispatchAlerts() {
-  const recipients = alertRecipients().filter((u) => push.users().includes(u));
+  const recipients = alertRecipients().filter((u) => push.users().includes(u) && !snoozedAll(u));
   if (!recipients.length && !clickup.chatEnabled) return;
   const data = await buildAlerts();
   const nowMs = Date.now();
@@ -4650,11 +4652,11 @@ async function dispatchAlerts() {
     for (const i of race.issues) {
       if (i.lateScratching && i.workflow !== 'fixed' && !alertsSent[`ls|${i.key}`]) {
         alertsSent[`ls|${i.key}`] = nowMs;
-        due.push({ title: `Late scratching not updated · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${minutesText(mins)}: ${i.detail}`, url: race.raceUrl, tag: `ls-${race.raceId}` });
+        due.push({ title: `Late scratching not updated · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${minutesText(mins)}: ${i.detail}`, url: race.raceUrl, tag: `ls-${race.raceId}`, snooze: { kind: 'race', ids: [race.raceId] } });
       }
       if (i.missingResult && i.workflow !== 'fixed' && !alertsSent[`mr|${i.key}`]) {
         alertsSent[`mr|${i.key}`] = nowMs;
-        due.push({ title: `Results missing · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${race.time || ''}: no results yet, a later race already has them`, url: race.raceUrl, tag: `mr-${race.raceId}` });
+        due.push({ title: `Results missing · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${race.time || ''}: no results yet, a later race already has them`, url: race.raceUrl, tag: `mr-${race.raceId}`, snooze: { kind: 'race', ids: [race.raceId] } });
       }
     }
     // A race that has run only had its results-missing alert above.
@@ -4666,7 +4668,7 @@ async function dispatchAlerts() {
     const key = `${race.raceId}|${milestone}`;
     if (!alertsSent[`p|${key}`]) {
       alertsSent[`p|${key}`] = nowMs;
-      due.push({ title: `${race.meeting} R${race.rNo} · ${disc} — ${minutesText(mins)}`, body: list.map((i) => i.detail || i.label).join(', '), url: race.raceUrl, tag: `race-${race.raceId}` });
+      due.push({ title: `${race.meeting} R${race.rNo} · ${disc} — ${minutesText(mins)}`, body: list.map((i) => i.detail || i.label).join(', '), url: race.raceUrl, tag: `race-${race.raceId}`, snooze: { kind: 'race', ids: [race.raceId] } });
     }
     if (clickup.chatEnabled && CHAT_MILESTONES.includes(milestone) && !alertsSent[`c|${key}`]) {
       alertsSent[`c|${key}`] = nowMs;
@@ -4681,7 +4683,7 @@ async function dispatchAlerts() {
   }
   if (recipients.length && due.length) {
     const batch = due.length > 3
-      ? [{ title: `${due.length} race alerts`, body: due.slice(0, 4).map((d) => d.title).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/overview', tag: 'race-alerts' }]
+      ? [{ title: `${due.length} race alerts`, body: due.slice(0, 4).map((d) => d.title).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/overview', tag: 'race-alerts', snooze: { kind: 'race', ids: [...new Set(due.flatMap((d) => d.snooze.ids))] } }]
       : due;
     for (const p of batch) await push.sendTo(recipients, p);
   }
@@ -4768,11 +4770,11 @@ async function dispatchMissingMeetingAlerts() {
   if (due.length) {
     due.forEach((a) => { alertsSent[a.key] = nowMs; });
     sent = true;
-    const recipients = missingMeetingRecipients().filter((u) => push.users().includes(u));
+    const recipients = missingMeetingRecipients().filter((u) => push.users().includes(u) && !snoozedAll(u));
     if (recipients.length) {
       const batch = due.length > 3
-        ? [{ title: `${due.length} missing meetings`, body: due.slice(0, 4).map((a) => `${a.course} (${a.country}) ${feedDayText(a.date)}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/missing-meetings', tag: 'missing-meetings' }]
-        : due.map((a) => ({ title: a.title, body: a.body, url: '/missing-meetings', tag: `mm-${a.key}` }));
+        ? [{ title: `${due.length} missing meetings`, body: due.slice(0, 4).map((a) => `${a.course} (${a.country}) ${feedDayText(a.date)}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/missing-meetings', tag: 'missing-meetings', snooze: { kind: 'mm', ids: due.map((a) => a.key) } }]
+        : due.map((a) => ({ title: a.title, body: a.body, url: '/missing-meetings', tag: `mm-${a.key}`, snooze: { kind: 'mm', ids: [a.key] } }));
       for (const p of batch) await push.sendTo(recipients, p);
     }
   }
@@ -4813,6 +4815,111 @@ function runMissingMeetingAlerts() {
 setTimeout(runMissingMeetingAlerts, 45 * 1000);
 setInterval(runMissingMeetingAlerts, MISSING_ALERT_EVERY_MS);
 
+// --- Snooze (25 Oct 2026, per Dinesh: "notification snooz aagura madhiri",
+// draft OK'd) --------------------------------------------------------------
+// Snooze 10 / 30 min on an alert (the notification's buttons, or the bell)
+// brings it back to that user after the time, only if it's still open: the
+// race is still in the alerts with an issue, the meeting is still missing.
+// "Snooze all" in the bell stops that user's pushes and pop-ups for 30 min,
+// 1 h or 2 h; what comes in meanwhile still shows in the bell. Kept in
+// alert-snooze.json in the data folder.
+const ALERT_SNOOZE_PATH = path.join(ACTIVITY_LOG_DIR, 'alert-snooze.json');
+let alertSnooze = { all: {}, items: [] };
+try {
+  if (fs.existsSync(ALERT_SNOOZE_PATH)) alertSnooze = { ...alertSnooze, ...JSON.parse(fs.readFileSync(ALERT_SNOOZE_PATH, 'utf8')) };
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${ALERT_SNOOZE_PATH}: ${err.message} -- starting with no snoozes`);
+}
+function saveAlertSnooze() {
+  const nowMs = Date.now();
+  alertSnooze.items = alertSnooze.items.filter((s) => s.dueAt > nowMs - 24 * 60 * 60 * 1000);
+  for (const [u, t] of Object.entries(alertSnooze.all)) if (t <= nowMs) delete alertSnooze.all[u];
+  try { fs.writeFileSync(ALERT_SNOOZE_PATH, JSON.stringify(alertSnooze), 'utf8'); } catch (err) { /* next save */ }
+}
+function snoozedAll(username, nowMs = Date.now()) {
+  return (alertSnooze.all[username] || 0) > nowMs;
+}
+function cleanSnoozeItem(item) {
+  if (!item || !['race', 'mm'].includes(item.kind)) return null;
+  const ids = (Array.isArray(item.ids) ? item.ids : []).map((x) => String(x).slice(0, 120)).filter(Boolean).slice(0, 20);
+  if (!ids.length) return null;
+  const str = (v, n) => String(v || '').slice(0, n);
+  const url = str(item.url, 300);
+  return { kind: item.kind, ids, title: str(item.title, 200), body: str(item.body, 600), url: url.startsWith('/') ? url : '/', tag: str(item.tag, 120) };
+}
+function addSnooze(username, item, minutes) {
+  // Snoozing the same alert again moves it, rather than adding a second.
+  alertSnooze.items = alertSnooze.items.filter((s) => !(s.user === username && !s.deliveredAt && s.kind === item.kind && s.ids.join('|') === item.ids.join('|')));
+  const entry = { id: crypto.randomBytes(6).toString('hex'), user: username, ...item, dueAt: Date.now() + minutes * 60 * 1000, deliveredAt: null, dropped: false };
+  alertSnooze.items.push(entry);
+  saveAlertSnooze();
+  return entry;
+}
+function snoozeStillOpen(s, alerts) {
+  if (s.kind === 'mm') return s.ids.some((k) => missingAlertState.open.some((a) => a.key === k));
+  return s.ids.some((id) => alerts.races.some((r) => r.raceId === id && r.issues.length));
+}
+async function deliverSnoozed() {
+  const nowMs = Date.now();
+  const due = alertSnooze.items.filter((s) => !s.deliveredAt && s.dueAt <= nowMs);
+  if (!due.length) return;
+  const alerts = due.some((s) => s.kind === 'race') ? await buildAlerts() : { races: [] };
+  for (const s of due) {
+    if (snoozedAll(s.user, nowMs)) { s.dueAt = alertSnooze.all[s.user]; continue; }
+    s.deliveredAt = nowMs;
+    s.dropped = !snoozeStillOpen(s, alerts);
+    if (!s.dropped && push.users().includes(s.user)) {
+      await push.sendTo([s.user], { title: `⏰ ${s.title}`, body: s.body, url: s.url, tag: s.tag, snooze: { kind: s.kind, ids: s.ids } });
+    }
+  }
+  saveAlertSnooze();
+}
+setInterval(() => {
+  deliverSnoozed().catch((err) => console.warn(`[race-dashboard] WARNING: snoozed alerts failed: ${err.message}`));
+}, 60 * 1000);
+// For /api/alerts: this user's snooze-all, what's snoozed, and snoozed
+// alerts that came back in the last 15 min (the page pops those up itself
+// when this device has no push).
+function snoozeInfo(username) {
+  const nowMs = Date.now();
+  const mine = alertSnooze.items.filter((s) => s.user === username);
+  return {
+    snoozedUntil: snoozedAll(username, nowMs) ? new Date(alertSnooze.all[username]).toISOString() : null,
+    snoozed: mine.filter((s) => !s.deliveredAt).map((s) => ({ kind: s.kind, ids: s.ids, dueAt: new Date(s.dueAt).toISOString() })),
+    reminders: mine.filter((s) => s.deliveredAt && !s.dropped && s.deliveredAt > nowMs - 15 * 60 * 1000)
+      .map((s) => ({ id: s.id, kind: s.kind, ids: s.ids, title: s.title, body: s.body, url: s.url, tag: s.tag })),
+  };
+}
+function snoozeRequest(username, body, res) {
+  if (body.item) {
+    const minutes = [10, 30].includes(Number(body.minutes)) ? Number(body.minutes) : null;
+    const item = cleanSnoozeItem(body.item);
+    if (!minutes || !item) return res.status(400).json({ error: 'minutes (10 or 30) and an alert are required' });
+    const entry = addSnooze(username, item, minutes);
+    return res.json({ ok: true, dueAt: new Date(entry.dueAt).toISOString() });
+  }
+  const minutes = Number(body.minutes);
+  if (![0, 30, 60, 120].includes(minutes)) return res.status(400).json({ error: 'minutes must be 0, 30, 60 or 120' });
+  if (minutes) alertSnooze.all[username] = Date.now() + minutes * 60 * 1000;
+  else delete alertSnooze.all[username];
+  saveAlertSnooze();
+  return res.json({ ok: true, snoozedUntil: minutes ? new Date(alertSnooze.all[username]).toISOString() : null });
+}
+// The bell: one alert ({ item, minutes }) or every alert ({ minutes }, 0 = back on).
+app.post('/api/alerts/snooze', requirePermission('overview'), (req, res) => {
+  snoozeRequest(req.session.username, req.body || {}, res);
+});
+// A notification's Snooze button (service worker): the login when there is
+// one, otherwise whose device the push subscription is. One alert only.
+app.post('/api/alerts/snooze-push', (req, res) => {
+  const body = req.body || {};
+  const sessionUser = req.session && req.session.loggedIn ? findUser(req.session.username) : null;
+  const username = sessionUser ? sessionUser.username : push.userOf(String(body.endpoint || ''));
+  if (!username) return res.status(401).json({ error: 'Unknown device' });
+  if (!body.item) return res.status(400).json({ error: 'an alert is required' });
+  snoozeRequest(username, body, res);
+});
+
 // UK / US runner-comment problems -> admins only (19 Oct 2026, per Dinesh:
 // "UK and US vertionla edawadu issue irunda enakku personal ha admin-ku
 // mattu oru notification podunga"). The dashboard shows the AU comments and
@@ -4827,7 +4934,7 @@ function commentVersionText(v) {
   return parts.join(' · ');
 }
 async function dispatchCommentVersionAlerts() {
-  const admins = (authConfig.users || []).filter((u) => u.role === 'admin').map((u) => u.username).filter((u) => push.users().includes(u));
+  const admins = (authConfig.users || []).filter((u) => u.role === 'admin').map((u) => u.username).filter((u) => push.users().includes(u) && !snoozedAll(u));
   if (!admins.length) return;
   const nowMs = Date.now();
   const today = todayStr();

@@ -63,6 +63,12 @@ function createPush({ dir, subject }) {
     return (subs[username] || []).some((s) => keyOf(s.sub) === endpoint);
   }
 
+  // Whose device this is (a notification's Snooze button, sent with no login).
+  function userOf(endpoint) {
+    if (!endpoint) return null;
+    return Object.keys(subs).find((u) => has(u, endpoint)) || null;
+  }
+
   // Sends one notification to every device of the given users. payload:
   // { title, body, url, tag }.
   async function sendTo(usernames, payload) {
@@ -95,7 +101,7 @@ function createPush({ dir, subject }) {
     return { publicKey: keys.publicKey, users: Object.keys(subs).length, devices, sent: sentCount, lastError };
   }
 
-  return { publicKey: keys.publicKey, subscribe, unsubscribe, has, sendTo, users: () => Object.keys(subs), status };
+  return { publicKey: keys.publicKey, subscribe, unsubscribe, has, userOf, sendTo, users: () => Object.keys(subs), status };
 }
 
 module.exports = { createPush };

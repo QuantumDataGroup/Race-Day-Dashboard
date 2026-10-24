@@ -279,6 +279,18 @@ Chat message to the team's "New Meetings Need to Scrape" group (`2kz0m0zv-12476`
 `CLICKUP_MISSING_CHANNEL_ID` overrides, `off` stops it), each with its own keys (`mmt|`, `mmc|`) so a failed send is
 retried on the next run. System Health row "Missing meeting alerts".
 
+**Snooze (25 Oct 2026):** pushed alerts carry `snooze: { kind: 'race' | 'mm', ids }`,
+and sw.js adds "Snooze 10 min" / "Snooze 30 min" buttons (PC + Android; iPhone
+shows none). A button posts to `/api/alerts/snooze-push` (public path: the login
+cookie if there is one, else the push subscription's endpoint → `push.userOf`).
+The bell has "Snooze all" (30 min / 1 h / 2 h, "Turn back on") and "Snooze 10 min"
+per race / missing meeting (`POST /api/alerts/snooze`). `deliverSnoozed` (every
+minute) brings an alert back to that user only if it's still open; snooze-all
+users get no pushes or pop-ups meanwhile (the bell still lists everything).
+`/api/alerts` returns `snoozedUntil`, `snoozed` and `reminders` (came back in the
+last 15 min, popped up by the page when the device has no push). State in
+`alert-snooze.json`.
+
 ### Runners check (`runners-check.js`)
 Every 8 hours the server compares runners with ours, for today to 2 days
 ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing

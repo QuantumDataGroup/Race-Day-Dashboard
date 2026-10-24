@@ -162,13 +162,39 @@
     });
   }
 
-  function popup(title, body, url, tag) {
+  function popup(title, body, url, tag, snooze) {
     if (pushOn) return;
     if (!settings.popups || !('Notification' in window) || Notification.permission !== 'granted') return;
-    try {
-      var n = new Notification(title, { body: body, tag: tag, icon: '/logo.png' });
-      n.onclick = function () { window.focus(); if (url) location.href = url; n.close(); };
-    } catch (e) { /* some browsers only allow it from a service worker */ }
+    function plain() {
+      try {
+        var n = new Notification(title, { body: body, tag: tag, icon: '/logo.png' });
+        n.onclick = function () { window.focus(); if (url) location.href = url; n.close(); };
+      } catch (e) { /* some browsers only allow it from a service worker */ }
+    }
+    // With Snooze buttons (25 Oct 2026) the service worker shows it; sw.js
+    // handles the buttons and the click.
+    if (snooze && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then(function (reg) {
+        return reg.showNotification(title, {
+          body: body, tag: tag, icon: '/icons/icon-192.png', badge: '/icons/badge-96.png',
+          data: { url: url || '/', title: title, body: body, tag: tag, snooze: snooze },
+          actions: [{ action: 'snooze10', title: 'Snooze 10 min' }, { action: 'snooze30', title: 'Snooze 30 min' }],
+        });
+      }).catch(plain);
+      return;
+    }
+    plain();
+  }
+
+  function snoozedUntil() {
+    var t = data && data.snoozedUntil ? Date.parse(data.snoozedUntil) : 0;
+    return t > Date.now() ? t : 0;
+  }
+  function hhmm(ms) { return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+  // When this alert comes back, if it's snoozed (one of its ids matches).
+  function snoozedTill(kind, id) {
+    var hit = ((data && data.snoozed) || []).filter(function (x) { return x.kind === kind && x.ids.indexOf(id) !== -1; })[0];
+    return hit ? Date.parse(hit.dueAt) : 0;
   }
 
   function issueSummary(list) {
@@ -184,11 +210,11 @@
       race.issues.forEach(function (i) {
         if (i.lateScratching && i.workflow !== 'fixed' && !seen['ls|' + i.key]) {
           seen['ls|' + i.key] = Date.now();
-          due.push({ title: 'Late scratching not updated · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + inText(m) + ': ' + i.detail, url: race.raceUrl, tag: 'ls-' + race.raceId });
+          due.push({ title: 'Late scratching not updated · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + inText(m) + ': ' + i.detail, url: race.raceUrl, tag: 'ls-' + race.raceId, snooze: { kind: 'race', ids: [race.raceId] } });
         }
         if (i.missingResult && i.workflow !== 'fixed' && !seen['mr|' + i.key]) {
           seen['mr|' + i.key] = Date.now();
-          due.push({ title: 'Results missing · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + (race.time || '') + ': no results yet, a later race already has them', url: race.raceUrl, tag: 'mr-' + race.raceId });
+          due.push({ title: 'Results missing · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + (race.time || '') + ': no results yet, a later race already has them', url: race.raceUrl, tag: 'mr-' + race.raceId, snooze: { kind: 'race', ids: [race.raceId] } });
         }
       });
       var milestone = milestoneFor(m);
@@ -198,25 +224,32 @@
       if (!list.length || seen[key]) return;
       seen[key] = Date.now();
       var label = milestone >= 60 ? (milestone / 60) + ' h' : milestone + ' min';
-      due.push({ title: raceTitle(race) + ' — ' + label + ' to jump', body: issueSummary(list), url: race.raceUrl, tag: 'race-' + race.raceId });
+      due.push({ title: raceTitle(race) + ' — ' + label + ' to jump', body: issueSummary(list), url: race.raceUrl, tag: 'race-' + race.raceId, snooze: { kind: 'race', ids: [race.raceId] } });
     });
     // Missing meetings (25 Oct 2026): a feed meeting not on the dashboard.
     (data.missingMeetings || []).forEach(function (a) {
       if (seen[a.key]) return;
       seen[a.key] = Date.now();
-      due.push({ title: a.title, body: a.body, url: '/missing-meetings', tag: 'mm-' + a.key });
+      due.push({ title: a.title, body: a.body, url: '/missing-meetings', tag: 'mm-' + a.key, snooze: { kind: 'mm', ids: [a.key] } });
+    });
+    // Snoozed alerts that came back (the server checked they're still open).
+    (data.reminders || []).forEach(function (r) {
+      if (seen['sn|' + r.id]) return;
+      seen['sn|' + r.id] = Date.now();
+      due.push({ title: '⏰ ' + r.title, body: r.body, url: r.url, tag: r.tag, snooze: { kind: r.kind, ids: r.ids } });
     });
     // Forget what is over a day old (missing meetings 4 days: they go up to
     // the day after tomorrow).
     var cutoff = Date.now() - 24 * 60 * 60 * 1000;
     Object.keys(seen).forEach(function (k) { if (seen[k] < (k.indexOf('mm|') === 0 ? cutoff - 72 * 60 * 60 * 1000 : cutoff)) delete seen[k]; });
     write(SEEN_KEY, seen);
-    if (!due.length) return;
+    // Snooze all: nothing pops up or beeps; the bell still lists it.
+    if (!due.length || snoozedUntil()) return;
     beep();
     if (due.length > 3) {
       popup(due.length + ' race alerts', due.slice(0, 4).map(function (d) { return d.title; }).join('\n') + (due.length > 4 ? '\n…' : ''), '/overview', 'race-alerts');
     } else {
-      due.forEach(function (d) { popup(d.title, d.body, d.url, d.tag); });
+      due.forEach(function (d) { popup(d.title, d.body, d.url, d.tag, d.snooze); });
     }
     bell.classList.add('alerts-ping');
     setTimeout(function () { bell.classList.remove('alerts-ping'); }, 4000);
@@ -245,18 +278,28 @@
     if (!panel || panel.hidden) return;
     var list = panel.querySelector('.al-list');
     if (!data) { list.innerHTML = '<p class="al-empty">Loading...</p>'; return; }
+    var until = snoozedUntil();
+    var bar = '<div class="al-snooze">' + (until
+      ? '<span class="al-snoozed"><i class="fa-regular fa-clock"></i> Alerts snoozed until ' + esc(hhmm(until)) + '</span><button type="button" class="adm-btn" data-al-snooze-all="0">Turn back on</button>'
+      : '<span>Snooze all:</span><button type="button" class="adm-btn" data-al-snooze-all="30">30 min</button><button type="button" class="adm-btn" data-al-snooze-all="60">1 h</button><button type="button" class="adm-btn" data-al-snooze-all="120">2 h</button>') + '</div>';
+    function snoozeBtn(kind, id, title, body, url) {
+      var till = snoozedTill(kind, id);
+      if (till) return '<span class="al-chip al-wait"><i class="fa-regular fa-clock"></i> Snoozed till ' + esc(hhmm(till)) + '</span>';
+      return '<button type="button" class="adm-btn" data-al-snooze="' + esc(kind) + '" data-id="' + esc(id) + '" data-title="' + esc(title) + '" data-body="' + esc(body) + '" data-url="' + esc(url) + '"><i class="fa-regular fa-clock"></i> Snooze 10 min</button>';
+    }
     var mm = (data.missingMeetings || []).map(function (a) {
       return '<article class="al-race al-missing">' +
         '<div class="al-race-head"><a href="/missing-meetings"><i class="fa-solid fa-triangle-exclamation"></i> Missing meeting · ' + esc(a.course) + ' <span class="al-cc">' + esc(a.country) + '</span></a></div>' +
         '<div class="al-issue"><div class="al-issue-text"><span>' + esc(a.body) + '</span></div>' +
-        '<div class="al-actions"><a class="adm-btn" href="/missing-meetings"><i class="fa-solid fa-arrow-right"></i> Missing Meetings</a></div></div></article>';
+        '<div class="al-actions"><a class="adm-btn" href="/missing-meetings"><i class="fa-solid fa-arrow-right"></i> Missing Meetings</a>' + snoozeBtn('mm', a.key, a.title, a.body, '/missing-meetings') + '</div></div></article>';
     }).join('');
-    list.innerHTML = mm + data.races.map(function (race) {
+    list.innerHTML = bar + mm + data.races.map(function (race) {
       var m = minsTo(race);
       var soon = m != null && m <= 30;
       return '<article class="al-race">' +
         '<div class="al-race-head"><a href="' + esc(race.raceUrl) + '">' + esc(race.meeting) + ' <b>R' + esc(race.rNo) + '</b> <span class="al-cc">' + esc(race.country) + '</span></a>' + discTag(race) +
-        '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(dayLabel(race)) + esc(race.time || '') + '</span></div>' +
+        '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(dayLabel(race)) + esc(race.time || '') + '</span>' +
+        snoozeBtn('race', race.raceId, raceTitle(race) + ' (' + race.country + ')', race.issues.map(function (i) { return i.detail || i.label; }).join(', '), race.raceUrl) + '</div>' +
         race.issues.map(function (i) {
           var src = i.source ? '<div class="al-src ' + (i.source.available ? 'al-src-yes' : 'al-src-no') + '">' + esc(i.source.text) + (i.source.available ? ' — update it' : '') + '</div>' : '';
           return '<div class="al-issue">' +
@@ -268,7 +311,7 @@
             '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(race.raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Admin</a>' +
             '</div></div>';
         }).join('') + '</article>';
-    }).join('') || (mm ? '' : '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>');
+    }).join('') + (mm || data.races.length ? '' : '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>');
   }
 
   function buildPanel() {
@@ -311,6 +354,20 @@
       });
     });
     panel.addEventListener('click', function (e) {
+      // Snooze (25 Oct 2026): one alert for 10 min, or everything.
+      var sn = e.target.closest('[data-al-snooze],[data-al-snooze-all]');
+      if (sn) {
+        sn.disabled = true;
+        var all = sn.hasAttribute('data-al-snooze-all');
+        var payload = all ? { minutes: Number(sn.getAttribute('data-al-snooze-all')) } : {
+          minutes: 10,
+          item: { kind: sn.getAttribute('data-al-snooze'), ids: [sn.getAttribute('data-id')], title: sn.getAttribute('data-title'), body: sn.getAttribute('data-body'), url: sn.getAttribute('data-url'), tag: 'snooze-' + sn.getAttribute('data-id') },
+        };
+        fetch('/api/alerts/snooze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+          .then(function (res) { if (!res.ok) throw new Error('Could not snooze'); return load(); })
+          .catch(function (err) { sn.disabled = false; alert(err.message); });
+        return;
+      }
       var btn = e.target.closest('[data-al-key]');
       if (!btn) return;
       btn.disabled = true;
