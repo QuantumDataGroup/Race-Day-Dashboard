@@ -4756,10 +4756,6 @@ function missingMeetingRecipients() {
 function feedDayText(dateStr) {
   return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
 }
-function feedSeenText(m) {
-  const t = new Date(m.firstSeenAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' });
-  return `${m.firstSeenBefore ? 'in the feed before' : 'in the feed since'} ${t}`;
-}
 async function dispatchMissingMeetingAlerts() {
   const data = await getMissingMeetings(false);
   const nowMs = Date.now();
@@ -4771,7 +4767,8 @@ async function dispatchMissingMeetingAlerts() {
       country: m.country,
       course: m.course,
       title: `Missing meeting · ${m.course} (${m.country})`,
-      body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''} · ${feedSeenText(m)}`,
+      // No "in the feed since" in the message (25 Oct 2026, per Dinesh).
+      body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''}`,
     }));
   Object.assign(missingAlertState, { open, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
   let sent = false;
