@@ -4709,8 +4709,9 @@ setInterval(() => {
 const MISSING_ALERT_EVERY_MS = 5 * 60 * 1000;
 const MISSING_ALERT_AFTER_MS = Number(process.env.MISSING_ALERT_AFTER_MIN || 30) * 60 * 1000;
 const missingAlertState = { lastRunAt: null, lastError: null, chatError: null, open: [] };
-// The ClickUp Chat group for missing meetings; "off" stops it.
-const MISSING_CHAT_CHANNEL_ID = process.env.CLICKUP_MISSING_CHANNEL_ID || 'off';
+// The ClickUp Chat group for missing meetings: "New Meetings Need to Scrape"
+// (25 Oct 2026, made by Dinesh); CLICKUP_MISSING_CHANNEL_ID overrides, "off" stops it.
+const MISSING_CHAT_CHANNEL_ID = process.env.CLICKUP_MISSING_CHANNEL_ID || '2kz0m0zv-12476';
 // Telegram (25 Oct 2026): a bot that messages Dinesh's phone. The bot token
 // and his chat id are set in Portainer (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID),
 // never in the code; without both it's off. The token is never logged.

@@ -275,8 +275,8 @@ summary. `/api/alerts` also returns them (`missingMeetings`) for those users,
 so the bell lists them at the top and pops them up, until added or ignored.
 The same run also sends one **Telegram** message to Dinesh (`TELEGRAM_BOT_TOKEN`
 + `TELEGRAM_CHAT_ID`, set in Portainer only; off without them) and one ClickUp
-Chat message to the team's missing-meetings group (`CLICKUP_MISSING_CHANNEL_ID`,
-off by default), each with its own keys (`mmt|`, `mmc|`) so a failed send is
+Chat message to the team's "New Meetings Need to Scrape" group (`2kz0m0zv-12476`;
+`CLICKUP_MISSING_CHANNEL_ID` overrides, `off` stops it), each with its own keys (`mmt|`, `mmc|`) so a failed send is
 retried on the next run. System Health row "Missing meeting alerts".
 
 ### Runners check (`runners-check.js`)
