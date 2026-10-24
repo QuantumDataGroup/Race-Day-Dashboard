@@ -231,12 +231,11 @@
             // One meeting the feed split by surface (e.g. SHA TIN + SHA TIN AW).
             (m.splitNames && m.splitNames.length > 1 ? '<small class="mm-note">Feed: ' + m.splitNames.map(esc).join(' + ') + '</small>' : '') +
             // Master admin only (the server leaves them out for everyone else), 25 Oct 2026:
-            // when our check first saw it in the feed -- not when it was already there as
-            // the server started checking (Dinesh: no "In feed before") -- and when it came
-            // into our DB.
-            (m.firstSeenAt && !m.firstSeenBefore ? '<small class="mm-note">In feed since ' + esc(whenText(m.firstSeenAt)) + '</small>' : '') +
-            (m.dbAddedAt ? '<small class="mm-note">In DB since ' + esc(whenText(m.dbAddedAt)) + '</small>' : '') + '</td>' +
-          '<td>' + status + '</td>' +
+            // when our check first saw it in the RAS feed -- not when it was already there
+            // as the server started checking (Dinesh: no "In feed before").
+            (m.firstSeenAt && !m.firstSeenBefore ? '<small class="mm-note">RAS: ' + esc(whenText(m.firstSeenAt)) + '</small>' : '') + '</td>' +
+          // ...and in the Status column, when it came into our DB (Dinesh, 25 Oct 2026).
+          '<td>' + status + (m.dbAddedAt ? '<small class="mm-note">DB: ' + esc(whenText(m.dbAddedAt)) + '</small>' : '') + '</td>' +
           '<td>' + runnersCell(m) + '</td>' +
           '<td class="mm-mono">' + (m.sourceMeetingIds || [m.sourceMeetingId]).map(esc).join('<br>') + '</td></tr>';
       }).join('') : '<tr><td colspan="5" class="adm-empty">' + (data.meetings.length ? 'Nothing for these filters.' : 'No thoroughbred meetings in the feed for these countries.') + '</td></tr>';
