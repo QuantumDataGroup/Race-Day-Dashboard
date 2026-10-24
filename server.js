@@ -4883,8 +4883,14 @@ async function dispatchVideoAlerts() {
     keys.push(key);
     const first = races.slice().sort((a, b) => a.rNo - b.rNo)[0];
     const link = first ? `${PUBLIC_URL}${raceUrl({ discipline: m.discipline || 'T', country: m.country, meeting: m.meeting, date: today, rNo: first.rNo })}` : PUBLIC_URL;
-    parts.push(`**${m.meeting} (${m.country})** · first race in ${milestone >= 60 ? `${milestone / 60} h` : `${milestone} min`}\n`
-      + `No video: ${missing.map((r) => `R${r.rNo}${r.label ? ` ${r.label}` : ''}`).join(', ')}\n[Open meeting](${link})`);
+    // How long until each race without a video starts (25 Oct 2026, per
+    // Dinesh: "start aaguradukku evvalavu time irukkunu pathu podunga").
+    const inText = (r) => {
+      const left = Math.max(0, Math.round((Date.parse(r.startUtc) - nowMs) / 60000));
+      return left >= 60 ? `${Math.floor(left / 60)} h${left % 60 ? ` ${left % 60} min` : ''}` : `${left} min`;
+    };
+    parts.push(`**${m.meeting} (${m.country})** · no video for ${missing.length} race${missing.length === 1 ? '' : 's'}\n`
+      + `${missing.map((r) => `- R${r.rNo}${r.label ? ` ${r.label}` : ''} · starts in ${inText(r)}`).join('\n')}\n[Open meeting](${link})`);
   }
   if (!parts.length) return;
   await clickup.postChat(`**[Race Day Dashboard] Missing videos**\n\n${parts.join('\n\n')}`, VIDEO_CHAT_CHANNEL_ID);
