@@ -231,9 +231,9 @@
             // One meeting the feed split by surface (e.g. SHA TIN + SHA TIN AW).
             (m.splitNames && m.splitNames.length > 1 ? '<small class="mm-note">Feed: ' + m.splitNames.map(esc).join(' + ') + '</small>' : '') +
             // Master admin only (the server leaves them out for everyone else), 25 Oct 2026:
-            // when our check first saw it in the RAS feed -- not when it was already there
-            // as the server started checking (Dinesh: no "In feed before").
-            (m.firstSeenAt && !m.firstSeenBefore ? '<small class="mm-note">RAS: ' + esc(whenText(m.firstSeenAt)) + '</small>' : '') + '</td>' +
+            // when our check first saw it in the RAS feed; "before" when it was already
+            // there as the server started checking (Dinesh wanted that back).
+            (m.firstSeenAt ? '<small class="mm-note">RAS: ' + (m.firstSeenBefore ? 'before ' : '') + esc(whenText(m.firstSeenAt)) + '</small>' : '') + '</td>' +
           // ...and in the Status column, when it came into our DB (Dinesh, 25 Oct 2026).
           '<td>' + status + (m.dbAddedAt ? '<small class="mm-note">DB: ' + esc(whenText(m.dbAddedAt)) + '</small>' : '') + '</td>' +
           '<td>' + runnersCell(m) + '</td>' +
