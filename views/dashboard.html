@@ -1441,18 +1441,7 @@
               ? ' <button type="button" class="missing-jockey-ignore-btn runner-check-ignore-btn" data-rkey="' + escapeHtmlClient(it.key) + '" data-rtext="' + escapeHtmlClient(it.text) + '" onclick="ignoreRunnerCheck(this)">&#10003; Ignore</button>'
               : '');
           }).join(' &middot; ') + '</p>'
-        : '';
-      // Which runners are mismatched, at the top too (25 Oct 2026, per Dinesh:
-      // SELANGOR R3 said "Runner Mismatched" and the runners were far down the
-      // table): "#12 HAPPY WARRIOR: Jockey Missing (Reserve 1)". Ignore stays
-      // in the runner's Issue column.
-      var mismatchedRunners = (race.runners || []).filter(function (r) { return !r.isScratched && r.runnerCheckItems && r.runnerCheckItems.length; });
-      if (mismatchedRunners.length) {
-        runnerCheckLine += '<p class="modal-runner-check"><i class="fa-solid fa-triangle-exclamation"></i> Runners mismatched: ' + mismatchedRunners.map(function (r) {
-          return '#' + escapeHtmlClient(String(r.tabNo)) + ' ' + escapeHtmlClient(r.horseName || '') + ': ' + r.runnerCheckItems.map(function (it) { return escapeHtmlClient(it.text); }).join(', ');
-        }).join(' &middot; ') + '</p>';
-      }
-      // Our time vs the RAS API's (22 Oct 2026), with Ignore.
+        : '';      // Our time vs the RAS API's (22 Oct 2026), with Ignore.
       var timeMismatchLine = race.timeMismatch
         ? '<p class="modal-runner-check"><i class="fa-solid fa-clock"></i> ' + escapeHtmlClient(race.timeMismatch.text) +
           ' <button type="button" class="missing-jockey-ignore-btn" data-ras="' + escapeHtmlClient(race.timeMismatch.rasUtc) + '" onclick="ignoreTimeMismatch(this)">&#10003; Ignore</button></p>'

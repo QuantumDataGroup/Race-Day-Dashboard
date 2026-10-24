@@ -399,7 +399,8 @@ function issueForRunner(runner, discipline, jockeyCountsMap, tabCountsMap) {
   if (runner.missingScratching) parts.push('Scratching not updated');
   // Runner Missing / Mismatched (2 Oct 2026, per Dinesh) -- from the RAS
   // runner check, attached server-side by attachRunnersCheck, AUS + NZ.
-  if (Array.isArray(runner.runnerCheckDiffs)) parts.push(...runner.runnerCheckDiffs);
+  // Labelled (25 Oct 2026, per Dinesh): "Runner mismatched: Jockey Missing (Reserve 1)".
+  if (Array.isArray(runner.runnerCheckDiffs)) parts.push(...runner.runnerCheckDiffs.map((t) => `Runner mismatched: ${t}`));
   return parts.join(' | ');
 }
 
