@@ -1333,6 +1333,11 @@ html.is-app .install-app-btn { display: none; }
 .al-disc .disc-icon { width: 18px; height: 18px; }
 .al-when { font-size: 12px; font-weight: 700; color: var(--adm-dl); }
 .al-when.al-soon { color: var(--adm-warn); }
+/* Snooze (25 Oct 2026): "Snooze all" bar on top, Snooze 10 min per alert. */
+.al-snooze { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.al-snooze .adm-btn, .al-race-head .adm-btn { padding: 2px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.al-snoozed { flex: 1 1 auto; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--adm-dl-bg); color: var(--adm-dl); font-weight: 700; }
+.al-race-head .al-chip { margin-top: 0; }
 .al-issue { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
 .al-issue-text { font-size: 13px; color: var(--fg); }
 .al-issue-text span { color: var(--muted); }

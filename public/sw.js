@@ -33,13 +33,36 @@ self.addEventListener('push', (event) => {
     renotify: Boolean(d.tag),
     icon: '/icons/icon-192.png',
     badge: '/icons/badge-96.png',
-    data: { url: d.url || '/' },
+    data: { url: d.url || '/', title: d.title || '', body: d.body || '', tag: d.tag || '', snooze: d.snooze || null },
+    actions: d.snooze ? SNOOZE_ACTIONS : [],
     timestamp: Date.now(),
   }));
 });
 
+// Snooze buttons (25 Oct 2026): PC (Chrome / Edge) and Android show them;
+// iPhone doesn't, so there the bell's snooze is used. The server brings the
+// alert back after the time if it's still open.
+const SNOOZE_ACTIONS = [{ action: 'snooze10', title: 'Snooze 10 min' }, { action: 'snooze30', title: 'Snooze 30 min' }];
+function snooze(n, minutes) {
+  const d = n.data || {};
+  return self.registration.pushManager.getSubscription().catch(() => null).then((sub) => fetch('/api/alerts/snooze-push', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      minutes,
+      endpoint: sub ? sub.endpoint : null,
+      item: { ...d.snooze, title: String(d.title || '').replace(/^⏰ /, ''), body: d.body, url: d.url, tag: d.tag },
+    }),
+  })).catch(() => {});
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'snooze10' || event.action === 'snooze30') {
+    event.waitUntil(snooze(event.notification, event.action === 'snooze10' ? 10 : 30));
+    return;
+  }
   const url = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href;
   event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
     const mine = list.find((c) => new URL(c.url).origin === self.location.origin);
