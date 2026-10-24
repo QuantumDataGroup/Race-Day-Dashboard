@@ -264,9 +264,11 @@ nextdc.racingandsports.com.au:8813, which production can't reach.
 **Missing meeting alerts (25 Oct 2026):** WOODBINE was in the feed and nobody
 picked it up. The feed has no timestamps, so `noteFirstSeen` keeps when our
 check first saw each feed MeetingID (`missing-meeting-seen.json` in the data
-folder, 7 days); the page shows "In feed since …", or "In feed before …" when
-it was already there on the server's first check of that date (restart /
-deploy). Every 5 min `dispatchMissingMeetingAlerts` runs the check: a meeting
+folder, 7 days). The page shows "In feed since …" (not for one already there
+on the server's first check of that date, after a restart / deploy) and "In DB
+since …" (the meeting's `createdAt`, a UTC string) to the master admin only:
+`MASTER_ADMINS` (usernames, default `Dinesh`); `/api/missing-meetings` leaves
+both out for everyone else. The alerts don't carry the feed time. Every 5 min `dispatchMissingMeetingAlerts` runs the check: a meeting
 still missing (not ignored) 30 min after it first showed (`MISSING_ALERT_AFTER_MIN`,
 time for the scraper to add it normally) is pushed once (`mm|` in
 `alerts-sent.json`, 4 days) to admins and users with the Missing Data section,
