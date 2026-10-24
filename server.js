@@ -3326,7 +3326,7 @@ async function getMissingMeetings(fresh) {
   const [dbMeetings, raceCounts] = await Promise.all([
     db.collection('meetings')
       .find({ mDate: { $in: dates }, mDiscipline: 'T' })
-      .project({ _id: 1, tabMeetingId: 1, mDate: 1, mCountry: 1, mCourseDisplayName: 1, isHidden: 1, hiddenReason: 1 })
+      .project({ _id: 1, tabMeetingId: 1, mDate: 1, mCountry: 1, mCourseDisplayName: 1, isHidden: 1, hiddenReason: 1, createdAt: 1 })
       .toArray(),
     db.collection('races').aggregate([
       { $match: { rDate: { $in: dates }, rDiscipline: 'T', isHidden: { $ne: true } } },
@@ -3506,9 +3506,19 @@ app.post('/api/missing-meetings/:meetingId/ignore', requirePermission('missing')
   res.json({ ok: true, ignored: Boolean(ignored), ignoredBy: req.session.username, ignoredAt: ignored ? missingMeetingIgnores[meetingId].ignoredAt : null });
 });
 
+// "In feed since" and "In DB since" are for the master admin only (25 Oct
+// 2026, per Dinesh: "Inda rendu times Master main adminku mattu da
+// kaattanum"): MASTER_ADMINS (usernames, comma-separated), default Dinesh.
+const MASTER_ADMINS = (process.env.MASTER_ADMINS || 'Dinesh').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+function isMasterAdmin(req) {
+  return accessOf(req).admin && MASTER_ADMINS.includes(String(req.session.username || '').toLowerCase());
+}
 app.get('/api/missing-meetings', requirePermission('missing'), async (req, res) => {
   try {
-    res.json({ ...(await getMissingMeetings(req.query.fresh === '1')), canManageCountries: accessOf(req).admin });
+    const data = await getMissingMeetings(req.query.fresh === '1');
+    const master = isMasterAdmin(req);
+    const meetings = data.meetings.map(({ firstSeenAt, firstSeenBefore, dbAddedAt, ...row }) => (master ? { ...row, firstSeenAt, firstSeenBefore, dbAddedAt } : row));
+    res.json({ ...data, meetings, canManageCountries: accessOf(req).admin });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4757,10 +4767,6 @@ function missingMeetingRecipients() {
 function feedDayText(dateStr) {
   return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
 }
-function feedSeenText(m) {
-  const t = new Date(m.firstSeenAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' });
-  return `${m.firstSeenBefore ? 'in the feed before' : 'in the feed since'} ${t}`;
-}
 async function dispatchMissingMeetingAlerts() {
   const data = await getMissingMeetings(false);
   const nowMs = Date.now();
@@ -4772,7 +4778,8 @@ async function dispatchMissingMeetingAlerts() {
       country: m.country,
       course: m.course,
       title: `Missing meeting · ${m.course} (${m.country})`,
-      body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''} · ${feedSeenText(m)}`,
+      // No "in the feed since" in the message (25 Oct 2026, per Dinesh).
+      body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''}`,
     }));
   Object.assign(missingAlertState, { open, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
   let sent = false;
