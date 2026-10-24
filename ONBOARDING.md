@@ -273,6 +273,11 @@ time for the scraper to add it normally) is pushed once (`mm|` in
 naming the meeting, click → `/missing-meetings`; over 3 at once become one
 summary. `/api/alerts` also returns them (`missingMeetings`) for those users,
 so the bell lists them at the top and pops them up, until added or ignored.
+The same run also sends one **Telegram** message to Dinesh (`TELEGRAM_BOT_TOKEN`
++ `TELEGRAM_CHAT_ID`, set in Portainer only; off without them) and one ClickUp
+Chat message to the team's "New Meetings Need to Scrape" group (`2kz0m0zv-12476`;
+`CLICKUP_MISSING_CHANNEL_ID` overrides, `off` stops it), each with its own keys (`mmt|`, `mmc|`) so a failed send is
+retried on the next run. System Health row "Missing meeting alerts".
 
 ### Runners check (`runners-check.js`)
 Every 8 hours the server compares runners with ours, for today to 2 days
