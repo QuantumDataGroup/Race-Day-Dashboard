@@ -200,9 +200,16 @@
       var label = milestone >= 60 ? (milestone / 60) + ' h' : milestone + ' min';
       due.push({ title: raceTitle(race) + ' — ' + label + ' to jump', body: issueSummary(list), url: race.raceUrl, tag: 'race-' + race.raceId });
     });
-    // Forget what is over a day old.
+    // Missing meetings (25 Oct 2026): a feed meeting not on the dashboard.
+    (data.missingMeetings || []).forEach(function (a) {
+      if (seen[a.key]) return;
+      seen[a.key] = Date.now();
+      due.push({ title: a.title, body: a.body, url: '/missing-meetings', tag: 'mm-' + a.key });
+    });
+    // Forget what is over a day old (missing meetings 4 days: they go up to
+    // the day after tomorrow).
     var cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    Object.keys(seen).forEach(function (k) { if (seen[k] < cutoff) delete seen[k]; });
+    Object.keys(seen).forEach(function (k) { if (seen[k] < (k.indexOf('mm|') === 0 ? cutoff - 72 * 60 * 60 * 1000 : cutoff)) delete seen[k]; });
     write(SEEN_KEY, seen);
     if (!due.length) return;
     beep();
@@ -217,7 +224,7 @@
 
   function activeCount() {
     if (!data) return 0;
-    return data.races.filter(function (race) {
+    return (data.missingMeetings || []).length + data.races.filter(function (race) {
       var m = minsTo(race);
       return liveIssues(race, milestoneFor(m)).length || race.issues.some(function (i) { return (i.lateScratching || i.missingResult) && i.workflow !== 'fixed'; });
     }).length;
@@ -238,7 +245,13 @@
     if (!panel || panel.hidden) return;
     var list = panel.querySelector('.al-list');
     if (!data) { list.innerHTML = '<p class="al-empty">Loading...</p>'; return; }
-    list.innerHTML = data.races.map(function (race) {
+    var mm = (data.missingMeetings || []).map(function (a) {
+      return '<article class="al-race al-missing">' +
+        '<div class="al-race-head"><a href="/missing-meetings"><i class="fa-solid fa-triangle-exclamation"></i> Missing meeting · ' + esc(a.course) + ' <span class="al-cc">' + esc(a.country) + '</span></a></div>' +
+        '<div class="al-issue"><div class="al-issue-text"><span>' + esc(a.body) + '</span></div>' +
+        '<div class="al-actions"><a class="adm-btn" href="/missing-meetings"><i class="fa-solid fa-arrow-right"></i> Missing Meetings</a></div></div></article>';
+    }).join('');
+    list.innerHTML = mm + data.races.map(function (race) {
       var m = minsTo(race);
       var soon = m != null && m <= 30;
       return '<article class="al-race">' +
@@ -255,7 +268,7 @@
             '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(race.raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Admin</a>' +
             '</div></div>';
         }).join('') + '</article>';
-    }).join('') || '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>';
+    }).join('') || (mm ? '' : '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>');
   }
 
   function buildPanel() {
