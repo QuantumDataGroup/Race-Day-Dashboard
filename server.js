@@ -4884,14 +4884,21 @@ async function dispatchVideoAlerts() {
     keys.push(key);
     const first = races.slice().sort((a, b) => a.rNo - b.rNo)[0];
     const link = first ? `${PUBLIC_URL}${raceUrl({ discipline: m.discipline || 'T', country: m.country, meeting: m.meeting, date: today, rNo: first.rNo })}` : PUBLIC_URL;
-    // How long until each race without a video starts (25 Oct 2026, per
-    // Dinesh: "start aaguradukku evvalavu time irukkunu pathu podunga").
-    const inText = (r) => {
-      const left = Math.max(0, Math.round((Date.parse(r.startUtc) - nowMs) / 60000));
-      return left >= 60 ? `${Math.floor(left / 60)} h${left % 60 ? ` ${left % 60} min` : ''}` : `${left} min`;
-    };
-    parts.push(`**${m.meeting} (${m.country})** · no video for ${missing.length} race${missing.length === 1 ? '' : 's'}\n`
-      + `${missing.map((r) => `- R${r.rNo}${r.label ? ` ${r.label}` : ''} · starts in ${inText(r)}`).join('\n')}\n[Open meeting](${link})`);
+    // The races as ranges ("R4–R8", "all races (R1–R8)") and only the first
+    // one's start time and how long until it starts (25 Oct 2026, per
+    // Dinesh: "Race 4 to R8 missing na Race 4 start agura time mattu podu").
+    const left = Math.max(0, Math.round((Date.parse(missing[0].startUtc) - nowMs) / 60000));
+    const inText = left >= 60 ? `${Math.floor(left / 60)} h${left % 60 ? ` ${left % 60} min` : ''}` : `${left} min`;
+    const runs = [];
+    for (const r of missing) {
+      const last = runs[runs.length - 1];
+      if (last && r.rNo === last[1] + 1) last[1] = r.rNo;
+      else runs.push([r.rNo, r.rNo]);
+    }
+    const list = runs.map(([a, b]) => (a === b ? `R${a}` : `R${a}–R${b}`)).join(', ');
+    const all = missing.length === races.length;
+    parts.push(`**${m.meeting} (${m.country})** · no video: ${all ? `all races (${list})` : list}\n`
+      + `${all ? 'First race ' : ''}R${missing[0].rNo}${missing[0].label ? ` ${missing[0].label}` : ''} · starts in ${inText}\n[Open meeting](${link})`);
   }
   if (!parts.length) return;
   await clickup.postChat(`**[Race Day Dashboard] Missing videos**\n\n${parts.join('\n\n')}`, VIDEO_CHAT_CHANNEL_ID);
