@@ -3264,7 +3264,9 @@ async function attachMeetingRunnerChecks(db, rows, dates) {
       const one = { rNo: race.rNo, missing: 0, mismatched: 0, lines: [], url: entry.meeting ? raceUrl({ discipline: entry.discipline, country: entry.country, meeting: entry.meeting, date: entry.date, rNo: entry.rNo }) : null };
       for (const it of items) {
         if (it.field === 'present' && it.raceLevel) { result.missing++; one.missing++; } else { result.mismatched++; one.mismatched++; }
-        one.lines.push(`${it.tab != null && !it.raceLevel ? `#${it.tab} ` : ''}${it.text}`);
+        // With the horse's name (25 Oct 2026): "#12 HAPPY WARRIOR: Jockey Missing (Reserve 1)".
+        const horse = it.tab != null && !it.raceLevel ? ((race.runners || []).find((x) => x.tabNo === it.tab) || {}).horseName : null;
+        one.lines.push(`${it.tab != null && !it.raceLevel ? `#${it.tab} ${horse ? `${horse}: ` : ''}` : ''}${it.text}`);
       }
       result.byRace.push(one);
     }
