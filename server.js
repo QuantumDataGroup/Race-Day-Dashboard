@@ -323,6 +323,7 @@ function applyAllIgnores(docs) {
   applyDupJockeyIgnores(docs);
   applyMissingJockeyIgnores(docs);
   applyTimeMismatch(docs);
+  applyVideoIgnores(docs);
 }
 
 // --- Response cache (1 Oct 2026, per Dinesh: "site a konjo optimize panni
@@ -835,11 +836,19 @@ async function runHealthChecks() {
     missingAlertState.lastRunAt ? `${missingAlertState.open.length} missing` : 'Starting',
     [`every ${MISSING_ALERT_EVERY_MS / 60000} min, after ${MISSING_ALERT_AFTER_MS / 60000} min in the feed`,
       `Telegram ${telegramEnabled() ? (telegramState.lastSentAt ? `on, last sent ${fmtTime(telegramState.lastSentAt)}` : 'on') : 'off (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)'}`,
-      `ClickUp group ${clickup.chatEnabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? 'on' : 'off (CLICKUP_MISSING_CHANNEL_ID)'}`,
+      `ClickUp group ${clickup.enabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? 'on' : 'off (CLICKUP_MISSING_CHANNEL_ID)'}`,
       missingAlertState.lastRunAt ? `last ${fmtTime(missingAlertState.lastRunAt)}` : '',
       telegramState.lastError ? `Telegram failed: ${telegramState.lastError}` : '',
       missingAlertState.chatError || '',
       missingAlertState.lastError ? `failed: ${missingAlertState.lastError}` : ''].filter(Boolean).join(' · '));
+
+  // Missing videos to ClickUp (25 Oct 2026).
+  add('video-alerts', 'Missing video alerts', videoAlertState.lastError ? 'warn' : 'ok',
+    clickup.enabled && VIDEO_CHAT_CHANNEL_ID !== 'off' ? `${videoAlertState.sent} meeting${videoAlertState.sent === 1 ? '' : 's'} sent` : 'Off',
+    ['ClickUp "Missing Videos", 2 h / 1 h / 30 min before a meeting starts, every 5 min',
+      videoAlertState.lastRunAt ? `last ${fmtTime(videoAlertState.lastRunAt)}` : '',
+      `${Object.keys(videoIgnores).length} race${Object.keys(videoIgnores).length === 1 ? '' : 's'} ignored`,
+      videoAlertState.lastError ? `failed: ${videoAlertState.lastError}` : ''].filter(Boolean).join(' · '));
 
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
   const ps = push.status();
@@ -4793,7 +4802,7 @@ async function dispatchMissingMeetingAlerts() {
       telegramState.lastError = err.message;
     }
   }
-  const chatDue = clickup.chatEnabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? open.filter((a) => !alertsSent[`mmc|${a.key}`]) : [];
+  const chatDue = clickup.enabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? open.filter((a) => !alertsSent[`mmc|${a.key}`]) : [];
   if (chatDue.length) {
     try {
       await clickup.postChat(`**[Race Day Dashboard] ${chatDue.length > 1 ? `${chatDue.length} missing meetings` : 'Missing meeting'}** — not on the dashboard\n${chatDue.map((a) => `- **${a.course} (${a.country})** · ${a.body}`).join('\n')}\n[Open Missing Meetings](${link})`, MISSING_CHAT_CHANNEL_ID);
@@ -4814,6 +4823,85 @@ function runMissingMeetingAlerts() {
 }
 setTimeout(runMissingMeetingAlerts, 45 * 1000);
 setInterval(runMissingMeetingAlerts, MISSING_ALERT_EVERY_MS);
+
+// --- Missing videos in ClickUp (25 Oct 2026, per Dinesh: "Meeting Start
+// aguradukku modalla 2h before videos illanna ... inda chat-ku varanum",
+// again at 1 h and 30 min, and an Ignore per race so it stops) ----------
+// Every 5 min: each of today's meetings whose first race is 2 h / 1 h /
+// 30 min away gets one message in the "Missing Videos" ClickUp Chat group
+// listing its races (not run yet) with Missing Video. A race the team
+// ignored in the popup isn't listed, and isn't flagged on the dashboard.
+// Ignores are kept in video-ignores.json in the data folder, 3 days.
+const VIDEO_IGNORE_PATH = path.join(ACTIVITY_LOG_DIR, 'video-ignores.json');
+let videoIgnores = {};
+try {
+  if (fs.existsSync(VIDEO_IGNORE_PATH)) videoIgnores = JSON.parse(fs.readFileSync(VIDEO_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${VIDEO_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function applyVideoIgnores(docs) {
+  for (const doc of docs) doc.videoIgnored = videoIgnores[doc._id] || null;
+}
+app.post('/api/race/:raceId/video-ignore', requireWork, (req, res) => {
+  const { raceId } = req.params;
+  const { ignored, race } = req.body || {};
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Missing video ignored: ${race || raceId}` });
+  if (ignored) videoIgnores[raceId] = { race: race || null, ignoredAt: new Date().toISOString(), ignoredBy: req.session.username };
+  else delete videoIgnores[raceId];
+  for (const [k, v] of Object.entries(videoIgnores)) if (Date.parse(v.ignoredAt) < Date.now() - 3 * 86400000) delete videoIgnores[k];
+  try {
+    fs.writeFileSync(VIDEO_IGNORE_PATH, JSON.stringify(videoIgnores, null, 2), 'utf8');
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  res.json({ ok: true, ignored: Boolean(ignored) });
+});
+
+const VIDEO_CHAT_CHANNEL_ID = process.env.CLICKUP_VIDEO_CHANNEL_ID || '2kz0m0zv-12496';
+const VIDEO_ALERT_MILESTONES = (process.env.VIDEO_ALERT_MILESTONES || '120,60,30').split(',').map(Number).filter((n) => n > 0).sort((a, b) => b - a);
+const videoAlertState = { lastRunAt: null, lastError: null, sent: 0 };
+async function dispatchVideoAlerts() {
+  if (!clickup.enabled || VIDEO_CHAT_CHANNEL_ID === 'off') return;
+  const today = todayStr();
+  const nowMs = Date.now();
+  const { meetings } = await currentIssues(today);
+  const parts = [];
+  const keys = [];
+  for (const m of meetings) {
+    const races = Object.entries(m.races).filter(([, r]) => r && r.status !== 'abandoned').map(([n, r]) => ({ ...r, rNo: Number(n) }));
+    const starts = races.map((r) => Date.parse(r.startUtc || '')).filter(Number.isFinite);
+    if (!starts.length) continue;
+    const mins = (Math.min(...starts) - nowMs) / 60000;
+    if (!(mins > 0)) continue;
+    // The latest one passed: a restart in between doesn't send the earlier one.
+    const milestone = VIDEO_ALERT_MILESTONES.filter((x) => mins <= x).pop();
+    if (milestone == null) continue;
+    const key = `mv|${today}|${m.country}|${m.meeting}|${milestone}`;
+    if (alertsSent[key]) continue;
+    const missing = races.filter((r) => r.missingVideo && !(Date.parse(r.startUtc || '') <= nowMs)).sort((a, b) => a.rNo - b.rNo);
+    if (!missing.length) continue;
+    keys.push(key);
+    const first = races.slice().sort((a, b) => a.rNo - b.rNo)[0];
+    const link = first ? `${PUBLIC_URL}${raceUrl({ discipline: m.discipline || 'T', country: m.country, meeting: m.meeting, date: today, rNo: first.rNo })}` : PUBLIC_URL;
+    parts.push(`**${m.meeting} (${m.country})** · first race in ${milestone >= 60 ? `${milestone / 60} h` : `${milestone} min`}\n`
+      + `No video: ${missing.map((r) => `R${r.rNo}${r.label ? ` ${r.label}` : ''}`).join(', ')}\n[Open meeting](${link})`);
+  }
+  if (!parts.length) return;
+  await clickup.postChat(`**[Race Day Dashboard] Missing videos**\n\n${parts.join('\n\n')}`, VIDEO_CHAT_CHANNEL_ID);
+  keys.forEach((k) => { alertsSent[k] = nowMs; });
+  videoAlertState.sent += parts.length;
+  saveAlertsSent(nowMs);
+}
+function runVideoAlerts() {
+  dispatchVideoAlerts()
+    .then(() => Object.assign(videoAlertState, { lastRunAt: new Date().toISOString(), lastError: null }))
+    .catch((err) => {
+      videoAlertState.lastError = err.message;
+      console.warn(`[race-dashboard] WARNING: missing video alerts failed: ${err.message}`);
+    });
+}
+setTimeout(runVideoAlerts, 75 * 1000);
+setInterval(runVideoAlerts, 5 * 60 * 1000);
 
 // --- Snooze (25 Oct 2026, per Dinesh: "notification snooz aagura madhiri",
 // draft OK'd) --------------------------------------------------------------

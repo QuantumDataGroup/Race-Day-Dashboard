@@ -512,7 +512,8 @@ function buildSchedule(docs, dateStr) {
       // `videoUrl` (the icon/link) shows for ANY race with a video, any date,
       // any status. The "missing" WARNING is restricted to today (see
       // `isToday` above), resulted or not.
-      missingVideo: doc.hasVideo === false && isToday,
+      // An ignored race (server.js video-ignore, 25 Oct 2026) isn't flagged.
+      missingVideo: doc.hasVideo === false && !doc.videoIgnored && isToday,
       videoUrl: doc.videoUrl || null,
       // `missingSpeedMap` is attached server-side (attachSpeedMapStatus) for
       // Greyhound races only, and only when the external stats source
@@ -993,7 +994,11 @@ function buildRaceDetail(doc) {
     isTrial: Boolean(doc.isTrail), // `isTrail` is the DB's field name
     // Matches buildSchedule's rule: the "missing" warning only applies to
     // today's races (videos only ever get uploaded same-day).
-    missingVideo: !abandoned && doc.hasVideo === false && doc.rDate === todayStr(),    videoUrl: doc.videoUrl || null,
+    missingVideo: !abandoned && doc.hasVideo === false && !doc.videoIgnored && doc.rDate === todayStr(),
+    // Missing video Ignore (25 Oct 2026): who ignored it, or whether it can be.
+    videoIgnored: !abandoned && doc.hasVideo === false && doc.videoIgnored ? doc.videoIgnored : null,
+    canIgnoreVideo: !abandoned && doc.hasVideo === false && doc.rDate === todayStr(),
+    videoUrl: doc.videoUrl || null,
     // Race-level runners check differences (a runner absent or scratched on one
     // side); per-runner ones are in each runner's issue text.
     runnerCheckLines: Array.isArray(doc.runnerCheckLines) && !abandoned ? doc.runnerCheckLines : [],

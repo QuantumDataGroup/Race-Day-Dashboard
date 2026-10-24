@@ -317,6 +317,7 @@ td.time.trial-race { white-space: normal; }
 .trial-line { font-size: 10px; font-weight: 700; color: #8fc0ee; margin-top: 2px; text-decoration: none; }
 .trial-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #1c3b57; color: #8fc0ee; }
 .novideo-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: #4a1530; color: #ef9dc3; }
+.novideo-ignored { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; vertical-align: middle; background: rgba(148, 163, 184, 0.18); color: var(--muted); }
 /* Current/live runner odds (14 Sep 2026, per Dinesh, matching a reference
    punting site) -- green price pill + a "Favourite" badge under the
    single lowest-priced runner. */
