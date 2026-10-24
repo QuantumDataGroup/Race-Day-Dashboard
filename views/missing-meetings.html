@@ -229,8 +229,9 @@
           '<td class="chg-where"><b>' + esc(m.course) + '</b><small>' + esc(m.country) + (m.races ? ' &middot; ' + m.races + ' races' : '') + '</small>' +
             // One meeting the feed split by surface (e.g. SHA TIN + SHA TIN AW).
             (m.splitNames && m.splitNames.length > 1 ? '<small class="mm-note">Feed: ' + m.splitNames.map(esc).join(' + ') + '</small>' : '') +
-            // When our check first saw it in the feed (25 Oct 2026); "before" = already there when the server started checking.
-            (m.firstSeenAt ? '<small class="mm-note">In feed ' + (m.firstSeenBefore ? 'before ' : 'since ') + esc(new Date(m.firstSeenAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })) + '</small>' : '') + '</td>' +
+            // When our check first saw it in the feed (25 Oct 2026); not shown when it
+            // was already there as the server started checking (Dinesh: no "In feed before").
+            (m.firstSeenAt && !m.firstSeenBefore ? '<small class="mm-note">In feed since ' + esc(new Date(m.firstSeenAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })) + '</small>' : '') + '</td>' +
           '<td>' + status + '</td>' +
           '<td>' + runnersCell(m) + '</td>' +
           '<td class="mm-mono">' + (m.sourceMeetingIds || [m.sourceMeetingId]).map(esc).join('<br>') + '</td></tr>';
