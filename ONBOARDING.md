@@ -279,6 +279,16 @@ Chat message to the team's "New Meetings Need to Scrape" group (`2kz0m0zv-12476`
 `CLICKUP_MISSING_CHANNEL_ID` overrides, `off` stops it), each with its own keys (`mmt|`, `mmc|`) so a failed send is
 retried on the next run. System Health row "Missing meeting alerts".
 
+**Missing video alerts (25 Oct 2026):** every 5 min `dispatchVideoAlerts` posts to
+the ClickUp Chat group "Missing Videos" (`2kz0m0zv-12496`; `CLICKUP_VIDEO_CHANNEL_ID`
+overrides, `off` stops it) once per meeting when its first race is 2 h, 1 h and
+30 min away (`VIDEO_ALERT_MILESTONES`, keys `mv|` in `alerts-sent.json`; after a
+restart only the latest milestone passed is sent), listing its races not run
+yet with Missing Video. The race popup's **Ignore** next to "Videos not available"
+(`POST /api/race/:raceId/video-ignore`, `video-ignores.json` in the data folder,
+3 days, Undo in the popup) stops both the dashboard flag and the message.
+System Health row "Missing video alerts".
+
 **Snooze (25 Oct 2026):** pushed alerts carry `snooze: { kind: 'race' | 'mm', ids }`,
 and sw.js adds "Snooze 10 min" / "Snooze 30 min" buttons (PC + Android; iPhone
 shows none). A button posts to `/api/alerts/snooze-push` (public path: the login

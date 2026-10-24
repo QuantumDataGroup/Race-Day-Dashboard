@@ -1514,7 +1514,11 @@
           (race.rDistance ? ' | Distance: ' + escapeHtmlClient(String(race.rDistance)) + 'm' : '') +
           (race.rPrizeMoney ? ' | Prize: ' + escapeHtmlClient(race.rPrizeMoney) : '') +
           (race.isTrial ? ' | <span class="trial-tag">Trial</span>' : '') +
-          (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
+          // Missing video Ignore (25 Oct 2026): stops the flag and the ClickUp message.
+          (race.missingVideo ? ' | <span class="novideo-tag">Videos not available</span>' +
+            (race.canIgnoreVideo ? ' <button type="button" class="missing-jockey-ignore-btn" onclick="ignoreVideo(this, true)">&#10003; Ignore</button>' : '') : '') +
+          (race.videoIgnored ? ' | <span class="novideo-ignored">No video &middot; ignored by ' + escapeHtmlClient(race.videoIgnored.ignoredBy || '?') + '</span>' +
+            ' <button type="button" class="missing-jockey-ignore-btn" onclick="ignoreVideo(this, false)">Undo</button>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
         '</div><div class="modal-admin-slot" id="adminSlot"></div></div>' +
         (race.raceComment ? raceCommentHtml(race) : '') +
         resultLine +
@@ -2992,6 +2996,44 @@
         .catch(function (err) {
           btn.disabled = false;
           btn.innerHTML = '&#10003; Ignore';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // Missing video Ignore / Undo (25 Oct 2026): the grid cell drops (or gets
+    // back on the next refresh) its Missing Video flag.
+    function ignoreVideo(btn, ignored) {
+      var race = _currentRaceData;
+      if (!race || !_currentRaceId) return;
+      if (ignored && !window.confirm('Ignore the missing video for ' + race.meeting + ' R' + race.rNo + '? It won\'t be flagged or sent to ClickUp any more.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/race/' + encodeURIComponent(_currentRaceId) + '/video-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: ignored, race: race.meeting + ' R' + race.rNo + ' (' + race.country + ')' }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          var tag = btn.previousElementSibling;
+          if (tag) tag.textContent = ignored ? 'No video · ignored' : 'Videos not available';
+          btn.remove();
+          var cell = document.querySelector('td[data-race-id="' + _currentRaceId + '"]');
+          if (cell && ignored) {
+            setOtherIssueFlag(cell, 'missing-video', false);
+            try {
+              var list = JSON.parse(cell.getAttribute('data-issues') || '[]').filter(function (i) { return i.code !== 'missing-video'; });
+              cell.setAttribute('data-issues', JSON.stringify(list));
+            } catch (e) { /* the next refresh redraws it */ }
+            refreshIssueIcons(cell);
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.innerHTML = ignored ? '&#10003; Ignore' : 'Undo';
           window.alert('Could not save: ' + err.message);
         });
     }
