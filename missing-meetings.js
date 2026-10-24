@@ -99,7 +99,7 @@ function sameCourse(a, b) {
   return small.every((t) => big.has(t));
 }
 
-// dbMeetings: { _id, tabMeetingId, mDate, mCountry, mCourseDisplayName, isHidden, hiddenReason }
+// dbMeetings: { _id, tabMeetingId, mDate, mCountry, mCourseDisplayName, isHidden, hiddenReason, createdAt }
 // visibleRaceCounts: Map meetingId -> races the dashboard shows for it.
 function compareMeetings(sourceMeetings, dbMeetings, visibleRaceCounts) {
   const byTabId = new Map();
@@ -132,6 +132,8 @@ function compareMeetings(sourceMeetings, dbMeetings, visibleRaceCounts) {
       note,
       dashboardMeeting: m ? m.mCourseDisplayName : null,
       dbMeetingId: m ? m._id : null,
+      // When it came into our DB (createdAt is a UTC string with no zone), 25 Oct 2026.
+      dbAddedAt: m && m.createdAt ? `${String(m.createdAt).replace(' ', 'T')}Z` : null,
     };
   });
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.country.localeCompare(b.country) || a.course.localeCompare(b.course));

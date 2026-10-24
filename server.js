@@ -3325,7 +3325,7 @@ async function getMissingMeetings(fresh) {
   const [dbMeetings, raceCounts] = await Promise.all([
     db.collection('meetings')
       .find({ mDate: { $in: dates }, mDiscipline: 'T' })
-      .project({ _id: 1, tabMeetingId: 1, mDate: 1, mCountry: 1, mCourseDisplayName: 1, isHidden: 1, hiddenReason: 1 })
+      .project({ _id: 1, tabMeetingId: 1, mDate: 1, mCountry: 1, mCourseDisplayName: 1, isHidden: 1, hiddenReason: 1, createdAt: 1 })
       .toArray(),
     db.collection('races').aggregate([
       { $match: { rDate: { $in: dates }, rDiscipline: 'T', isHidden: { $ne: true } } },
@@ -3505,9 +3505,19 @@ app.post('/api/missing-meetings/:meetingId/ignore', requirePermission('missing')
   res.json({ ok: true, ignored: Boolean(ignored), ignoredBy: req.session.username, ignoredAt: ignored ? missingMeetingIgnores[meetingId].ignoredAt : null });
 });
 
+// "In feed since" and "In DB since" are for the master admin only (25 Oct
+// 2026, per Dinesh: "Inda rendu times Master main adminku mattu da
+// kaattanum"): MASTER_ADMINS (usernames, comma-separated), default Dinesh.
+const MASTER_ADMINS = (process.env.MASTER_ADMINS || 'Dinesh').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+function isMasterAdmin(req) {
+  return accessOf(req).admin && MASTER_ADMINS.includes(String(req.session.username || '').toLowerCase());
+}
 app.get('/api/missing-meetings', requirePermission('missing'), async (req, res) => {
   try {
-    res.json({ ...(await getMissingMeetings(req.query.fresh === '1')), canManageCountries: accessOf(req).admin });
+    const data = await getMissingMeetings(req.query.fresh === '1');
+    const master = isMasterAdmin(req);
+    const meetings = data.meetings.map(({ firstSeenAt, firstSeenBefore, dbAddedAt, ...row }) => (master ? { ...row, firstSeenAt, firstSeenBefore, dbAddedAt } : row));
+    res.json({ ...data, meetings, canManageCountries: accessOf(req).admin });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
