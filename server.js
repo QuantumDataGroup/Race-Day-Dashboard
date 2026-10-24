@@ -829,6 +829,18 @@ async function runHealthChecks() {
       (rasTimes.nedsPageErrors || []).length ? `Neds pages failed: ${rasTimes.nedsPageErrors.join('; ')}` : '',
       rasTimes.lastError ? `failed: ${rasTimes.lastError}` : ''].filter(Boolean).join(' · '));
 
+  // Missing meeting alerts (25 Oct 2026): push + bell, Telegram, ClickUp group.
+  const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' });
+  add('missing-alerts', 'Missing meeting alerts', missingAlertState.lastError || telegramState.lastError || missingAlertState.chatError ? 'warn' : 'ok',
+    missingAlertState.lastRunAt ? `${missingAlertState.open.length} missing` : 'Starting',
+    [`every ${MISSING_ALERT_EVERY_MS / 60000} min, after ${MISSING_ALERT_AFTER_MS / 60000} min in the feed`,
+      `Telegram ${telegramEnabled() ? (telegramState.lastSentAt ? `on, last sent ${fmtTime(telegramState.lastSentAt)}` : 'on') : 'off (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)'}`,
+      `ClickUp group ${clickup.chatEnabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? 'on' : 'off (CLICKUP_MISSING_CHANNEL_ID)'}`,
+      missingAlertState.lastRunAt ? `last ${fmtTime(missingAlertState.lastRunAt)}` : '',
+      telegramState.lastError ? `Telegram failed: ${telegramState.lastError}` : '',
+      missingAlertState.chatError || '',
+      missingAlertState.lastError ? `failed: ${missingAlertState.lastError}` : ''].filter(Boolean).join(' · '));
+
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
   const ps = push.status();
   add('alerts', 'Race alerts (push + ClickUp Chat)', alertDispatch.lastError || ps.lastError ? 'warn' : 'ok',
@@ -4679,7 +4691,7 @@ async function dispatchAlerts() {
 function saveAlertsSent(nowMs) {
   // Comment-version keys (cv|) live 3 days: tomorrow's race is checked from
   // today; missing meetings (mm|) 4, as they go up to the day after tomorrow.
-  for (const [k, t] of Object.entries(alertsSent)) if (t < nowMs - (k.startsWith('mm|') ? 96 : k.startsWith('cv|') ? 72 : 24) * 60 * 60 * 1000) delete alertsSent[k];
+  for (const [k, t] of Object.entries(alertsSent)) if (t < nowMs - (k.startsWith('mm') ? 96 : k.startsWith('cv|') ? 72 : 24) * 60 * 60 * 1000) delete alertsSent[k];
   try { fs.writeFileSync(ALERTS_SENT_PATH, JSON.stringify(alertsSent), 'utf8'); } catch (err) { /* next run */ }
 }
 setInterval(() => {
@@ -4696,7 +4708,34 @@ setInterval(() => {
 // or ignored. The wait lets the scraper add a new meeting the normal way.
 const MISSING_ALERT_EVERY_MS = 5 * 60 * 1000;
 const MISSING_ALERT_AFTER_MS = Number(process.env.MISSING_ALERT_AFTER_MIN || 30) * 60 * 1000;
-const missingAlertState = { lastRunAt: null, lastError: null, open: [] };
+const missingAlertState = { lastRunAt: null, lastError: null, chatError: null, open: [] };
+// The ClickUp Chat group for missing meetings; "off" stops it.
+const MISSING_CHAT_CHANNEL_ID = process.env.CLICKUP_MISSING_CHANNEL_ID || 'off';
+// Telegram (25 Oct 2026): a bot that messages Dinesh's phone. The bot token
+// and his chat id are set in Portainer (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID),
+// never in the code; without both it's off. The token is never logged.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const telegramState = { lastSentAt: null, lastError: null, sent: 0 };
+function telegramEnabled() { return Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID); }
+async function sendTelegram(text) {
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: String(text).slice(0, 4000), disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (err) {
+    throw new Error(`Telegram not reachable: ${networkReason(err)}`);
+  }
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(`Telegram answered ${res.status}${j.description ? `: ${j.description}` : ''}`);
+  }
+  Object.assign(telegramState, { lastSentAt: new Date().toISOString(), lastError: null, sent: telegramState.sent + 1 });
+}
 function missingMeetingRecipients() {
   return (authConfig.users || [])
     .filter((u) => u.role === 'admin' || (userType(u) !== 'view' && Array.isArray(u.permissions) && u.permissions.includes('missing')))
@@ -4722,18 +4761,47 @@ async function dispatchMissingMeetingAlerts() {
       title: `Missing meeting · ${m.course} (${m.country})`,
       body: `${feedDayText(m.date)} · ${m.races} races in the feed, not on the dashboard${m.note ? ` (${m.note})` : ''} · ${feedSeenText(m)}`,
     }));
-  const due = open.filter((a) => !alertsSent[a.key]);
   Object.assign(missingAlertState, { open, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
-  if (!due.length) return;
-  due.forEach((a) => { alertsSent[a.key] = nowMs; });
-  const recipients = missingMeetingRecipients().filter((u) => push.users().includes(u));
-  if (recipients.length) {
-    const batch = due.length > 3
-      ? [{ title: `${due.length} missing meetings`, body: due.slice(0, 4).map((a) => `${a.course} (${a.country}) ${feedDayText(a.date)}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/missing-meetings', tag: 'missing-meetings' }]
-      : due.map((a) => ({ title: a.title, body: a.body, url: '/missing-meetings', tag: `mm-${a.key}` }));
-    for (const p of batch) await push.sendTo(recipients, p);
+  let sent = false;
+  const due = open.filter((a) => !alertsSent[a.key]);
+  if (due.length) {
+    due.forEach((a) => { alertsSent[a.key] = nowMs; });
+    sent = true;
+    const recipients = missingMeetingRecipients().filter((u) => push.users().includes(u));
+    if (recipients.length) {
+      const batch = due.length > 3
+        ? [{ title: `${due.length} missing meetings`, body: due.slice(0, 4).map((a) => `${a.course} (${a.country}) ${feedDayText(a.date)}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/missing-meetings', tag: 'missing-meetings' }]
+        : due.map((a) => ({ title: a.title, body: a.body, url: '/missing-meetings', tag: `mm-${a.key}` }));
+      for (const p of batch) await push.sendTo(recipients, p);
+    }
   }
-  saveAlertsSent(nowMs);
+  // Telegram to Dinesh only, and a ClickUp Chat group for the team (25 Oct
+  // 2026, per Dinesh: "Telegram enakku mattu, Click up group-podala appo
+  // mattavangalukku kaattum"). Own keys, so one that failed is tried again
+  // on the next run. One message per run, every new meeting in it.
+  const link = `${PUBLIC_URL}/missing-meetings`;
+  const tgDue = telegramEnabled() ? open.filter((a) => !alertsSent[`mmt|${a.key}`]) : [];
+  if (tgDue.length) {
+    try {
+      await sendTelegram(`🚨 ${tgDue.length > 1 ? `${tgDue.length} missing meetings` : 'Missing meeting'}\n\n${tgDue.map((a) => `${a.course} (${a.country})\n${a.body}`).join('\n\n')}\n\n${link}`);
+      tgDue.forEach((a) => { alertsSent[`mmt|${a.key}`] = nowMs; });
+      sent = true;
+    } catch (err) {
+      telegramState.lastError = err.message;
+    }
+  }
+  const chatDue = clickup.chatEnabled && MISSING_CHAT_CHANNEL_ID !== 'off' ? open.filter((a) => !alertsSent[`mmc|${a.key}`]) : [];
+  if (chatDue.length) {
+    try {
+      await clickup.postChat(`**[Race Day Dashboard] ${chatDue.length > 1 ? `${chatDue.length} missing meetings` : 'Missing meeting'}** — not on the dashboard\n${chatDue.map((a) => `- **${a.course} (${a.country})** · ${a.body}`).join('\n')}\n[Open Missing Meetings](${link})`, MISSING_CHAT_CHANNEL_ID);
+      chatDue.forEach((a) => { alertsSent[`mmc|${a.key}`] = nowMs; });
+      missingAlertState.chatError = null;
+      sent = true;
+    } catch (err) {
+      missingAlertState.chatError = `ClickUp Chat: ${err.message}`;
+    }
+  }
+  if (sent) saveAlertsSent(nowMs);
 }
 function runMissingMeetingAlerts() {
   dispatchMissingMeetingAlerts().catch((err) => {
