@@ -2543,7 +2543,11 @@ const RAS_COUNTRY_ALIAS = { UK: 'GB', ESP: 'SPA', BRA: 'BRZ', URY: 'URU', KSA: '
 // RAS course name -> ours, where they differ (checked 22 Oct 2026).
 const RAS_COURSE_ALIAS = { 'PAN|PANAMA': 'HIPODROMOPRESIDENTEREMON' };
 const TIME_MISMATCH_MIN = 2;
-const RAS_TIMES_EVERY_MS = 10 * 60 * 1000;
+// RAS once an hour (26 Oct 2026, per Dinesh: "1h ku oru thadawa check
+// pannunga, appo block aagadu"); the timer still ticks every 10 min for the
+// Neds fallback (NEDS_TIMES_EVERY_MS).
+const RAS_TIMES_EVERY_MS = 60 * 60 * 1000;
+const RAS_TIMES_TICK_MS = 10 * 60 * 1000;
 const rasTimes = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, mismatches: 0, running: false };
 const courseKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function utcMs(raw) {
@@ -2598,7 +2602,9 @@ async function refreshRasTimes() {
     const byRace = new Map();
     let races = 0;
     let rasMeetings = null;
-    try {
+    const rasDue = !rasTimes.rasTriedAt || Date.now() - rasTimes.rasTriedAt >= RAS_TIMES_EVERY_MS;
+    if (rasDue) try {
+      rasTimes.rasTriedAt = Date.now();
       rasMeetings = [];
       for (const dateStr of dates) {
         const j = await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json();
@@ -2617,6 +2623,8 @@ async function refreshRasTimes() {
       Object.assign(rasTimes, { byRace, races, source: 'RAS', lastRunAt: new Date().toISOString(), lastError: null, nedsPageErrors: [] });
       return;
     }
+    // Between the hourly RAS checks the last RAS times stay in use.
+    if (!rasDue && rasTimes.source === 'RAS' && !rasTimes.rasError) return;
     if (rasTimes.nedsTriedAt && Date.now() - rasTimes.nedsTriedAt < NEDS_TIMES_EVERY_MS) return;
     rasTimes.nedsTriedAt = Date.now();
     const pool = [];
@@ -2656,7 +2664,7 @@ function applyTimeMismatch(docs) {
   }
 }
 setTimeout(refreshRasTimes, 30 * 1000);
-setInterval(refreshRasTimes, RAS_TIMES_EVERY_MS);
+setInterval(refreshRasTimes, RAS_TIMES_TICK_MS);
 setInterval(() => refreshRacecardApi(false), RACECARD_API_EVERY_MS);
 setInterval(() => refreshRacecardApi(true), RACECARD_API_SOON_EVERY_MS);
 
