@@ -2,8 +2,9 @@
  * Daily and weekly data-quality reports (Oct 2026, per Dinesh).
  *
  * Every day at 8:00 AM Sri Lanka time a report for the day before, and on
- * Mondays one for the last week (Mon-Sun), go to ClickUp as a task in the
- * tickets list (tagged "report", assigned to the owner) with a PDF attached.
+ * Mondays one for the last week (Mon-Sun), go to the ClickUp Chat channel
+ * "Weekly data report" with a link to the PDF (no ClickUp task since 27 Oct
+ * 2026, per Dinesh).
  * The numbers come from issue-tracker.js's history (issues found, fixed,
  * fix time, who marked them fixed, races that ran with an issue still open)
  * plus the ClickUp tickets.
@@ -40,6 +41,7 @@ function pct(a, b) { return b ? Math.round((a / b) * 100) : null; }
 // only, to him, not to his boss); REPORTS_DAILY=on turns it back on.
 function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'Asia/Colombo', dir, logoPath, ownerEmail = () => null, siteUrl = '', daily = false }) {
   const statePath = path.join(dir, 'reports-state.json');
+  const pdfDir = path.join(dir, 'reports');
   let state = { daily: null, weekly: null, last: null, lastError: null, lastErrorAt: 0 };
   try {
     if (fs.existsSync(statePath)) state = { ...state, ...JSON.parse(fs.readFileSync(statePath, 'utf8')) };
@@ -129,8 +131,8 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     return lines.join('\n');
   }
 
-  // The Chat message: headline numbers plus links to the PDF and the task.
-  function chatText(r, task, filename) {
+  // The Chat message: headline numbers plus a link to the PDF.
+  function chatText(r, filename) {
     const types = Object.entries(r.byType).sort((a, b) => b[1].found - a[1].found).slice(0, 3);
     const people = Object.entries(r.byPerson).sort((a, b) => b[1] - a[1]).slice(0, 4);
     const lines = [
@@ -140,10 +142,9 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     ];
     if (types.length) lines.push(`- Top issues: ${types.map(([k, v]) => `${label(k)} ${v.found}`).join(' · ')}`);
     if (people.length) lines.push(`- Marked fixed: ${people.map(([n, v]) => `${n} ${v}`).join(' · ')}`);
-    const links = [];
-    if (task.pdfUrl) links.push(`[📄 ${filename}](${task.pdfUrl})`);
-    if (task.url) links.push(`[Open the report task](${task.url})`);
-    if (links.length) lines.push(links.join(' · '));
+    if (r.tickets) lines.push(`- Tickets: ${r.tickets.opened} opened · ${r.tickets.done} done · ${r.tickets.todo} in To Do (${r.tickets.overdue} over 24 h)`);
+    if (!r.recorded) lines.push('_No issue history was recorded for this period._');
+    if (siteUrl) lines.push(`[📄 ${filename}](${siteUrl}/reports/${filename}) · [Overview](${siteUrl}/overview)`);
     return lines.join('\n');
   }
 
@@ -303,23 +304,29 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     return { from: shiftDate(thisMonday, -7), to: shiftDate(thisMonday, -1) };
   }
 
+  // No ClickUp task any more (27 Oct 2026, per Dinesh: "Weekly Report a
+  // ticket open panna wena, ada inda chatla podunga"): the report goes to the
+  // "Weekly data report" Chat channel only. ClickUp Chat can't carry a file,
+  // so the PDF is kept in the data folder (reports/, the newest 26) and the
+  // message links to it on the dashboard (admins, /reports/<file>).
   async function send(kind, period) {
+    if (!clickup.reportChannelId) throw new Error('The report Chat channel is off (CLICKUP_REPORT_CHANNEL_ID)');
     const r = await build(kind, period.from, period.to);
     const buf = await pdf(r);
     const filename = `${kind}-report-${period.from}${kind === 'weekly' ? `-to-${period.to}` : ''}.pdf`;
-    const task = await clickup.createReportTask({ name: r.title, markdown: markdown(r), pdf: buf, filename, ownerEmail: ownerEmail(), kind });
-    state.last = { kind, from: period.from, to: period.to, at: new Date().toISOString(), taskId: task.id, url: task.url };
-    // The PDF link in the report Chat channel too (ClickUp Chat can't carry a file itself).
-    if (clickup.reportChannelId) {
-      try {
-        await clickup.postChat(chatText(r, task, filename), clickup.reportChannelId);
-        state.last.chat = true;
-      } catch (err) {
-        state.last.chat = false;
-        state.lastChatError = err.message;
-      }
-    }
+    fs.mkdirSync(pdfDir, { recursive: true });
+    fs.writeFileSync(path.join(pdfDir, filename), buf);
+    const old = fs.readdirSync(pdfDir).filter((f) => f.endsWith('.pdf')).sort((a, b) => fs.statSync(path.join(pdfDir, b)).mtimeMs - fs.statSync(path.join(pdfDir, a)).mtimeMs).slice(26);
+    old.forEach((f) => { try { fs.unlinkSync(path.join(pdfDir, f)); } catch (e) { /* next time */ } });
+    await clickup.postChat(chatText(r, filename), clickup.reportChannelId);
+    state.last = { kind, from: period.from, to: period.to, at: new Date().toISOString(), file: filename, chat: true };
     return state.last;
+  }
+  // A saved report PDF by name, or null.
+  function pdfFile(name) {
+    if (!/^(daily|weekly)-report-[\d-]+(?:-to-[\d-]+)?\.pdf$/.test(String(name || ''))) return null;
+    const file = path.join(pdfDir, name);
+    return fs.existsSync(file) ? file : null;
   }
 
   // Called every few minutes: sends whatever is due and not sent yet.
@@ -357,7 +364,7 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
   }
 
   function status() {
-    return { enabled: Boolean(clickup && clickup.enabled), dailyOn: daily, daily: state.daily, weekly: state.weekly, last: state.last, lastError: state.lastError || (state.last && state.last.chat === false ? `PDF link not posted in Chat: ${state.lastChatError}` : null), sendHour: SEND_HOUR, chat: Boolean(clickup && clickup.reportChannelId) };
+    return { enabled: Boolean(clickup && clickup.enabled), dailyOn: daily, daily: state.daily, weekly: state.weekly, last: state.last, lastError: state.lastError, sendHour: SEND_HOUR, chat: Boolean(clickup && clickup.reportChannelId) };
   }
 
   // Admin "send now" (System Health): this period's report straight to ClickUp.
@@ -368,7 +375,7 @@ function createReports({ issueTracker, clickup, issueLabels = {}, timezone = 'As
     return last;
   }
 
-  return { build, pdf, markdown, runDue, previewPdf, sendNow, status, localNow };
+  return { build, pdf, markdown, runDue, previewPdf, sendNow, status, localNow, pdfFile };
 }
 
 module.exports = { createReports };
