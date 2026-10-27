@@ -1419,6 +1419,7 @@ const ADMIN_DENIED_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'adm
 const CHANGES_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'changes.html'), 'utf8');
 const SYSTEM_HEALTH_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'system-health.html'), 'utf8');
 const MISSING_MEETINGS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'missing-meetings.html'), 'utf8');
+const COMMENT_CHECKS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'comment-checks.html'), 'utf8');
 const OVERVIEW_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'overview.html'), 'utf8');
 const TICKETS_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'tickets.html'), 'utf8');
 
@@ -1465,6 +1466,8 @@ const ADMIN_SECTIONS = [
   { key: 'health', href: '/system-health', icon: 'fa-heart-pulse', label: 'System Health' },
   { key: 'changes', href: '/changes', icon: 'fa-clock-rotate-left', label: 'Data Changes' },
   { key: 'missing', href: '/missing-meetings', icon: 'fa-triangle-exclamation', label: 'Missing Data' },
+  // Master admins only (27 Oct 2026, accessOf in server.js).
+  { key: 'commentChecks', href: '/comment-checks', icon: 'fa-magnifying-glass', label: 'Comment Checks' },
 ];
 function renderAdminTabs(active, access) {
   return `<nav class="adm-tabs" aria-label="Admin sections">${ADMIN_SECTIONS.filter((s) => access && access[s.key]).map((s) =>
@@ -1489,6 +1492,10 @@ function renderSystemHealthPage(options = {}) {
 
 function renderMissingMeetingsPage(options = {}) {
   return renderTemplate(MISSING_MEETINGS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('missing', options.access) });
+}
+
+function renderCommentChecksPage(options = {}) {
+  return renderTemplate(COMMENT_CHECKS_TEMPLATE, { USERNAME_BLOCK: renderUserBlock(options.username, options.access), ADMIN_TABS_HTML: renderAdminTabs('commentChecks', options.access) });
 }
 
 function renderOverviewPage(options = {}) {
@@ -2125,7 +2132,7 @@ module.exports = {
   countMissingTrainers,
   buildIssuesReport, issuesReportToCsv, buildMeetingDetailsReport, meetingDetailsReportToCsv, reportHasJockey, deriveRaceStatus,
   buildMeetingsListReport, meetingsListReportToCsv,
-  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
+  renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage, renderCommentChecksPage,
   renderOverviewPage, renderTicketsPage, raceIssueList, collectIssues, ISSUE_LABELS,
   MISSING_JOCKEY_BORDER_THRESHOLD, MISSING_FORM_BORDER_THRESHOLD, MAX_EXPECTED_HORSE_AGE, GAP_THRESHOLD_MIN, DISCIPLINE_ORDER, STATUS_ORDER, STATUS_LABELS,
 };
