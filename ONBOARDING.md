@@ -322,8 +322,11 @@ change or after an hour) pushes new findings to `MASTER_ADMINS` only (key
 `cf|raceId|hash`, snooze kind `cf`), opening the **Comment Checks** page
 (`/comment-checks`, `views/comment-checks.html`, data from `/api/comment-checks`;
 an Admin tab shown only when `access.commentChecks`, i.e. an admin in
-`MASTER_ADMINS`). Not in the bell (per Dinesh: on its own page). System Health
-row "Comment fact check".
+`MASTER_ADMINS`). Not in the bell (per Dinesh: on its own page). Each row has
+its race, Open race and **Ignore** (28 Oct 2026): `POST /api/comment-checks/ignore`,
+key `raceId|tab|where|claim|quote`, kept 3 days in `comment-check-ignores.json`;
+an ignored finding stays greyed with Undo, isn't counted, isn't in the popup
+box and is never pushed. System Health row "Comment fact check".
 The findings are only as good as the form lines: a run missing from them can
 make a correct comment look wrong.
 
