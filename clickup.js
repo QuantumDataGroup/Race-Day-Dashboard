@@ -61,9 +61,10 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
   const workspaceId = env.CLICKUP_WORKSPACE_ID || '90161415163';
   const chatChannelId = env.CLICKUP_CHAT_CHANNEL_ID || '2kz0m0zv-12256';
   const chatEnabled = enabled && chatChannelId !== 'off';
-  // The weekly report's PDF link goes to Dinesh's "RDD - Weekly Update"
-  // channel (14 Oct 2026); CLICKUP_REPORT_CHANNEL_ID overrides, "off" stops it.
-  const reportChannelId = env.CLICKUP_REPORT_CHANNEL_ID || '2kz0m0zv-12216';
+  // The weekly report goes to Dinesh's "Weekly data report" channel (27 Oct
+  // 2026; "RDD - Weekly Update" before); CLICKUP_REPORT_CHANNEL_ID overrides,
+  // "off" stops it.
+  const reportChannelId = env.CLICKUP_REPORT_CHANNEL_ID || '2kz0m0zv-12556';
   const reportChatEnabled = enabled && reportChannelId !== 'off';
   const v3Url = baseUrl.replace(/\/api\/v2$/, '/api/v3');
   const storePath = path.join(dir, 'tickets.json');

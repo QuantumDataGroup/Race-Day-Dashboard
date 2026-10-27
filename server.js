@@ -873,7 +873,7 @@ async function runHealthChecks() {
   const rs = reports.status();
   add('reports', 'Reports to ClickUp', rs.lastError ? 'warn' : 'ok',
     rs.last ? `${rs.last.kind === 'weekly' ? 'Weekly' : 'Daily'} sent ${rs.last.at.slice(0, 10)}` : (rs.enabled ? 'None sent yet' : 'Not connected'),
-    rs.lastError || `Weekly every Monday ${rs.sendHour}:00 Sri Lanka time${rs.dailyOn ? ' · daily every day' : ''} · a ClickUp task with the PDF, assigned to ${ticketOwnerEmail() || 'the owner'}${rs.chat ? ' · PDF link in Chat "RDD - Weekly Update"' : ''}`);
+    rs.lastError || `Weekly every Monday ${rs.sendHour}:00 Sri Lanka time${rs.dailyOn ? ' · daily every day' : ''} · ${rs.chat ? 'ClickUp Chat "Weekly data report" with the PDF link (no task)' : 'Chat channel off'}`);
 
   const lastCheck = tracker.lastCheckAt ? Date.parse(tracker.lastCheckAt) : null;
   add('changes', 'Data Changes check', lastCheck && now - lastCheck <= CHANGE_CHECK_LATE_MS ? 'ok' : (uptimeMs < 60000 ? 'ok' : 'warn'),
@@ -5415,6 +5415,12 @@ const reports = createReports({
 });
 setInterval(() => { reports.runDue().catch(() => {}); }, 5 * 60 * 1000);
 setTimeout(() => { reports.runDue().catch(() => {}); }, 2 * 60 * 1000);
+// A sent report's PDF (the link in the Chat message), admins only.
+app.get('/reports/:file', requireAdmin, (req, res) => {
+  const file = reports.pdfFile(req.params.file);
+  if (!file) return res.status(404).send('Report not found');
+  res.set('Content-Disposition', `inline; filename="${req.params.file}"`).sendFile(file);
+});
 // Admins: download a report now (?kind=daily|weekly&date=YYYY-MM-DD) or send it to ClickUp now.
 app.get('/api/reports/preview', requireAdmin, async (req, res) => {
   try {
