@@ -14,7 +14,9 @@
 // 2. The nedsform.com.au website -- see "Second source" below.
 //
 // Only each runner's tab number, name and scratched state are compared (the
-// API has nothing else) -- not jockey, trainer, barrier or weight.
+// API has nothing else). The Neds website also gives jockey, barrier and
+// weight: a jockey or barrier missing in ours, and a big weight difference
+// (28 Oct 2026), are flagged from it.
 
 const RUNNERS_API_URL = process.env.RUNNERS_API_URL || 'http://nextdc.racingandsports.com:9542/api/v1/neds/meetings';
 const DISCIPLINES = new Set(['T', 'H', 'G']);
@@ -151,6 +153,8 @@ function parseNedsSiteRunners(html) {
       // the apprentice claim.
       jockey: fixMojibake((r.Jockey && r.Jockey.Name) || ''),
       weight: r.Weight && r.Weight.Total ? Number(r.Weight.Total) : null,
+      // Barrier (28 Oct 2026); 0 / blank = not drawn yet.
+      barrier: Number(r.Barrier) > 0 ? Number(r.Barrier) : null,
     }))
     .filter((r) => Number.isFinite(r.tab));
 }
@@ -197,8 +201,14 @@ function ourValue(dbRace, tab, field) {
   if (field === 'scratched') return String(Boolean(r.isScratched));
   if (field === 'jockey') return String(r.jockey || '').trim();
   if (field === 'weight') return r.weight == null ? '' : String(r.weight);
+  if (field === 'barrier') return Number(r.bp) > 0 ? String(r.bp) : '';
   return '';
 }
+
+// Weight (28 Oct 2026, per Dinesh: "Weight periya changes irunda modalla
+// enakku mattu warning podunga"): ours blank, or this many kg or more off
+// the source's handicap weight. Smaller differences aren't flagged.
+const WEIGHT_DIFF_KG = Number(process.env.WEIGHT_DIFF_KG || 2);
 
 // --- Jockey matching (5 Oct 2026) -------------------------------------------
 // "Unknown" / "TBA" means not declared yet -- nothing to compare.
@@ -313,6 +323,18 @@ function compareRunners(dbRace, allSourceRunners, { fromNeds = false } = {}) {
     // "Jockey names mismatched issue illa, Jockey missing mattu check").
     const theirJockey = realJockey(t.n.jockey);
     if (theirJockey && !String(o.r.jockey || '').trim()) add(o.r.tabNo, 'jockey', `Jockey Missing (${theirJockey})`);
+    // Barrier (28 Oct 2026, per Dinesh: "Barrier Position missing na warning
+    // kudunga"): ours blank while the source has one drawn.
+    if (t.n.barrier && !(Number(o.r.bp) > 0)) add(o.r.tabNo, 'barrier', `Barrier Missing (${t.n.barrier})`);
+    // Weight: missing in ours, or a big difference (see WEIGHT_DIFF_KG).
+    // `big` tells these apart from the weight flags dropped on 6 Oct 2026.
+    const ourWeight = parseFloat(o.r.weight);
+    if (t.n.weight > 0) {
+      if (!(ourWeight > 0)) items.push({ tab: o.r.tabNo, field: 'weight', ours: ourValue(dbRace, o.r.tabNo, 'weight'), text: `Weight Missing (source ${t.n.weight} kg)`, raceLevel: false, big: true });
+      else if (Math.abs(ourWeight - t.n.weight) >= WEIGHT_DIFF_KG) {
+        items.push({ tab: o.r.tabNo, field: 'weight', ours: ourValue(dbRace, o.r.tabNo, 'weight'), text: `Weight Mismatched (ours ${ourWeight} kg, source ${t.n.weight} kg)`, raceLevel: false, big: true });
+      }
+    }
   }
   for (const t of unmatchedTheirs) add(null, 'present', `Runner Missing: ${t.n.name}`, true);
   if (!fromNeds) {
@@ -354,8 +376,9 @@ function stillDiffers(dbRace, item, source) {
     const count = /^Runner Count Mismatched \(source (\d+), ours (\d+)\)/.exec(item.text || '');
     if (count && Number(count[1]) < Number(count[2])) return false;
   }
-  // Weight and jockey-name checks were dropped 6 Oct 2026; hides any saved from before.
-  if (item.field === 'weight' || /^Jockey Mismatched/.test(item.text || '')) return false;
+  // Weight and jockey-name checks were dropped 6 Oct 2026; hides any saved
+  // from before (the big-difference weight check of 28 Oct 2026 is `big`).
+  if ((item.field === 'weight' && !item.big) || /^Jockey Mismatched/.test(item.text || '')) return false;
   // Vacant Box flags saved before 6 Oct 2026 -- hidden at once, no re-check needed.
   if (/vacant box/i.test(item.text || '') || /^Runner Missing: *(tbd|tba|tbc)?$/i.test(item.text || '')) return false;
   // Name flags are re-read with today's name matching, so a matching fix
@@ -374,4 +397,4 @@ function stillDiffers(dbRace, item, source) {
 
 module.exports = {
   RUNNERS_API_URL, NEDS_SITE_BASE, NEDS_SITE_HEADERS, parseNedsSiteMeetings, parseNedsSiteRunners,
-  ourCountry, sameCountry, parseRunnerMeetings, compareRunners, countRunners, samePerson, realJockey, stillDiffers, horseKey };
+  ourCountry, sameCountry, parseRunnerMeetings, compareRunners, countRunners, samePerson, realJockey, stillDiffers, horseKey, WEIGHT_DIFF_KG };

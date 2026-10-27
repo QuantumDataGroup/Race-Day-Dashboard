@@ -90,7 +90,7 @@ const { generateCommentsV2 } = require('./comments-v2');
 const { checkClaims } = require('./comment-facts');
 const {
   RUNNERS_API_URL, NEDS_SITE_BASE, NEDS_SITE_HEADERS, parseNedsSiteMeetings, parseNedsSiteRunners,
-  sameCountry, parseRunnerMeetings, compareRunners, countRunners, stillDiffers,
+  sameCountry, parseRunnerMeetings, compareRunners, countRunners, stillDiffers, WEIGHT_DIFF_KG,
 } = require('./runners-check');
 const { KEEP_DAYS: CHANGE_KEEP_DAYS, meetingSnap, raceSnap, diffMeeting, diffRace, appendChanges, readChanges, deleteOldChangeFiles } = require('./change-tracker');
 const {
@@ -792,11 +792,11 @@ async function runHealthChecks() {
   const jc = jockeyCheckState;
   const jockeyLast = jc.lastRunAt ? Date.parse(jc.lastRunAt) : null;
   const nedsPaused = (jc.nedsPausedUntil || 0) > now;
-  add('jockeys', 'Jockey check (Neds)', jockeyCheckRunning ? 'ok' : (nedsPaused || jc.error ? 'warn' : 'ok'),
+  add('jockeys', 'Jockey / barrier / weight check (Neds)', jockeyCheckRunning ? 'ok' : (nedsPaused || jc.error ? 'warn' : 'ok'),
     jockeyCheckRunning ? 'Running now' : (jockeyLast ? ageText(now - jockeyLast) : 'Not run yet'),
     nedsPaused ? `Neds website paused until ${new Date(jc.nedsPausedUntil).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })} -- it ${jc.nedsPauseReason || 'asked us to slow down'}`
       : jc.error ? `Last run failed: ${jc.error}`
-        : jockeyLast ? `Every ${JOCKEY_CHECK_EVERY_MS / 3600000} h · ${jc.racesWanted} races in the next 24 h missing a jockey, ${jc.racesChecked} checked on Neds, ${jc.jockeysFound} jockeys found`
+        : jockeyLast ? `Every ${JOCKEY_CHECK_EVERY_MS / 3600000} h · ${jc.racesWanted} races (next ${WEIGHT_CHECK_WINDOW_MS / 3600000} h, or missing a jockey in the next 24 h), ${jc.racesChecked} checked on Neds · ${jc.jockeysFound} jockeys, ${jc.barriersMissing || 0} barriers found · ${jc.weightIssues || 0} weight differences of ${WEIGHT_DIFF_KG} kg+ (${WEIGHT_ISSUES_FOR_ALL ? 'shown to everyone' : `to ${MASTER_ADMINS.join(', ')} only`}) · RAS has no barrier / weight`
           : 'First run starts two minutes after the server starts');
   // The full "can't be checked" message lives here only (9 Oct 2026, per
   // Dinesh: System Health, admins only) -- the dashboard just marks today's
@@ -1487,7 +1487,7 @@ async function loadRunnersCheckRaces(countries) {
     .find({ rDate: { $in: trackedDates() }, rCountry: { $in: countries }, isHidden: { $ne: true }, isTrail: { $ne: true } })
     .project({
       rDate: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rScheduleTimeUTC: 1, resultString: 1,
-      'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1,
+      'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1, 'runners.bp': 1,
     })
     .toArray();
 }
@@ -1636,6 +1636,7 @@ async function runRunnersCheck(trigger = 'schedule') {
     summary = `${result.stats.racesChecked} races, ${result.stats.racesWithDifferences} with differences (${runnersSourceLabel(used)}${failures.length ? '; the other failed' : ''})`;
     // The grid's cached race docs carry the previous result; reload them.
     for (const key of memoCache.keys()) if (dates.some((d) => key.startsWith(`docs|${d}|`) || key.startsWith('race|'))) memoCache.delete(key);
+    dispatchWeightAlerts().catch((err) => console.warn(`[race-dashboard] WARNING: weight alerts failed: ${err.message}`));
   } catch (err) {
     // Keep the last good result on screen; try again in an hour.
     runnersCheckState = { ...runnersCheckState, lastAttemptAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: err.message, trigger };
@@ -1652,11 +1653,14 @@ async function runRunnersCheck(trigger = 'schedule') {
 // --- Jockey check (5 Oct 2026, per Dinesh) ----------------------------------
 // The RAS feed fills jockeys late; the Neds website often has them sooner
 // (Palermo 5 Oct: our R4 #17 XA had none, Neds had Juan Pablo Paoloni). Every
-// JOCKEY_CHECK_EVERY_MS this reads the Neds pages of only the races starting
-// in the next 24 hours that still have a running horse with no jockey in
-// ours -- one page at a time, a second apart -- and updates those races'
-// runners check result (Jockey Missing / Mismatched, plus the runner
-// checks). Nothing to read, no requests.
+// JOCKEY_CHECK_EVERY_MS this reads the Neds pages of the races starting in
+// the next 24 hours that still have a running horse with no jockey in ours,
+// and since 28 Oct 2026 every race starting in the next
+// WEIGHT_CHECK_WINDOW_MS (Barrier Missing, big weight differences) -- one
+// page at a time, a second apart -- and updates those races' runners check
+// result (Jockey / Barrier Missing, weight, plus the runner checks).
+// The RAS API has no barrier or weight, so these come from Neds only.
+const WEIGHT_CHECK_WINDOW_MS = 12 * 60 * 60 * 1000;
 async function runJockeyCheck() {
   if (jockeyCheckRunning || runnersCheckRunning) { scheduleJockeyCheck(10 * 60 * 1000); return; }
   jockeyCheckRunning = true;
@@ -1667,16 +1671,20 @@ async function runJockeyCheck() {
     const { countries, inScope } = runnersCheckScope();
     const dbRaces = await loadRunnersCheckRaces(countries);
     const now = Date.now();
+    // Races missing a jockey in the next 24 h, and (28 Oct 2026, barrier and
+    // weight checks) every race in the next WEIGHT_CHECK_WINDOW_MS.
     const wanted = dbRaces.filter((r) => {
       const start = r.rScheduleTimeUTC ? Date.parse(r.rScheduleTimeUTC) : NaN;
       return r.rDiscipline !== 'G' && !r.resultString && inScope(r.rCountry === 'NZL' ? 'NZ' : r.rCountry, r.rDiscipline)
         && start > now - 30 * 60 * 1000 && start < now + 24 * 60 * 60 * 1000
-        && (r.runners || []).some((x) => !x.isScratched && !String(x.jockey || '').trim());
+        && (start < now + WEIGHT_CHECK_WINDOW_MS || (r.runners || []).some((x) => !x.isScratched && !String(x.jockey || '').trim()));
     });
     const wantedIds = new Set(wanted.map((r) => r._id));
     let checked = 0;
     let found = 0;
     let issues = 0;
+    let barriers = 0;
+    let weights = 0;
     if (wanted.length) {
       const raceDates = [...new Set(wanted.map((r) => r.rDate))];
       // Overseas meetings are listed on Neds under the next (AUS) day.
@@ -1700,6 +1708,8 @@ async function runJockeyCheck() {
         checked++;
         issues += entry.items.length;
         found += entry.items.filter((it) => it.field === 'jockey' && /^Jockey Missing/.test(it.text)).length;
+        barriers += entry.items.filter((it) => it.field === 'barrier').length;
+        weights += entry.items.filter((it) => it.field === 'weight' && it.big).length;
         runnersCheckState.races[race._id] = entry;
       }
       if (checked) {
@@ -1709,9 +1719,10 @@ async function runJockeyCheck() {
     }
     Object.assign(jockeyCheckState, {
       lastRunAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: null,
-      racesWanted: wanted.length, racesChecked: checked, jockeysFound: found, issues,
+      racesWanted: wanted.length, racesChecked: checked, jockeysFound: found, issues, barriersMissing: barriers, weightIssues: weights,
     });
-    summary = `${wanted.length} races missing a jockey, ${checked} checked, ${found} jockeys found on Neds`;
+    summary = `${wanted.length} races wanted, ${checked} checked, ${found} jockeys / ${barriers} barriers found on Neds, ${weights} weight differences`;
+    if (checked) dispatchWeightAlerts().catch((err) => console.warn(`[race-dashboard] WARNING: weight alerts failed: ${err.message}`));
   } catch (err) {
     Object.assign(jockeyCheckState, { lastRunAt: new Date().toISOString(), durationMs: Date.now() - startedAt, error: err.message });
     summary = `failed (${err.message})`;
@@ -1776,11 +1787,21 @@ function saveRunnerCheckIgnores() {
   fs.writeFileSync(RUNNER_CHECK_IGNORE_PATH, JSON.stringify(runnerCheckIgnores, null, 2), 'utf8');
 }
 
+// Big weight differences (28 Oct 2026, per Dinesh: "modalla enakku mattu
+// warning podunga, na soldre apram ellarukku podunga"): until WEIGHT_ISSUES=all
+// they stay out of the runner issues and go to the master admins only
+// (doc.weightChecks: the popup box and dispatchWeightAlerts).
+const WEIGHT_ISSUES_FOR_ALL = process.env.WEIGHT_ISSUES === 'all';
 function attachRunnersCheck(docs) {
   for (const doc of docs) {
     const entry = runnersCheckState.races[doc._id];
     if (!entry || !entry.items.length) continue;
-    const items = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !runnerIssueIgnored(doc._id, it));
+    const live = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !runnerIssueIgnored(doc._id, it));
+    const items = WEIGHT_ISSUES_FOR_ALL ? live : live.filter((it) => it.field !== 'weight');
+    doc.weightChecks = WEIGHT_ISSUES_FOR_ALL ? [] : live.filter((it) => it.field === 'weight').map((it) => {
+      const r = (doc.runners || []).find((x) => x.tabNo === it.tab);
+      return r && !r.isScratched ? { tab: it.tab, horse: r.horseName || '', text: it.text } : null;
+    }).filter(Boolean);
     for (const r of doc.runners || []) {
       const mine = items.filter((it) => !it.raceLevel && it.tab === r.tabNo && !r.isScratched);
       if (mine.length) {
@@ -2381,7 +2402,7 @@ async function loadRaceDocs(dateStr, includeTrials) {
       meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1, rScheduleTimeUTC: 1, rDate: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
       'runners.trainer': 1, 'runners.horseName': 1, 'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1,
-      'runners.weight': 1, // runners check weight issues (attachRunnersCheck)
+      'runners.weight': 1, 'runners.bp': 1, // runners check weight / barrier issues (attachRunnersCheck)
     })
     .sort({ rCourseDisplayName: 1, rNo: 1 })
     .toArray();
@@ -3306,7 +3327,7 @@ async function attachMeetingRunnerChecks(db, rows, dates) {
   const meetingIds = [...new Set(rows.map((r) => r.dbMeetingId).filter(Boolean))];
   const races = meetingIds.length ? await db.collection('races')
     .find({ meetingId: { $in: meetingIds }, rDate: { $in: dates }, isHidden: { $ne: true } })
-    .project({ meetingId: 1, rNo: 1, 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1 })
+    .project({ meetingId: 1, rNo: 1, 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1, 'runners.bp': 1 })
     .toArray() : [];
   for (const row of rows) {
     // byRace: one entry per race with an issue, for the click-to-expand list
@@ -3431,12 +3452,13 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
     const ids = Object.keys(state.races || {}).filter((id) => state.races[id].items.length);
     const docs = ids.length ? await (await getClient()).db().collection('races')
       .find({ _id: { $in: ids } })
-      .project({ 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1 })
+      .project({ 'runners.tabNo': 1, 'runners.horseName': 1, 'runners.isScratched': 1, 'runners.jockey': 1, 'runners.weight': 1, 'runners.bp': 1 })
       .toArray() : [];
     const races = [];
     for (const doc of docs) {
       const entry = state.races[doc._id];
-      const items = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !(!it.raceLevel && (doc.runners || []).some((x) => x.tabNo === it.tab && x.isScratched)));
+      const items = entry.items.filter((it) => stillDiffers(doc, it, entry.source) && !(!it.raceLevel && (doc.runners || []).some((x) => x.tabNo === it.tab && x.isScratched))
+        && (WEIGHT_ISSUES_FOR_ALL || it.field !== 'weight'));
       if (!items.length) continue;
       const horse = (tab) => ((doc.runners || []).find((x) => x.tabNo === tab) || {}).horseName || '';
       races.push({
@@ -3446,7 +3468,8 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
         issues: items.map((it) => {
           const ignore = runnerIssueIgnored(doc._id, it);
           return {
-            kind: it.field === 'count' ? 'count' : it.field === 'jockey' || it.field === 'weight' ? 'jockey' : (it.field === 'present' && it.raceLevel) || it.field === 'field' ? 'missing' : 'mismatched',
+            // Barrier Missing (28 Oct 2026) goes with Jockey Missing.
+            kind: it.field === 'count' ? 'count' : it.field === 'jockey' || it.field === 'weight' || it.field === 'barrier' ? 'jockey' : (it.field === 'present' && it.raceLevel) || it.field === 'field' ? 'missing' : 'mismatched',
             tab: it.raceLevel ? null : it.tab,
             horse: it.raceLevel ? '' : horse(it.tab),
             text: it.text,
@@ -3469,7 +3492,7 @@ app.get('/api/missing-runners', requirePermission('missing'), async (req, res) =
       everyHours: RUNNERS_CHECK_EVERY_MS / 3600000, dates: state.dates || [], stats: state.stats, races,
       jockeyCheck: {
         lastRunAt: jockeyCheckState.lastRunAt, everyHours: JOCKEY_CHECK_EVERY_MS / 3600000, error: jockeyCheckState.error,
-        racesWanted: jockeyCheckState.racesWanted, racesChecked: jockeyCheckState.racesChecked, jockeysFound: jockeyCheckState.jockeysFound,
+        racesWanted: jockeyCheckState.racesWanted, racesChecked: jockeyCheckState.racesChecked, jockeysFound: jockeyCheckState.jockeysFound, barriersMissing: jockeyCheckState.barriersMissing || 0,
         nedsPausedUntil: jockeyCheckState.nedsPausedUntil > Date.now() ? new Date(jockeyCheckState.nedsPausedUntil).toISOString() : null,
       },
     });
@@ -3874,7 +3897,12 @@ app.get('/api/race/:id', async (req, res) => {
     // canIgnoreRunnerCheck: the popup's runner check Ignore buttons, for
     // users with the Missing Data section (same as its Ignore endpoint).
     // commentFacts: the comment fact check, master admin only (27 Oct 2026).
-    res.json({ ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing), commentFacts: isMasterAdmin(req) ? (doc.commentFacts || []) : [] });
+    // commentFacts / weightChecks: master admin only (27 / 28 Oct 2026).
+    const master = isMasterAdmin(req);
+    res.json({
+      ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing),
+      commentFacts: master ? (doc.commentFacts || []) : [], weightChecks: master ? (doc.weightChecks || []) : [],
+    });
     prefetchMeetingRaces(doc);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5259,6 +5287,40 @@ async function dispatchCommentFactAlerts() {
 }
 setTimeout(dispatchCommentFactAlerts, 90 * 1000);
 setInterval(dispatchCommentFactAlerts, COMMENT_FACT_EVERY_MS);
+
+// Big weight differences to the master admins only (28 Oct 2026, per
+// Dinesh: "modalla enakku mattu warning podunga"): after each runners /
+// jockey check, one push per race not run yet with a weight difference not
+// sent before (today and tomorrow). Off once WEIGHT_ISSUES=all makes them
+// normal runner issues.
+async function dispatchWeightAlerts() {
+  if (WEIGHT_ISSUES_FOR_ALL) return;
+  const nowMs = Date.now();
+  const today = todayStr();
+  const due = [];
+  for (const dateStr of [today, shiftDate(today, 1)]) {
+    for (const d of await fetchRaceDocs(dateStr, false)) {
+      if (!d.weightChecks || !d.weightChecks.length || d.resultString || !(startMs(d) > nowMs)) continue;
+      const fresh = d.weightChecks.filter((w) => !alertsSent[`wt|${d._id}|${w.tab}|${w.text}`]);
+      if (!fresh.length) continue;
+      fresh.forEach((w) => { alertsSent[`wt|${d._id}|${w.tab}|${w.text}`] = nowMs; });
+      due.push({
+        title: `Weight check · ${d.rCourseDisplayName} R${d.rNo} (${d.rCountry})`,
+        body: fresh.map((w) => `#${w.tab} ${w.horse}: ${w.text}`).join('\n'),
+        url: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
+        tag: `wt-${d._id}`,
+      });
+    }
+  }
+  if (!due.length) return;
+  saveAlertsSent(nowMs);
+  const recipients = masterAdminUsers().filter((u) => push.users().includes(u) && !snoozedAll(u));
+  if (!recipients.length) return;
+  const batch = due.length > 3
+    ? [{ title: `${due.length} races with weight differences`, body: due.slice(0, 5).map((p) => p.title.replace('Weight check · ', '')).join('\n') + (due.length > 5 ? '\n…' : ''), url: '/', tag: 'weight-checks' }]
+    : due;
+  for (const p of batch) await push.sendTo(recipients, p);
+}
 
 app.get('/comment-checks', requirePermission('commentChecks'), (req, res) => {
   res.send(renderCommentChecksPage({ username: req.session.username, access: accessOf(req) }));

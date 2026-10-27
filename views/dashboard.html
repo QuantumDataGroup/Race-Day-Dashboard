@@ -1177,6 +1177,17 @@
         }).join('') + '</ul></div>';
     }
 
+    // Big weight differences with Neds (28 Oct 2026, per Dinesh): master admin
+    // only until they're made normal runner issues (server: WEIGHT_ISSUES=all).
+    function weightChecksHtml(race) {
+      var list = race.weightChecks || [];
+      if (!list.length) return '';
+      return '<div class="cf-warn"><div class="cf-head"><i class="fa-solid fa-weight-hanging" aria-hidden="true"></i> Weight check <span class="cf-only">only you</span></div><ul>' +
+        list.map(function (w) {
+          return '<li><b>' + escapeHtmlClient(String(w.tab)) + '. ' + escapeHtmlClient(w.horse) + '</b> &mdash; ' + escapeHtmlClient(w.text.replace(/\bsource\b/g, 'Neds')) + '</li>';
+        }).join('') + '</ul></div>';
+    }
+
     function handleRaceCellClick(event, id, aEl) {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return true;
       event.preventDefault();
@@ -1533,6 +1544,7 @@
         '</div><div class="modal-admin-slot" id="adminSlot"></div></div>' +
         (race.raceComment ? raceCommentHtml(race) : '') +
         commentFactsHtml(race) +
+        weightChecksHtml(race) +
         resultLine +
         runnerCheckLine +
         timeMismatchLine +
