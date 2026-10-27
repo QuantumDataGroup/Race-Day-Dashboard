@@ -304,6 +304,26 @@ users get no pushes or pop-ups meanwhile (the bell still lists everything).
 last 15 min, popped up by the page when the device has no push). State in
 `alert-snooze.json`.
 
+**Comment fact check (27 Oct 2026, master admin only):** `comment-facts.js`
+checks what the race comment and runner comments say about a horse's form
+against its racecard FormLines / PerformanceStatistics / form figures: last-start
+win, recent win, last-start placing ("close second" beaten > 2.5L), result at a
+course, step up / drop in class (GB/IRE Class 1 = top; AUS/NZ BM, Class, Maiden;
+Group/Listed everywhere; mixed scales aren't compared), first-up / after a break
+(< 42 days = wrong), maiden / yet to win, debut, track / distance record.
+Keyword rules only, no AI. Negated phrases ("lacks recent success") and
+qualified ones ("yet to win over hurdles") are skipped, and one phrase gives one
+finding. `commentFactsFor` (server.js) gives each race-comment claim to the
+horse named before it in the sentence ("the former" → the earlier horse). The
+popup shows a "Comment check · only you" box (`/api/race/:id` sends
+`commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10
+min, T races in the next 12 h, today + tomorrow, rechecked when the comments
+change or after an hour) pushes new findings to `MASTER_ADMINS` only (key
+`cf|raceId|hash`, snooze kind `cf`) and fills the bell (`/api/alerts`
+`commentFacts`, after the race issues). System Health row "Comment fact check".
+The findings are only as good as the form lines: a run missing from them can
+make a correct comment look wrong.
+
 ### Runners check (`runners-check.js`)
 Every 8 hours the server compares runners with ours, for today to 2 days
 ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing
