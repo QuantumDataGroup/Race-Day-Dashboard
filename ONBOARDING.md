@@ -544,14 +544,18 @@ activity log, Data Changes, and both Missing Data lists. A page calls
 
 ### Weekly report (`reports.js`, 14 Oct 2026)
 Every Monday 8:00 AM Sri Lanka time, last week's (Mon–Sun) data-quality
-report goes to ClickUp as a task in the tickets list, tagged `report`,
-assigned to `CLICKUP_OWNER_EMAIL` (Dinesh — not his boss), with a PDF
-(pdfkit): data quality %, races, issues found / fixed / average fix time,
-races that ran with an issue still open, by type, by country, who marked
-issues fixed, tickets, and a day-by-day chart. Report tasks are kept out of
-the Tickets pages and reminders. `REPORTS_DAILY=on` adds a daily report for
-the day before. Admins: `GET /api/reports/preview?kind=weekly|daily&date=`
-downloads one, `POST /api/reports/send` sends one now. State in
+report goes to the ClickUp Chat channel **"Weekly data report"**
+(`2kz0m0zv-12556`, `CLICKUP_REPORT_CHANNEL_ID` overrides, `off` stops it) as
+the headline numbers plus a link to the PDF (pdfkit): data quality %, races,
+issues found / fixed / average fix time, races that ran with an issue still
+open, by type, by country, who marked issues fixed, tickets, and a day-by-day
+chart. No ClickUp task since 27 Oct 2026 (per Dinesh); before that it was a
+task tagged `report` plus a link in "RDD - Weekly Update". Chat can't carry a
+file, so the PDF is saved in the data folder (`reports/`, newest 26) and
+served to admins at `/reports/<file>`. A failed Chat post is retried after 30
+min. `REPORTS_DAILY=on` adds a daily report for the day before. Admins:
+`GET /api/reports/preview?kind=weekly|daily&date=` downloads one,
+`POST /api/reports/send` sends one now (System Health button). State in
 `reports-state.json`; System Health shows the last one sent.
 
 ### Installable app (PWA, 14 Oct 2026)
