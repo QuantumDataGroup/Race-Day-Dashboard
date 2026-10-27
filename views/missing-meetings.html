@@ -58,7 +58,7 @@
         <div class="adm-tile adm-warn"><small>Runner Missing</small><b id="rMissing">-</b><span>in the source, not in ours</span></div>
         <div class="adm-tile adm-warn"><small>Runner Mismatched</small><b id="rMismatched">-</b><span>name / not in field / scratched</span></div>
         <div class="adm-tile adm-warn"><small>Runner Count Mismatched</small><b id="rCount">-</b><span>races</span></div>
-        <div class="adm-tile adm-warn"><small>Jockey Missing</small><b id="rJockey">-</b><span>blank in ours, the source has one</span></div>
+        <div class="adm-tile adm-warn"><small>Jockey / Barrier Missing</small><b id="rJockey">-</b><span>blank in ours, Neds has one</span></div>
       </section>
       <div class="adm-filters chg-filters" role="group" aria-label="Runner filters">
         <label for="rDate">Date</label>
@@ -68,7 +68,7 @@
         <label for="rDisc">Code</label>
         <select id="rDisc"><option value="">All</option><option value="T">Thoroughbred</option><option value="H">Harness</option><option value="G">Greyhound</option></select>
         <label for="rKind">Show</label>
-        <select id="rKind"><option value="">Everything</option><option value="missing">Runner Missing</option><option value="mismatched">Runner Mismatched</option><option value="count">Runner Count Mismatched</option><option value="jockey">Jockey Missing</option><option value="ignored">Ignored</option></select>
+        <select id="rKind"><option value="">Everything</option><option value="missing">Runner Missing</option><option value="mismatched">Runner Mismatched</option><option value="count">Runner Count Mismatched</option><option value="jockey">Jockey / Barrier Missing</option><option value="ignored">Ignored</option></select>
         <input type="search" id="rText" placeholder="Search meeting, horse..." aria-label="Search runners">
         <button type="button" class="adm-btn primary" id="rCheckBtn"><i class="fa-solid fa-rotate"></i> Check now</button>
         <span class="mm-source" id="rSource"></span>
@@ -364,7 +364,7 @@
 
     // --- Missing / Mismatched Runners pane --------------------------------
     var DISC = { T: 'Thoroughbred', H: 'Harness', G: 'Greyhound' };
-    var KIND_TAG = { missing: ['missing', 'Runner Missing'], mismatched: ['mm-mismatch', 'Runner Mismatched'], count: ['missing', 'Runner Count Mismatched'], jockey: ['mm-jockey', 'Jockey Missing'] };
+    var KIND_TAG = { missing: ['missing', 'Runner Missing'], mismatched: ['mm-mismatch', 'Runner Mismatched'], count: ['missing', 'Runner Count Mismatched'], jockey: ['mm-jockey', 'Jockey / Barrier Missing'] };
     var rData = null;
 
     function ageLabel(iso) {
@@ -399,7 +399,7 @@
         var countCell = c ? '<span class="' + (c.source !== c.ours ? 'mm-count-bad' : '') + '">' + c.source + ' / ' + c.ours + '</span>' : '-';
         var issues = r.issues.map(function (i) {
           var tag = i.ignored ? ['ignored', 'Ignored'] : (KIND_TAG[i.kind] || ['missing', i.kind]);
-          // Jockey issues show their own label (Jockey Missing).
+          // Jockey / barrier issues show their own label (Jockey Missing, Barrier Missing).
           if (!i.ignored && i.kind === 'jockey') tag = ['mm-jockey', i.text.split(' (')[0]];
           var action = i.ignored
             ? '<button type="button" class="adm-btn mm-act" data-rkey="' + esc(i.key) + '" data-ract="undo">Undo</button>' +
@@ -409,7 +409,7 @@
           var srcTag = i.src ? '<span class="mm-src mm-src-' + esc(i.src) + '">' + ({ ras: 'RAS', neds: 'Neds', both: 'RAS + Neds' }[i.src] || esc(i.src)) + '</span> ' : '';
           return '<div class="mm-issue' + (i.ignored ? ' mm-issue-ignored' : '') + '"><span class="chg-tag ' + tag[0] + '">' + tag[1] + '</span> ' + srcTag +
             (i.tab != null ? '<b>#' + esc(i.tab) + ' ' + esc(i.horse) + '</b> ' : '') +
-            '<span class="mm-issue-text">' + esc(i.ignored ? i.text : i.text.replace(/^(Runner (Missing|Mismatched|Count Mismatched)|Jockey (Missing|Mismatched)|Weight Mismatched)[: ]*/, '')) + '</span>' + action + '</div>';
+            '<span class="mm-issue-text">' + esc(i.ignored ? i.text : i.text.replace(/^(Runner (Missing|Mismatched|Count Mismatched)|Jockey (Missing|Mismatched)|Barrier Missing|Weight (Missing|Mismatched))[: ]*/, '')) + '</span>' + action + '</div>';
         }).join('');
         return '<tr><td class="mm-nowrap">' + esc(dayLabel(r.date)) + '</td>' +
           '<td class="chg-where"><b>' + esc(r.meeting) + '</b><small>' + esc(r.country) + ' &middot; ' + esc(DISC[r.discipline] || r.discipline) + '</small></td>' +
@@ -443,7 +443,7 @@
         var jc = json.jockeyCheck || {};
         document.getElementById('rJockeyCheck').innerHTML = jc.nedsPausedUntil
           ? '<span class="mm-fallback">Neds website paused until ' + esc(hhmm(jc.nedsPausedUntil)) + ' (it asked us to slow down)</span>'
-          : 'Jockey check every ' + esc(jc.everyHours) + ' h' + (jc.lastRunAt ? ' &middot; last ' + esc(hhmm(jc.lastRunAt)) + ': ' + esc(jc.racesWanted) + ' races missing a jockey, ' + esc(jc.jockeysFound) + ' found on Neds' : ' &middot; not run yet') + (jc.error ? ' <span class="mm-fallback">(' + esc(jc.error) + ')</span>' : '');
+          : 'Jockey / barrier check (Neds) every ' + esc(jc.everyHours) + ' h' + (jc.lastRunAt ? ' &middot; last ' + esc(hhmm(jc.lastRunAt)) + ': ' + esc(jc.racesChecked) + ' races checked, ' + esc(jc.jockeysFound) + ' jockeys and ' + esc(jc.barriersMissing || 0) + ' barriers found on Neds' : ' &middot; not run yet') + (jc.error ? ' <span class="mm-fallback">(' + esc(jc.error) + ')</span>' : '');
         var btn = document.getElementById('rCheckBtn');
         btn.disabled = Boolean(json.running);
         btn.innerHTML = json.running ? '<i class="fa-solid fa-spinner fa-spin"></i> Checking...' : '<i class="fa-solid fa-rotate"></i> Check now';
