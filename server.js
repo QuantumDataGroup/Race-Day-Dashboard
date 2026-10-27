@@ -87,6 +87,7 @@ const { MIN_PASSWORD_LENGTH, USERNAME_RE, loadAuthFile, saveAuthFile, findUserIn
 const { KEEP_PREVIOUS_MONTHS, activityLogDir, monthKey, monthFilePath, migrateLegacyLog, deleteOldMonths, readEntries } = require('./activity-log');
 const { DEFAULT_COUNTRIES: MISSING_DEFAULT_COUNTRIES, pickSourceMeetings, uncheckedFeedCountries, compareMeetings, sameCourse: sameCourseName } = require('./missing-meetings');
 const { generateCommentsV2 } = require('./comments-v2');
+const { checkClaims } = require('./comment-facts');
 const {
   RUNNERS_API_URL, NEDS_SITE_BASE, NEDS_SITE_HEADERS, parseNedsSiteMeetings, parseNedsSiteRunners,
   sameCountry, parseRunnerMeetings, compareRunners, countRunners, stillDiffers,
@@ -849,6 +850,13 @@ async function runHealthChecks() {
       videoAlertState.lastRunAt ? `last ${fmtTime(videoAlertState.lastRunAt)}` : '',
       `${Object.keys(videoIgnores).length} race${Object.keys(videoIgnores).length === 1 ? '' : 's'} ignored`,
       videoAlertState.lastError ? `failed: ${videoAlertState.lastError}` : ''].filter(Boolean).join(' · '));
+
+  // Comment fact check (27 Oct 2026): master admin only.
+  add('comment-facts', 'Comment fact check', commentFactState.lastError ? 'warn' : 'ok',
+    commentFactState.lastRunAt ? `${commentFactState.open.length} race${commentFactState.open.length === 1 ? '' : 's'} flagged` : 'Starting',
+    [`every ${COMMENT_FACT_EVERY_MS / 60000} min, Thoroughbred races in the next ${COMMENT_FACT_WINDOW_MS / 3600000} h · to ${MASTER_ADMINS.join(', ')} only`,
+      commentFactState.lastRunAt ? `${commentFactState.races} races checked · last ${fmtTime(commentFactState.lastRunAt)}` : '',
+      commentFactState.lastError ? `failed: ${commentFactState.lastError}` : ''].filter(Boolean).join(' · '));
 
   // Race alerts sent by the server (Oct 2026): push to closed apps / tabs and ClickUp Chat.
   const ps = push.status();
@@ -2017,6 +2025,45 @@ function applyRacecardApi(doc, card, pending) {
   applyCommentChecks(doc);
 }
 
+// Comment fact check (27 Oct 2026, per Dinesh: "inda madhiri comments vanda
+// warning thara mudiuma enakku mattu"): what the race comment and the runner
+// comments say about each horse's form (recent win, class up / down, last
+// start, first-up, maiden, track / distance record), checked against its
+// form lines -- comment-facts.js. Master admin only. In the race comment each
+// claim goes with the horse named before it in the same sentence (the
+// first horse also takes what comes before it: "Fresh off a win, INCA (11)").
+function commentFactsFor(doc, raceClass) {
+  if (doc.rDiscipline !== 'T') return [];
+  const runners = (doc.runners || []).filter((r) => !r.isScratched);
+  const race = { rDate: doc.rDate, rCountry: doc.rCountry, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
+  const out = [];
+  const add = (r, where, text) => {
+    for (const c of checkClaims(text, r, race)) out.push({ tab: r.tabNo != null ? Number(r.tabNo) : null, horse: r.horseName || '', where, ...c });
+  };
+  for (const sentence of String(doc.raceComment || '').split(/(?<=[.!?])\s+(?=[A-Z])/)) {
+    const ms = [...sentence.matchAll(COMMENT_MENTION_RE)];
+    const horses = ms.map((m) => matchHorse(m[1].trim(), runners).runner || null);
+    ms.forEach((m, i) => {
+      if (!horses[i]) return;
+      let text = sentence.slice(i === 0 ? 0 : m.index, i + 1 < ms.length ? ms[i + 1].index : sentence.length);
+      // "Both A (4) and B (5) ..., with the former coming off a win and the
+      // latter ...": the former's part is A's (Will Rogers Downs R4 27 Oct).
+      const former = i > 0 ? /\bthe former\b/i.exec(text) : null;
+      if (former) {
+        const latter = /\bthe latter\b/i.exec(text.slice(former.index));
+        const formerText = latter ? text.slice(former.index, former.index + latter.index) : text.slice(former.index);
+        if (horses[i - 1]) add(horses[i - 1], 'race comment', formerText);
+        text = text.slice(0, former.index) + (latter ? text.slice(former.index + latter.index) : '');
+      }
+      add(horses[i], 'race comment', text);
+    });
+  }
+  for (const r of runners) {
+    if (r.runnerComment && !r.commentAbout) add(r, 'runner comment', r.runnerComment);
+  }
+  return out.sort((a, b) => (a.tab || 99) - (b.tab || 99));
+}
+
 // runnerId -> comment for one version (v = { byRunnerId, byName }) of a race.
 function runnerCommentsFrom(runners, v) {
   const race = { keys: new Set(), selfNamed: new Set() };
@@ -2409,6 +2456,7 @@ async function loadRaceById(id) {
     // alongside the rest above; the background copy if the API doesn't answer).
     if (doc.rDiscipline === 'T') applyRacecardApi(doc, await freshCard);
     attachRunnersCheck([doc]);
+    doc.commentFacts = commentFactsFor(doc);
   }
   return doc;
 }
@@ -3822,7 +3870,8 @@ app.get('/api/race/:id', async (req, res) => {
     logActivity(req, 'view-race', { detail: `${doc.rCourseDisplayName || doc.rCourse} R${doc.rNo} (${doc.rCountry}) ${doc.rDate}` }, { key: req.params.id, ms: 10 * 60 * 1000 });
     // canIgnoreRunnerCheck: the popup's runner check Ignore buttons, for
     // users with the Missing Data section (same as its Ignore endpoint).
-    res.json({ ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing) });
+    // commentFacts: the comment fact check, master admin only (27 Oct 2026).
+    res.json({ ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing), commentFacts: isMasterAdmin(req) ? (doc.commentFacts || []) : [] });
     prefetchMeetingRaces(doc);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4613,7 +4662,11 @@ async function buildAlerts() {
 app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
   try {
     // Missing meetings (25 Oct 2026) only for users with that section.
-    res.json({ ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [], ...snoozeInfo(req.session.username) });
+    // Comment fact check (27 Oct 2026) only for the master admin.
+    res.json({
+      ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [],
+      commentFacts: isMasterAdmin(req) ? commentFactState.open : [], ...snoozeInfo(req.session.username),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4958,7 +5011,7 @@ function snoozedAll(username, nowMs = Date.now()) {
   return (alertSnooze.all[username] || 0) > nowMs;
 }
 function cleanSnoozeItem(item) {
-  if (!item || !['race', 'mm'].includes(item.kind)) return null;
+  if (!item || !['race', 'mm', 'cf'].includes(item.kind)) return null;
   const ids = (Array.isArray(item.ids) ? item.ids : []).map((x) => String(x).slice(0, 120)).filter(Boolean).slice(0, 20);
   if (!ids.length) return null;
   const str = (v, n) => String(v || '').slice(0, n);
@@ -4975,6 +5028,7 @@ function addSnooze(username, item, minutes) {
 }
 function snoozeStillOpen(s, alerts) {
   if (s.kind === 'mm') return s.ids.some((k) => missingAlertState.open.some((a) => a.key === k));
+  if (s.kind === 'cf') return s.ids.some((k) => commentFactState.open.some((a) => a.key === k));
   return s.ids.some((id) => alerts.races.some((r) => r.raceId === id && r.issues.length));
 }
 async function deliverSnoozed() {
@@ -5088,6 +5142,122 @@ async function dispatchCommentVersionAlerts() {
 setInterval(() => {
   dispatchCommentVersionAlerts().catch((err) => { alertDispatch.lastError = `UK/US comment check: ${err.message}`; });
 }, COMMENT_VERSION_EVERY_MS);
+
+// Comment fact check in the background (27 Oct 2026, per Dinesh: "enakku
+// mattu"): every 10 min, Thoroughbred races not run yet in the next 12 h,
+// today and tomorrow. A race is checked again only when its comments change
+// (or after an hour, for new form lines). Each new finding goes to the
+// master admins only: push, and the bell (/api/alerts commentFacts).
+const COMMENT_FACT_EVERY_MS = 10 * 60 * 1000;
+const COMMENT_FACT_WINDOW_MS = 12 * 60 * 60 * 1000;
+const commentFactState = { lastRunAt: null, lastError: null, races: 0, open: [], byRace: new Map(), running: false };
+function masterAdminUsers() {
+  return (authConfig.users || []).filter((u) => u.role === 'admin' && MASTER_ADMINS.includes(String(u.username).toLowerCase())).map((u) => u.username);
+}
+function commentFactLine(f) {
+  return `${f.tab != null ? `#${f.tab} ` : ''}${f.horse} (${f.where}): "${f.quote}" — ${f.why}`;
+}
+// raceId -> runnerId -> { pastRaces, performanceStatistics }, and the race's
+// class, from the racecards (AU variant first; the newest 8 form lines).
+async function racecardFormFor(raceIds) {
+  const cards = await (await getClient()).db().collection('racecards').aggregate([
+    { $match: { RaceId: { $in: raceIds } } },
+    { $project: {
+      RaceId: 1, Style: 1, RaceClass: 1,
+      Runners: { $map: { input: { $ifNull: ['$Runners', []] }, as: 'r', in: {
+        RunnerId: '$$r.RunnerId', PerformanceStatistics: '$$r.PerformanceStatistics', Form: '$$r.Form', FormLines: { $slice: [{ $ifNull: ['$$r.FormLines', []] }, 8] },
+      } } },
+    } },
+  ]).toArray();
+  cards.sort((a, b) => (b.Style === 'AU' ? 1 : 0) - (a.Style === 'AU' ? 1 : 0));
+  const out = new Map();
+  for (const card of cards) {
+    if (!out.has(card.RaceId)) out.set(card.RaceId, { raceClass: card.RaceClass || '', runners: new Map() });
+    const race = out.get(card.RaceId);
+    for (const r of card.Runners) {
+      const have = race.runners.get(r.RunnerId);
+      if (!have) race.runners.set(r.RunnerId, { pastRaces: r.FormLines || [], performanceStatistics: r.PerformanceStatistics || null, formFigures: r.Form || null });
+      else {
+        if (!have.pastRaces.length && (r.FormLines || []).length) have.pastRaces = r.FormLines;
+        if (!have.performanceStatistics && r.PerformanceStatistics) have.performanceStatistics = r.PerformanceStatistics;
+        if (!have.formFigures && r.Form) have.formFigures = r.Form;
+      }
+    }
+  }
+  return out;
+}
+function startMs(doc) {
+  const raw = String(doc.rScheduleTimeUTC || '');
+  return Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`);
+}
+async function dispatchCommentFactAlerts() {
+  if (commentFactState.running) return;
+  commentFactState.running = true;
+  try {
+    const nowMs = Date.now();
+    const today = todayStr();
+    const races = [];
+    for (const dateStr of [today, shiftDate(today, 1)]) {
+      for (const d of await fetchRaceDocs(dateStr, false)) {
+        if (d.rDiscipline !== 'T' || d.isAbandoned || d.resultString || String(d.rStatus || '').toUpperCase() === 'ABANDONED') continue;
+        const start = startMs(d);
+        if (!(start > nowMs && start < nowMs + COMMENT_FACT_WINDOW_MS)) continue;
+        if (!d.raceComment && !(d.runners || []).some((r) => r.runnerComment)) continue;
+        races.push(d);
+      }
+    }
+    const hashOf = (d) => crypto.createHash('sha1').update([d.raceComment || '', ...(d.runners || []).map((r) => `${r.tabNo}|${r.isScratched ? 'S' : ''}|${r.runnerComment || ''}`)].join('\n')).digest('hex');
+    const todo = races.filter((d) => {
+      const had = commentFactState.byRace.get(d._id);
+      return !had || had.hash !== hashOf(d) || nowMs - had.at > 60 * 60 * 1000;
+    });
+    for (let i = 0; i < todo.length; i += 20) {
+      const batch = todo.slice(i, i + 20);
+      const form = await racecardFormFor(batch.map((d) => d._id));
+      for (const d of batch) {
+        const card = form.get(d._id) || { raceClass: '', runners: new Map() };
+        const runners = (d.runners || []).map((r) => ({ ...r, ...(card.runners.get(r.runnerId) || { pastRaces: [], performanceStatistics: null, formFigures: null }) }));
+        commentFactState.byRace.set(d._id, { hash: hashOf(d), at: nowMs, facts: commentFactsFor({ ...d, runners }, card.raceClass) });
+      }
+    }
+    const live = new Set(races.map((d) => d._id));
+    for (const id of commentFactState.byRace.keys()) if (!live.has(id)) commentFactState.byRace.delete(id);
+    const open = [];
+    for (const d of races) {
+      const facts = (commentFactState.byRace.get(d._id) || {}).facts || [];
+      if (!facts.length) continue;
+      const lines = facts.map(commentFactLine);
+      open.push({
+        key: `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}`,
+        raceId: d._id, date: d.rDate, meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, time: (parseClock(d.rScheduleTime) || {}).label || '',
+        startUtc: new Date(startMs(d)).toISOString(),
+        raceUrl: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
+        title: `Comment check · ${d.rCourseDisplayName} R${d.rNo} (${d.rCountry})`,
+        body: lines.join('\n'),
+        lines,
+      });
+    }
+    open.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+    Object.assign(commentFactState, { open, races: races.length, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
+    const due = open.filter((a) => !alertsSent[a.key]);
+    if (!due.length) return;
+    due.forEach((a) => { alertsSent[a.key] = nowMs; });
+    saveAlertsSent(nowMs);
+    const recipients = masterAdminUsers().filter((u) => push.users().includes(u) && !snoozedAll(u));
+    if (!recipients.length) return;
+    const batch = due.length > 3
+      ? [{ title: `${due.length} comment checks`, body: due.slice(0, 5).map((a) => a.title.replace('Comment check · ', '')).join('\n') + (due.length > 5 ? '\n…' : ''), url: '/', tag: 'comment-facts', snooze: { kind: 'cf', ids: due.map((a) => a.key) } }]
+      : due.map((a) => ({ title: a.title, body: a.body, url: a.raceUrl, tag: `cf-${a.raceId}`, snooze: { kind: 'cf', ids: [a.key] } }));
+    for (const p of batch) await push.sendTo(recipients, p);
+  } catch (err) {
+    commentFactState.lastError = err.message;
+    console.warn(`[race-dashboard] WARNING: comment fact check failed: ${err.message}`);
+  } finally {
+    commentFactState.running = false;
+  }
+}
+setTimeout(dispatchCommentFactAlerts, 90 * 1000);
+setInterval(dispatchCommentFactAlerts, COMMENT_FACT_EVERY_MS);
 
 // This browser's push subscription (bell panel → "Keep alerting when the tab is closed").
 app.get('/api/push/key', requirePermission('overview'), requireWork, (req, res) => {

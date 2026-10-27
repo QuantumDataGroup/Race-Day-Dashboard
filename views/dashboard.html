@@ -1165,6 +1165,18 @@
       return warn + '<p class="modal-race-comment' + (hits.length ? ' has-scr' : '') + '">' + html + '</p>';
     }
 
+    // Comment fact check (27 Oct 2026, per Dinesh): what a comment says about
+    // a horse's form vs its form lines. The server only sends it to the master admin.
+    function commentFactsHtml(race) {
+      var facts = race.commentFacts || [];
+      if (!facts.length) return '';
+      return '<div class="cf-warn"><div class="cf-head"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Comment check <span class="cf-only">only you</span></div><ul>' +
+        facts.map(function (f) {
+          return '<li><b>' + (f.tab != null ? escapeHtmlClient(String(f.tab)) + '. ' : '') + escapeHtmlClient(f.horse) + '</b> <span class="cf-where">' + escapeHtmlClient(f.where) + '</span> ' +
+            '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + '</li>';
+        }).join('') + '</ul></div>';
+    }
+
     function handleRaceCellClick(event, id, aEl) {
       if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) return true;
       event.preventDefault();
@@ -1520,6 +1532,7 @@
             ' <button type="button" class="missing-jockey-ignore-btn" onclick="ignoreVideo(this, false)">Undo</button>' : '') +          (race.missingRaceComment ? ' | <span class="nocomment-tag">Race comment not available</span>' : '') + '</p>' +
         '</div><div class="modal-admin-slot" id="adminSlot"></div></div>' +
         (race.raceComment ? raceCommentHtml(race) : '') +
+        commentFactsHtml(race) +
         resultLine +
         runnerCheckLine +
         timeMismatchLine +
