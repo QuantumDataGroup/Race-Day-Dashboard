@@ -98,7 +98,7 @@ const {
   slugify, countrySlug, raceUrl, DISCIPLINE_SLUGS,
   buildMeetingDetailsReport, meetingDetailsReportToCsv, reportHasJockey, buildMeetingsListReport, meetingsListReportToCsv, disciplineLabel,
   renderMeetingsListPage, groupDocsByDate, buildMeetingsListRowsForRange, parseClock, deriveRaceStatus,
-  renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage,
+  renderAdminPage, renderAdminDeniedPage, renderChangesPage, renderSystemHealthPage, renderMissingMeetingsPage, renderCommentChecksPage,
   renderOverviewPage, renderTicketsPage, collectIssues, ISSUE_LABELS,
 } = require('./raceView');
 const { createIssueTracker, priorityFor } = require('./issue-tracker');
@@ -476,6 +476,8 @@ function accessOf(req) {
   PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
   access.any = ADMIN_AREA_PERMISSIONS.some((p) => access[p]);
   access.work = userType(user) !== 'view';
+  // Comment Checks page (27 Oct 2026): master admins only, see MASTER_ADMINS.
+  access.commentChecks = admin && MASTER_ADMINS.includes(String(user.username || '').toLowerCase());
   return access;
 }
 function cleanPermissions(list) {
@@ -4662,11 +4664,7 @@ async function buildAlerts() {
 app.get('/api/alerts', requirePermission('overview'), async (req, res) => {
   try {
     // Missing meetings (25 Oct 2026) only for users with that section.
-    // Comment fact check (27 Oct 2026) only for the master admin.
-    res.json({
-      ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [],
-      commentFacts: isMasterAdmin(req) ? commentFactState.open : [], ...snoozeInfo(req.session.username),
-    });
+    res.json({ ...(await buildAlerts()), missingMeetings: accessOf(req).missing ? missingAlertState.open : [], ...snoozeInfo(req.session.username) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -5146,8 +5144,9 @@ setInterval(() => {
 // Comment fact check in the background (27 Oct 2026, per Dinesh: "enakku
 // mattu"): every 10 min, Thoroughbred races not run yet in the next 12 h,
 // today and tomorrow. A race is checked again only when its comments change
-// (or after an hour, for new form lines). Each new finding goes to the
-// master admins only: push, and the bell (/api/alerts commentFacts).
+// (or after an hour, for new form lines). The findings are on the Comment
+// Checks page (per Dinesh: "wera oru pagela", not in the bell); each new one
+// is pushed to the master admins only, opening that page.
 const COMMENT_FACT_EVERY_MS = 10 * 60 * 1000;
 const COMMENT_FACT_WINDOW_MS = 12 * 60 * 60 * 1000;
 const commentFactState = { lastRunAt: null, lastError: null, races: 0, open: [], byRace: new Map(), running: false };
@@ -5235,6 +5234,7 @@ async function dispatchCommentFactAlerts() {
         title: `Comment check · ${d.rCourseDisplayName} R${d.rNo} (${d.rCountry})`,
         body: lines.join('\n'),
         lines,
+        facts,
       });
     }
     open.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
@@ -5246,8 +5246,8 @@ async function dispatchCommentFactAlerts() {
     const recipients = masterAdminUsers().filter((u) => push.users().includes(u) && !snoozedAll(u));
     if (!recipients.length) return;
     const batch = due.length > 3
-      ? [{ title: `${due.length} comment checks`, body: due.slice(0, 5).map((a) => a.title.replace('Comment check · ', '')).join('\n') + (due.length > 5 ? '\n…' : ''), url: '/', tag: 'comment-facts', snooze: { kind: 'cf', ids: due.map((a) => a.key) } }]
-      : due.map((a) => ({ title: a.title, body: a.body, url: a.raceUrl, tag: `cf-${a.raceId}`, snooze: { kind: 'cf', ids: [a.key] } }));
+      ? [{ title: `${due.length} comment checks`, body: due.slice(0, 5).map((a) => a.title.replace('Comment check · ', '')).join('\n') + (due.length > 5 ? '\n…' : ''), url: '/comment-checks', tag: 'comment-facts', snooze: { kind: 'cf', ids: due.map((a) => a.key) } }]
+      : due.map((a) => ({ title: a.title, body: a.body, url: '/comment-checks', tag: `cf-${a.raceId}`, snooze: { kind: 'cf', ids: [a.key] } }));
     for (const p of batch) await push.sendTo(recipients, p);
   } catch (err) {
     commentFactState.lastError = err.message;
@@ -5258,6 +5258,23 @@ async function dispatchCommentFactAlerts() {
 }
 setTimeout(dispatchCommentFactAlerts, 90 * 1000);
 setInterval(dispatchCommentFactAlerts, COMMENT_FACT_EVERY_MS);
+
+app.get('/comment-checks', requirePermission('commentChecks'), (req, res) => {
+  res.send(renderCommentChecksPage({ username: req.session.username, access: accessOf(req) }));
+});
+// One row per finding, races in start order.
+app.get('/api/comment-checks', requirePermission('commentChecks'), (req, res) => {
+  const items = [];
+  for (const a of commentFactState.open) {
+    for (const f of a.facts) {
+      items.push({ raceId: a.raceId, date: a.date, meeting: a.meeting, country: a.country, rNo: a.rNo, time: a.time, startUtc: a.startUtc, raceUrl: a.raceUrl, ...f });
+    }
+  }
+  res.json({
+    lastRunAt: commentFactState.lastRunAt, lastError: commentFactState.lastError, racesChecked: commentFactState.races,
+    racesFlagged: commentFactState.open.length, everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
+  });
+});
 
 // This browser's push subscription (bell panel → "Keep alerting when the tab is closed").
 app.get('/api/push/key', requirePermission('overview'), requireWork, (req, res) => {
