@@ -375,15 +375,26 @@ over a week old are dropped). Logged in User Activity as a confirm.
 
 ### Jockey check + Neds politeness (server.js)
 When the Neds website is the source, jockeys (blank in ours / different)
-give "Jockey Missing (name)" when ours is blank. Jockey names that differ
-and weights are not compared (Dinesh, 6 Oct 2026). The RAS API has no
-jockeys. A separate **jockey check** runs every
-`JOCKEY_CHECK_EVERY_MS` (3 h; Dinesh may ask for 2 h): only races starting
-in the next 24 h that still have a running horse with no jockey, one Neds
-page a second, updating those races' result. Every Neds request goes through
-`fetchNeds()`: gaps between requests, and on a 429/403 all Neds requests
-pause for 6 hours (`jockey-check-state.json`); the runners check then uses
-RAS. System Health shows a "Jockey check (Neds)" row and any pause.
+give "Jockey Missing (name)" when ours is blank. Jockey names that differ are
+not compared (Dinesh, 6 Oct 2026). The RAS API has no jockeys, barriers or
+weights. Since 28 Oct 2026 the Neds race page's `Barrier` and `Weight.Total`
+are compared too: **Barrier Missing (n)** when our `bp` is blank/0 and Neds
+has one (a normal runner issue for everyone; Missing Data counts it with
+Jockey Missing), and a **big weight difference** — ours blank, or
+`WEIGHT_DIFF_KG` (2) kg or more off (`big: true` items). Weight items are
+kept out of the runner issues and go to `MASTER_ADMINS` only (popup "Weight
+check · only you" box via `doc.weightChecks`, push via
+`dispatchWeightAlerts`, key `wt|raceId|tab|text`) until `WEIGHT_ISSUES=all`
+makes them normal runner issues for everyone (Dinesh: "na soldre apram
+ellarukku podunga"). A separate **jockey check** runs every
+`JOCKEY_CHECK_EVERY_MS` (3 h; Dinesh may ask for 2 h): races starting in the
+next 24 h that still have a running horse with no jockey, plus every T / H
+race in the next `WEIGHT_CHECK_WINDOW_MS` (12 h) for barrier / weight, one
+Neds page a second, updating those races' result. Every Neds request goes
+through `fetchNeds()`: gaps between requests, and on a 429/403 all Neds
+requests pause for 6 hours (`jockey-check-state.json`); the runners check
+then uses RAS. System Health shows a "Jockey / barrier / weight check (Neds)"
+row and any pause.
 
 ### Overview (`/overview`) + issue workflow (Oct 2026)
 For admins and users given the **Overview** permission (Admin → Users →
