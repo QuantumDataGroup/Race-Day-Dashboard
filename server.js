@@ -856,7 +856,7 @@ async function runHealthChecks() {
 
   // Comment fact check (27 Oct 2026): master admin only.
   add('comment-facts', 'Comment fact check', commentFactState.lastError ? 'warn' : 'ok',
-    commentFactState.lastRunAt ? `${commentFactState.open.length} race${commentFactState.open.length === 1 ? '' : 's'} flagged` : 'Starting',
+    commentFactState.lastRunAt ? `${commentFactState.open.filter((a) => a.key).length} race${commentFactState.open.filter((a) => a.key).length === 1 ? '' : 's'} flagged` : 'Starting',
     [`every ${COMMENT_FACT_EVERY_MS / 60000} min, Thoroughbred races in the next ${COMMENT_FACT_WINDOW_MS / 3600000} h · to ${MASTER_ADMINS.join(', ')} only`,
       commentFactState.lastRunAt ? `${commentFactState.races} races checked · last ${fmtTime(commentFactState.lastRunAt)}` : '',
       commentFactState.lastError ? `failed: ${commentFactState.lastError}` : ''].filter(Boolean).join(' · '));
@@ -3901,7 +3901,8 @@ app.get('/api/race/:id', async (req, res) => {
     const master = isMasterAdmin(req);
     res.json({
       ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing),
-      commentFacts: master ? (doc.commentFacts || []) : [], weightChecks: master ? (doc.weightChecks || []) : [],
+      commentFacts: master ? (doc.commentFacts || []).filter((f) => !commentFactIgnores[commentFactKey(doc._id, f)]) : [],
+      weightChecks: master ? (doc.weightChecks || []) : [],
     });
     prefetchMeetingRaces(doc);
   } catch (err) {
@@ -5179,6 +5180,20 @@ setInterval(() => {
 const COMMENT_FACT_EVERY_MS = 10 * 60 * 1000;
 const COMMENT_FACT_WINDOW_MS = 12 * 60 * 60 * 1000;
 const commentFactState = { lastRunAt: null, lastError: null, races: 0, open: [], byRace: new Map(), running: false };
+// Ignore (28 Oct 2026, per Dinesh: "comments issue adu issue ilannu thonuna
+// adukku ignore button podunga"): one finding per key, kept 3 days in
+// comment-check-ignores.json. An ignored finding is greyed on the page (with
+// Undo), left out of the popup box and never pushed.
+const COMMENT_FACT_IGNORE_PATH = path.join(ACTIVITY_LOG_DIR, 'comment-check-ignores.json');
+let commentFactIgnores = {};
+try {
+  if (fs.existsSync(COMMENT_FACT_IGNORE_PATH)) commentFactIgnores = JSON.parse(fs.readFileSync(COMMENT_FACT_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${COMMENT_FACT_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function commentFactKey(raceId, f) {
+  return `${raceId}|${f.tab}|${f.where}|${f.claim}|${f.quote}`;
+}
 function masterAdminUsers() {
   return (authConfig.users || []).filter((u) => u.role === 'admin' && MASTER_ADMINS.includes(String(u.username).toLowerCase())).map((u) => u.username);
 }
@@ -5254,9 +5269,10 @@ async function dispatchCommentFactAlerts() {
     for (const d of races) {
       const facts = (commentFactState.byRace.get(d._id) || {}).facts || [];
       if (!facts.length) continue;
-      const lines = facts.map(commentFactLine);
+      // Ignored ones stay on the page (with Undo) but aren't pushed.
+      const lines = facts.filter((f) => !commentFactIgnores[commentFactKey(d._id, f)]).map(commentFactLine);
       open.push({
-        key: `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}`,
+        key: lines.length ? `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}` : null,
         raceId: d._id, date: d.rDate, meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, time: (parseClock(d.rScheduleTime) || {}).label || '',
         startUtc: new Date(startMs(d)).toISOString(),
         raceUrl: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
@@ -5268,7 +5284,7 @@ async function dispatchCommentFactAlerts() {
     }
     open.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
     Object.assign(commentFactState, { open, races: races.length, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
-    const due = open.filter((a) => !alertsSent[a.key]);
+    const due = open.filter((a) => a.key && !alertsSent[a.key]);
     if (!due.length) return;
     due.forEach((a) => { alertsSent[a.key] = nowMs; });
     saveAlertsSent(nowMs);
@@ -5330,13 +5346,33 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), (req, res) =>
   const items = [];
   for (const a of commentFactState.open) {
     for (const f of a.facts) {
-      items.push({ raceId: a.raceId, date: a.date, meeting: a.meeting, country: a.country, rNo: a.rNo, time: a.time, startUtc: a.startUtc, raceUrl: a.raceUrl, ...f });
+      const key = commentFactKey(a.raceId, f);
+      const ignored = commentFactIgnores[key] || null;
+      items.push({
+        raceId: a.raceId, date: a.date, meeting: a.meeting, country: a.country, rNo: a.rNo, time: a.time, startUtc: a.startUtc, raceUrl: a.raceUrl, ...f,
+        key, ignoredBy: ignored ? ignored.ignoredBy : null, ignoredAt: ignored ? ignored.ignoredAt : null,
+      });
     }
   }
   res.json({
     lastRunAt: commentFactState.lastRunAt, lastError: commentFactState.lastError, racesChecked: commentFactState.races,
-    racesFlagged: commentFactState.open.length, everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
+    racesFlagged: new Set(items.filter((i) => !i.ignoredBy).map((i) => i.raceId)).size,
+    everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
   });
+});
+app.post('/api/comment-checks/ignore', requirePermission('commentChecks'), (req, res) => {
+  const { key, ignored, label } = req.body || {};
+  if (!key || typeof key !== 'string' || key.length > 400) return res.status(400).json({ error: 'key is required' });
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Comment check ignored: ${String(label || key).slice(0, 200)}` });
+  if (ignored) commentFactIgnores[key] = { ignoredAt: new Date().toISOString(), ignoredBy: req.session.username };
+  else delete commentFactIgnores[key];
+  for (const [k, v] of Object.entries(commentFactIgnores)) if (Date.parse(v.ignoredAt) < Date.now() - 3 * 86400000) delete commentFactIgnores[k];
+  try {
+    fs.writeFileSync(COMMENT_FACT_IGNORE_PATH, JSON.stringify(commentFactIgnores, null, 2), 'utf8');
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  res.json({ ok: true, ignored: Boolean(ignored), ignoredBy: ignored ? req.session.username : null });
 });
 
 // This browser's push subscription (bell panel → "Keep alerting when the tab is closed").
