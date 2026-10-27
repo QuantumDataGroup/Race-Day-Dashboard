@@ -127,19 +127,53 @@
           (data.items.length ? 'Nothing matches the filters.' : (data.lastRunAt ? 'No comment disagrees with the form right now.' : 'The first check runs about 2 minutes after the server starts.')) + '</td></tr>';
         return;
       }
-      var lastRace = null;
       body.innerHTML = rows.map(function (i) {
-        var first = i.raceId !== lastRace;
-        lastRace = i.raceId;
         var soon = (Date.parse(i.startUtc) - Date.now()) / 60000 <= 30;
-        return '<tr class="' + (first ? 'cc-first' : 'cc-more') + '">' +
-          '<td>' + (first ? '<b>' + esc(i.meeting) + ' R' + esc(i.rNo) + '</b> <span class="al-cc">' + esc(i.country) + '</span>' +
-            '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div>' : '') + '</td>' +
+        // Ignore / Undo (28 Oct 2026, per Dinesh): an ignored finding stays, greyed.
+        var action = i.ignoredBy
+          ? '<button type="button" class="adm-btn" data-cc-key="' + esc(i.key) + '" data-cc-ignore="0">Undo</button><small class="cc-ignored-by">Ignored by ' + esc(i.ignoredBy) + (i.ignoredAt ? ', ' + esc(hhmm(i.ignoredAt)) : '') + '</small>'
+          : '<button type="button" class="adm-btn" data-cc-key="' + esc(i.key) + '" data-cc-ignore="1" data-cc-label="' + esc(i.meeting + ' R' + i.rNo + ' ' + i.horse + ': ' + i.quote) + '"><i class="fa-solid fa-eye-slash"></i> Ignore</button>';
+        return '<tr class="cc-row' + (i.ignoredBy ? ' cc-ignored' : '') + '">' +
+          // The race on every row (28 Oct 2026, per Dinesh: "Meeting name illa").
+          '<td><b>' + esc(i.meeting) + ' R' + esc(i.rNo) + '</b> <span class="al-cc">' + esc(i.country) + '</span>' +
+            '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div></td>' +
           '<td>' + (i.tab != null ? esc(i.tab) + '. ' : '') + esc(i.horse) + '<div class="cf-where">' + esc(i.where) + '</div></td>' +
           '<td>&ldquo;' + esc(i.quote) + '&rdquo;<div class="cc-why">' + esc(i.why) + '</div><div class="cf-where">' + esc(i.claim) + '</div></td>' +
-          '<td>' + (first ? '<a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' : '') + '</td>' +
+          '<td class="cc-actions"><a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' + action + '</td>' +
           '</tr>';
       }).join('');
+    }
+
+    document.getElementById('rows').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-cc-key]');
+      if (!btn) return;
+      var ignore = btn.getAttribute('data-cc-ignore') === '1';
+      btn.disabled = true;
+      fetch('/api/comment-checks/ignore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: btn.getAttribute('data-cc-key'), ignored: ignore, label: btn.getAttribute('data-cc-label') || '' }),
+      })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j; }); })
+        .then(function (j) {
+          data.items.forEach(function (i) {
+            if (i.key !== btn.getAttribute('data-cc-key')) return;
+            i.ignoredBy = j.ignored ? j.ignoredBy : null;
+            i.ignoredAt = j.ignored ? new Date().toISOString() : null;
+          });
+          showCounts();
+          render();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          alert('Could not save: ' + err.message);
+        });
+    });
+
+    // Ignored findings aren't counted.
+    function showCounts() {
+      var active = data.items.filter(function (i) { return !i.ignoredBy; });
+      document.getElementById('tRaces').textContent = uniq(active.map(function (i) { return i.raceId; })).length;
+      document.getElementById('tItems').textContent = active.length;
     }
 
     function load() {
@@ -152,8 +186,7 @@
           document.getElementById('checkDot').className = 'chg-dot' + (j.lastError ? ' mm-dot-warn' : '');
           document.getElementById('tChecked').textContent = j.lastRunAt ? j.racesChecked : '-';
           document.getElementById('tCheckedSub').textContent = j.lastRunAt ? 'next ' + j.windowHours + ' hours' : 'not run yet';
-          document.getElementById('tRaces').textContent = j.racesFlagged;
-          document.getElementById('tItems').textContent = j.items.length;
+          showCounts();
           document.getElementById('every').textContent = j.everyMin;
           document.getElementById('window').textContent = j.windowHours;
           if (j.lastError) {
