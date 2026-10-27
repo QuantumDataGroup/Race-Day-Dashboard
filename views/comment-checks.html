@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Day Dashboard - Comment Checks</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/styles.css?v={{STYLES_VERSION}}">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#121a27">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RacingHub">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-left">
+      <a class="brand" href="/">
+        <img src="/logo.png" class="brand-icon" alt="RacingHub logo">
+        <div class="brand-text">
+          <span class="brand-name">RACING<span class="brand-name-accent">HUB</span></span>
+          <span class="brand-subtitle">Admin</span>
+        </div>
+      </a>
+    </div>
+    <div class="app-header-right">
+      <a class="meetings-list-link" href="/"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>      <button type="button" class="theme-toggle" id="themeToggle" onclick="toggleTheme()"><i class="fa-solid fa-sun"></i> Light</button>
+      {{USERNAME_BLOCK}}
+    </div>
+  </header>
+
+  <!-- Comment Checks (27 Oct 2026, per Dinesh: "Inda Warning enakku wera oru
+       pagela thanga"): what race / runner comments say about a horse's form
+       that its form lines say otherwise (comment-facts.js). Master admins only. -->
+  <main class="adm-main">
+    {{ADMIN_TABS_HTML}}
+    <div class="adm-page-head">
+      <div>
+        <h1>Comment Checks <span class="cf-only">only you</span></h1>
+      </div>
+      <div class="chg-last-check"><span class="chg-dot" id="checkDot"></span>Last check: <b id="lastCheck">-</b></div>
+    </div>
+    <p class="adm-error" id="loadError" hidden></p>
+
+    <section class="adm-tiles mm-tiles" aria-label="Summary">
+      <div class="adm-tile"><small>Races checked</small><b id="tChecked">-</b><span id="tCheckedSub">not run yet</span></div>
+      <div class="adm-tile adm-warn"><small>Races flagged</small><b id="tRaces">-</b><span>comment vs form</span></div>
+      <div class="adm-tile adm-warn"><small>Findings</small><b id="tItems">-</b><span>horses / claims</span></div>
+    </section>
+
+    <div class="adm-filters chg-filters" role="group" aria-label="Filters">
+      <label for="fDate">Date</label>
+      <select id="fDate"><option value="">Today + tomorrow</option></select>
+      <label for="fCountry">Country</label>
+      <select id="fCountry"><option value="">All</option></select>
+      <label for="fClaim">Claim</label>
+      <select id="fClaim"><option value="">All claims</option></select>
+      <input type="search" id="fText" placeholder="Search horse or meeting" aria-label="Search">
+    </div>
+
+    <section class="adm-card">
+      <div class="adm-table-wrap">
+        <table class="adm-table cc-table">
+          <thead><tr><th>Race</th><th>Horse</th><th>Comment says &rarr; form says</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="4" class="adm-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <p class="adm-foot">Checked every <span id="every">10</span> minutes: Thoroughbred races not run yet in the next <span id="window">12</span> hours. What the race comment and runner comments say about a horse (recent / last-start win, last-start placing, result at a course, step up / drop in class, first-up, maiden, debut, track / distance record) is compared with its form lines. A run missing from the form lines can make a correct comment look wrong, so check the race before changing it. A new finding is also sent to your phone / PC as a notification.</p>
+  </main>
+
+  <script>
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var btn = document.getElementById('themeToggle');
+      if (btn) btn.innerHTML = theme === 'light' ? '<i class="fa-solid fa-moon"></i> Dark' : '<i class="fa-solid fa-sun"></i> Light';
+    }
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = current === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('rdd_theme_v2', next); } catch (e) { /* ignore */ }
+      applyTheme(next);
+    }
+
+    var data = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function hhmm(iso) { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    function dayLabel(d) {
+      var p = d.split('-').map(Number);
+      return new Date(Date.UTC(p[0], p[1] - 1, p[2])).toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
+    }
+    function inText(iso) {
+      var m = Math.round((Date.parse(iso) - Date.now()) / 60000);
+      if (m < 0) return 'started';
+      if (m < 60) return 'in ' + Math.max(1, m) + ' min';
+      return 'in ' + Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') + ' m';
+    }
+    function uniq(list) { return Array.from(new Set(list)).sort(); }
+    function fillSelect(id, values, labelOf) {
+      var sel = document.getElementById(id);
+      var keep = sel.value;
+      var first = sel.options[0].outerHTML;
+      sel.innerHTML = first + values.map(function (v) { return '<option value="' + esc(v) + '">' + esc(labelOf ? labelOf(v) : v) + '</option>'; }).join('');
+      if (values.indexOf(keep) !== -1) sel.value = keep;
+    }
+
+    function render() {
+      if (!data) return;
+      var fDate = document.getElementById('fDate').value;
+      var fCountry = document.getElementById('fCountry').value;
+      var fClaim = document.getElementById('fClaim').value;
+      var fText = document.getElementById('fText').value.trim().toLowerCase();
+      var rows = data.items.filter(function (i) {
+        if (fDate && i.date !== fDate) return false;
+        if (fCountry && i.country !== fCountry) return false;
+        if (fClaim && i.claim !== fClaim) return false;
+        if (fText && (i.horse + ' ' + i.meeting).toLowerCase().indexOf(fText) === -1) return false;
+        return true;
+      });
+      var body = document.getElementById('rows');
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="4" class="adm-empty"><i class="fa-solid fa-circle-check"></i> ' +
+          (data.items.length ? 'Nothing matches the filters.' : (data.lastRunAt ? 'No comment disagrees with the form right now.' : 'The first check runs about 2 minutes after the server starts.')) + '</td></tr>';
+        return;
+      }
+      var lastRace = null;
+      body.innerHTML = rows.map(function (i) {
+        var first = i.raceId !== lastRace;
+        lastRace = i.raceId;
+        var soon = (Date.parse(i.startUtc) - Date.now()) / 60000 <= 30;
+        return '<tr class="' + (first ? 'cc-first' : 'cc-more') + '">' +
+          '<td>' + (first ? '<b>' + esc(i.meeting) + ' R' + esc(i.rNo) + '</b> <span class="al-cc">' + esc(i.country) + '</span>' +
+            '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div>' : '') + '</td>' +
+          '<td>' + (i.tab != null ? esc(i.tab) + '. ' : '') + esc(i.horse) + '<div class="cf-where">' + esc(i.where) + '</div></td>' +
+          '<td>&ldquo;' + esc(i.quote) + '&rdquo;<div class="cc-why">' + esc(i.why) + '</div><div class="cf-where">' + esc(i.claim) + '</div></td>' +
+          '<td>' + (first ? '<a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' : '') + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    function load() {
+      fetch('/api/comment-checks', { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          data = j;
+          document.getElementById('loadError').hidden = true;
+          document.getElementById('lastCheck').textContent = j.lastRunAt ? hhmm(j.lastRunAt) : 'starting';
+          document.getElementById('checkDot').className = 'chg-dot' + (j.lastError ? ' mm-dot-warn' : '');
+          document.getElementById('tChecked').textContent = j.lastRunAt ? j.racesChecked : '-';
+          document.getElementById('tCheckedSub').textContent = j.lastRunAt ? 'next ' + j.windowHours + ' hours' : 'not run yet';
+          document.getElementById('tRaces').textContent = j.racesFlagged;
+          document.getElementById('tItems').textContent = j.items.length;
+          document.getElementById('every').textContent = j.everyMin;
+          document.getElementById('window').textContent = j.windowHours;
+          if (j.lastError) {
+            document.getElementById('loadError').textContent = 'Last check failed: ' + j.lastError;
+            document.getElementById('loadError').hidden = false;
+          }
+          fillSelect('fDate', uniq(j.items.map(function (i) { return i.date; })), dayLabel);
+          fillSelect('fCountry', uniq(j.items.map(function (i) { return i.country; })));
+          fillSelect('fClaim', uniq(j.items.map(function (i) { return i.claim; })));
+          render();
+        })
+        .catch(function (err) {
+          document.getElementById('loadError').textContent = 'Could not load the comment checks: ' + err.message;
+          document.getElementById('loadError').hidden = false;
+        });
+    }
+    ['fDate', 'fCountry', 'fClaim'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+    document.getElementById('fText').addEventListener('input', render);
+
+    (function init() {
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
+      applyTheme(savedTheme);
+      load();
+      setInterval(load, 2 * 60 * 1000);
+    })();
+  </script>
+</body>
+</html>

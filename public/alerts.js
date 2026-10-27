@@ -232,13 +232,6 @@
       seen[a.key] = Date.now();
       due.push({ title: a.title, body: a.body, url: '/missing-meetings', tag: 'mm-' + a.key, snooze: { kind: 'mm', ids: [a.key] } });
     });
-    // Comment fact check (27 Oct 2026): master admin only (the server sends
-    // nothing to anyone else). The key changes when what's wrong changes.
-    (data.commentFacts || []).forEach(function (a) {
-      if (seen[a.key]) return;
-      seen[a.key] = Date.now();
-      due.push({ title: a.title, body: a.body, url: a.raceUrl, tag: 'cf-' + a.raceId, snooze: { kind: 'cf', ids: [a.key] } });
-    });
     // Snoozed alerts that came back (the server checked they're still open).
     (data.reminders || []).forEach(function (r) {
       if (seen['sn|' + r.id]) return;
@@ -264,7 +257,7 @@
 
   function activeCount() {
     if (!data) return 0;
-    return (data.missingMeetings || []).length + (data.commentFacts || []).length + data.races.filter(function (race) {
+    return (data.missingMeetings || []).length + data.races.filter(function (race) {
       var m = minsTo(race);
       return liveIssues(race, milestoneFor(m)).length || race.issues.some(function (i) { return (i.lateScratching || i.missingResult) && i.workflow !== 'fixed'; });
     }).length;
@@ -300,14 +293,6 @@
         '<div class="al-issue"><div class="al-issue-text"><span>' + esc(a.body) + '</span></div>' +
         '<div class="al-actions"><a class="adm-btn" href="/missing-meetings"><i class="fa-solid fa-arrow-right"></i> Missing Meetings</a>' + snoozeBtn('mm', a.key, a.title, a.body, '/missing-meetings') + '</div></div></article>';
     }).join('');
-    var cf = (data.commentFacts || []).map(function (a) {
-      return '<article class="al-race al-missing">' +
-        '<div class="al-race-head"><a href="' + esc(a.raceUrl) + '"><i class="fa-solid fa-magnifying-glass"></i> Comment check · ' + esc(a.meeting) + ' <b>R' + esc(a.rNo) + '</b> <span class="al-cc">' + esc(a.country) + '</span></a>' +
-        '<span class="al-when">' + esc(inText(Math.round((Date.parse(a.startUtc) - Date.now()) / 60000))) + ' · ' + esc(a.time || '') + '</span>' +
-        snoozeBtn('cf', a.key, a.title, a.body, a.raceUrl) + '</div>' +
-        a.lines.map(function (l) { return '<div class="al-issue"><div class="al-issue-text"><span>' + esc(l) + '</span></div></div>'; }).join('') + '</article>';
-    }).join('');
-    // Comment checks after the race issues: those are the urgent ones.
     list.innerHTML = bar + mm + data.races.map(function (race) {
       var m = minsTo(race);
       var soon = m != null && m <= 30;
@@ -326,7 +311,7 @@
             '<a class="adm-btn" href="https://troyendata.com/Race?raceId=' + encodeURIComponent(race.raceId) + '" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square"></i> Admin</a>' +
             '</div></div>';
         }).join('') + '</article>';
-    }).join('') + cf + (mm || cf || data.races.length ? '' : '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>');
+    }).join('') + (mm || data.races.length ? '' : '<p class="al-empty"><i class="fa-solid fa-circle-check"></i> No open issues on races in the next 3 hours.</p>');
   }
 
   function buildPanel() {

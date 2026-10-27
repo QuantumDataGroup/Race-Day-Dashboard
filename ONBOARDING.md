@@ -319,8 +319,11 @@ popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10
 min, T races in the next 12 h, today + tomorrow, rechecked when the comments
 change or after an hour) pushes new findings to `MASTER_ADMINS` only (key
-`cf|raceId|hash`, snooze kind `cf`) and fills the bell (`/api/alerts`
-`commentFacts`, after the race issues). System Health row "Comment fact check".
+`cf|raceId|hash`, snooze kind `cf`), opening the **Comment Checks** page
+(`/comment-checks`, `views/comment-checks.html`, data from `/api/comment-checks`;
+an Admin tab shown only when `access.commentChecks`, i.e. an admin in
+`MASTER_ADMINS`). Not in the bell (per Dinesh: on its own page). System Health
+row "Comment fact check".
 The findings are only as good as the form lines: a run missing from them can
 make a correct comment look wrong.
 
