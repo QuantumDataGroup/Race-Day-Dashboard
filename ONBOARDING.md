@@ -328,7 +328,12 @@ Ignore needs a User (not View) login; 25 a page with the shared pager). Not in t
 its race, Open race and **Ignore** (28 Oct 2026): `POST /api/comment-checks/ignore`,
 key `raceId|tab|where|claim|quote`, kept 3 days in `comment-check-ignores.json`;
 an ignored finding stays greyed with Undo, isn't counted, isn't in the popup
-box and is never pushed. System Health row "Comment fact check".
+box and is never pushed. **Open ticket** (28 Oct 2026): one ClickUp ticket per
+race (issue code `comment-check`, `POST /api/tickets`, tags data-issue /
+comment-check / country) with every finding of the race not ignored, each
+with the whole comment (`fact.comment`); `/api/comment-checks` returns the
+open ones (`tickets`) so the rows show "Ticket open (status)". Needs a User
+login and ClickUp connected (`canTicket`). System Health row "Comment fact check".
 The findings are only as good as the form lines: a run missing from them can
 make a correct comment look wrong.
 

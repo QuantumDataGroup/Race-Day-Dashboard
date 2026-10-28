@@ -2060,8 +2060,9 @@ function commentFactsFor(doc, raceClass) {
   const runners = (doc.runners || []).filter((r) => !r.isScratched);
   const race = { rDate: doc.rDate, rCountry: doc.rCountry, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
   const out = [];
-  const add = (r, where, text) => {
-    for (const c of checkClaims(text, r, race)) out.push({ tab: r.tabNo != null ? Number(r.tabNo) : null, horse: r.horseName || '', where, ...c });
+  // comment: the whole comment, for the ticket (28 Oct 2026).
+  const add = (r, where, text, comment) => {
+    for (const c of checkClaims(text, r, race)) out.push({ tab: r.tabNo != null ? Number(r.tabNo) : null, horse: r.horseName || '', where, ...c, comment });
   };
   for (const sentence of String(doc.raceComment || '').split(/(?<=[.!?])\s+(?=[A-Z])/)) {
     const ms = [...sentence.matchAll(COMMENT_MENTION_RE)];
@@ -2075,14 +2076,14 @@ function commentFactsFor(doc, raceClass) {
       if (former) {
         const latter = /\bthe latter\b/i.exec(text.slice(former.index));
         const formerText = latter ? text.slice(former.index, former.index + latter.index) : text.slice(former.index);
-        if (horses[i - 1]) add(horses[i - 1], 'race comment', formerText);
+        if (horses[i - 1]) add(horses[i - 1], 'race comment', formerText, doc.raceComment);
         text = text.slice(0, former.index) + (latter ? text.slice(former.index + latter.index) : '');
       }
-      add(horses[i], 'race comment', text);
+      add(horses[i], 'race comment', text, doc.raceComment);
     });
   }
   for (const r of runners) {
-    if (r.runnerComment && !r.commentAbout) add(r, 'runner comment', r.runnerComment);
+    if (r.runnerComment && !r.commentAbout) add(r, 'runner comment', r.runnerComment, r.runnerComment);
   }
   return out.sort((a, b) => (a.tab || 99) - (b.tab || 99));
 }
@@ -5340,7 +5341,7 @@ app.get('/comment-checks', requirePermission('commentChecks'), (req, res) => {
   res.send(renderCommentChecksPage({ username: req.session.username, access: accessOf(req) }));
 });
 // One row per finding, races in start order.
-app.get('/api/comment-checks', requirePermission('commentChecks'), (req, res) => {
+app.get('/api/comment-checks', requirePermission('commentChecks'), async (req, res) => {
   const items = [];
   for (const a of commentFactState.open) {
     for (const f of a.facts) {
@@ -5352,10 +5353,20 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), (req, res) =>
       });
     }
   }
+  // Comment tickets (28 Oct 2026, per Dinesh: "comments-ku ticket open
+  // pannanum"): one per race, issue code 'comment-check'; the open ones here.
+  const tickets = {};
+  if (clickup.enabled && accessOf(req).work) {
+    for (const raceId of new Set(items.map((i) => i.raceId))) {
+      const t = await clickup.ticketForIssue(`${raceId}|comment-check`).catch(() => null);
+      if (t) tickets[raceId] = { id: t.id, url: t.url, statusLabel: t.statusLabel };
+    }
+  }
   res.json({
     lastRunAt: commentFactState.lastRunAt, lastError: commentFactState.lastError, racesChecked: commentFactState.races,
     racesFlagged: new Set(items.filter((i) => !i.ignoredBy).map((i) => i.raceId)).size,
     everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
+    tickets, canTicket: clickup.enabled && accessOf(req).work,
   });
 });
 app.post('/api/comment-checks/ignore', requirePermission('commentChecks'), requireWork, (req, res) => {
