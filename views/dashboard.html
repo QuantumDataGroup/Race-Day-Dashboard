@@ -1601,6 +1601,9 @@
       var slot = document.getElementById('adminSlot');
       if (slot && !document.documentElement.classList.contains('view-only')) slot.innerHTML = adminRaceLink(race.id);
       var issues = raceIssuesForTickets(race);
+      // Comment check findings (28 Oct 2026, per Dinesh: a ticket for them
+      // too) -- the same per-race ticket as the Comment Checks page's.
+      if ((race.commentFacts || []).length) issues = issues.concat([{ code: 'comment-check', texts: ['Comment check (' + race.commentFacts.length + ')'] }]);
       if (!issues.length) return;
       _ticketCtx = { race: race, issues: issues, tickets: {}, members: [], enabled: null };
       var draw = function () {
@@ -1657,6 +1660,21 @@
       lines.push((status ? 'Status: ' + status + ' · ' : '') + 'Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
       lines.push('Race ID: ' + race.id);
       lines.push('');
+      if (issue.code === 'comment-check') {
+        // What each comment says vs the form, with the whole comment once.
+        var facts = race.commentFacts || [];
+        var shown = [];
+        lines.push('Issue: Comment says something the horse\'s form doesn\'t show (' + facts.length + ')');
+        facts.forEach(function (f, n) {
+          lines.push('');
+          lines.push((n + 1) + '. #' + f.tab + ' ' + f.horse + ' – ' + f.where + ' (' + f.claim + ')');
+          lines.push('   Comment says: "' + f.quote + '"');
+          lines.push('   Form says: ' + f.why);
+          var c = f.where + '|' + (f.where === 'runner comment' ? f.tab : '');
+          if (f.comment && shown.indexOf(c) === -1) { shown.push(c); lines.push('   Full ' + f.where + ': ' + f.comment); }
+        });
+        return lines.join('\n');
+      }
       lines.push('Issue: ' + label);
       issue.texts.forEach(function (t) { lines.push(' · ' + t); });
       // The runners whose Issue column shows this issue (a runners check one:
