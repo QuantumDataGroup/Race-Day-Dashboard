@@ -333,7 +333,13 @@ race (issue code `comment-check`, `POST /api/tickets`, tags data-issue /
 comment-check / country) with every finding of the race not ignored, each
 with the whole comment (`fact.comment`); `/api/comment-checks` returns the
 open ones (`tickets`) so the rows show "Ticket open (status)". Needs a User
-login and ClickUp connected (`canTicket`). System Health row "Comment fact check".
+login and ClickUp connected (`canTicket`). Users with Comment Checks also get
+the findings on the dashboard (28 Oct 2026): `loadCommentIssues` reads
+`/api/comment-checks?lite=1` (403 for everyone else) and adds the red cell icon,
+the red race button in the popup and the runner's Issue column; the popup box
+has Ignore too. The background check covers 48 h (today + tomorrow). "Coming off
+/ fresh off a win" passes with a win in the last two runs within 60 days.
+System Health row "Comment fact check".
 The findings are only as good as the form lines: a run missing from them can
 make a correct comment look wrong.
 

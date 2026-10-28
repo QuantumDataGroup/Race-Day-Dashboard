@@ -3901,7 +3901,10 @@ app.get('/api/race/:id', async (req, res) => {
     // weightChecks: master admin only (28 Oct 2026).
     res.json({
       ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing),
-      commentFacts: accessOf(req).commentChecks ? (doc.commentFacts || []).filter((f) => !commentFactIgnores[commentFactKey(doc._id, f)]) : [],
+      // key: for the popup's Ignore (28 Oct 2026); canIgnoreComment: a User login.
+      commentFacts: accessOf(req).commentChecks
+        ? (doc.commentFacts || []).map((f) => ({ ...f, key: commentFactKey(doc._id, f) })).filter((f) => !commentFactIgnores[f.key]) : [],
+      canIgnoreComment: Boolean(accessOf(req).commentChecks && accessOf(req).work),
       weightChecks: isMasterAdmin(req) ? (doc.weightChecks || []) : [],
     });
     prefetchMeetingRaces(doc);
@@ -5178,7 +5181,9 @@ setInterval(() => {
 // Checks page (per Dinesh: "wera oru pagela", not in the bell); each new one
 // is pushed to the master admins only, opening that page.
 const COMMENT_FACT_EVERY_MS = 10 * 60 * 1000;
-const COMMENT_FACT_WINDOW_MS = 12 * 60 * 60 * 1000;
+// 48 h, today and tomorrow (28 Oct 2026: Vaal R4 for the next day showed in
+// the popup but not on the page with 12 h).
+const COMMENT_FACT_WINDOW_MS = 48 * 60 * 60 * 1000;
 const commentFactState = { lastRunAt: null, lastError: null, races: 0, open: [], byRace: new Map(), running: false };
 // Ignore (28 Oct 2026, per Dinesh: "comments issue adu issue ilannu thonuna
 // adukku ignore button podunga"): one finding per key, kept 3 days in
@@ -5357,7 +5362,8 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), async (req, r
   // Comment tickets (28 Oct 2026, per Dinesh: "comments-ku ticket open
   // pannanum"): one per race, issue code 'comment-check'; the open ones here.
   const tickets = {};
-  if (clickup.enabled && accessOf(req).work) {
+  // ?lite=1: the dashboard grid's red marks, no tickets needed.
+  if (clickup.enabled && accessOf(req).work && req.query.lite !== '1') {
     for (const raceId of new Set(items.map((i) => i.raceId))) {
       const t = await clickup.ticketForIssue(`${raceId}|comment-check`).catch(() => null);
       if (t) tickets[raceId] = { id: t.id, url: t.url, statusLabel: t.statusLabel };

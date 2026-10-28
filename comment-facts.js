@@ -92,9 +92,17 @@ const RULES = [
     claim: 'last-start win',
     negatable: true,
     re: /\b(?:just won|won (?:last start|last time(?: out)?|(?:his|her|its) (?:last|latest) (?:start|outing|race|run))|last[- ]start (?:win|winner|victory|success)|(?:coming|fresh|comes?|straight) off (?:a|an|his|her|its) (?:[a-z-]+ ){0,2}(?:win|victory|success|triumph)|off the back of (?:a|an|his|her|its) (?:[a-z-]+ ){0,2}(?:win|victory|success)|(?:won|scored|saluted) (?:at|on|in) (?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race)|broke (?:his|her|its) maiden last (?:start|time))/gi,
-    check(f) {
+    check(f, m) {
       const last = f.runs[0];
       if (!last || posOf(last) === 1) return null;
+      // "Coming off / fresh off / off the back of a win" is fine with a win
+      // in the last two runs within 60 days (28 Oct 2026, per Dinesh: Trinity
+      // State "coming off a solid maiden win" -- won its maiden 21 Sep, 2nd
+      // since). "Won last start" / "just won" still mean the last start.
+      if (/\boff\b/i.test(m[0])) {
+        const win = f.runs.slice(0, 2).find((x) => posOf(x) === 1);
+        if (win && daysBetween(win.Date, f.raceDate) <= 60) return null;
+      }
       return `last start ${runText(last)}`;
     },
   },
@@ -156,8 +164,10 @@ const RULES = [
   },
   {
     claim: 'first-up / after a break',
-    // "his second start after a significant break" is second-up.
-    skipBefore: /\bsecond\b[^.;]{0,30}$/i,
+    // "his second start after a significant break" is second-up; "showed
+    // promise in her last race after a break" (Vaal R4 28 Oct 2026) is about
+    // that earlier race, not today's.
+    skipBefore: /\bsecond\b[^.;]{0,30}$|\b(?:last|previous|latest|prior|most recent)\s+(?:race|start|run|outing|time|effort|appearance)\b[^.;]{0,25}$|\b(?:showed|shown|ran|was|finished|won|placed|raced|performed|returned|came|resumed)\b[^.;]{0,40}$/i,
     re: /\b(?:first[- ]up|resum(?:es|ing)|returns? (?:from|after) (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence|rest)|after (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence)|first (?:run|start|outing) (?:back|since)|fresh(?:ened)? up)\b/gi,
     check(f) {
       const last = f.runs[0];

@@ -1087,7 +1087,7 @@
     function renderRaceNavButtons() {
       return _currentMeetingRaces.map(function (r) {
         var isActive = r.id === _currentRaceId;
-        var hasIssue = r.hasFormIssue || r.hasOtherIssue;
+        var hasIssue = r.hasFormIssue || r.hasOtherIssue || Boolean(_commentIssueRaces[r.id]);
         var cls = 'race-nav-btn' + (isActive ? ' active' : '') + (hasIssue ? ' has-issue' : '');
         return '<button type="button" class="' + cls + '"' +
           (isActive ? ' disabled' : ' onclick="showRaceDetail(\'' + r.id + '\')"') +
@@ -1170,11 +1170,31 @@
     function commentFactsHtml(race) {
       var facts = race.commentFacts || [];
       if (!facts.length) return '';
-      return '<div class="cf-warn"><div class="cf-head"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Comment check</div><ul>' +
-        facts.map(function (f) {
+      return '<div class="cf-warn" id="cfBox"><div class="cf-head"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Comment check</div><ul>' +
+        facts.map(function (f, n) {
+          // Ignore (28 Oct 2026, per Dinesh): same as on the Comment Checks page.
+          var ignore = race.canIgnoreComment && f.key
+            ? ' <button type="button" class="missing-jockey-ignore-btn" onclick="ignoreCommentFact(this, ' + n + ')">&#10003; Ignore</button>' : '';
           return '<li><b>' + (f.tab != null ? escapeHtmlClient(String(f.tab)) + '. ' : '') + escapeHtmlClient(f.horse) + '</b> <span class="cf-where">' + escapeHtmlClient(f.where) + '</span> ' +
-            '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + '</li>';
+            '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + ignore + '</li>';
         }).join('') + '</ul></div>';
+    }
+    function ignoreCommentFact(btn, n) {
+      var race = _currentRaceData;
+      var f = race && (race.commentFacts || [])[n];
+      if (!f) return;
+      btn.disabled = true;
+      fetch('/api/comment-checks/ignore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: f.key, ignored: true, label: race.meeting + ' R' + race.rNo + ' ' + f.horse + ': ' + f.quote }),
+      })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j; }); })
+        .then(function () {
+          var li = btn.closest('li');
+          li.innerHTML = '<span class="cf-where">Ignored &middot; ' + escapeHtmlClient(f.horse) + ' &ldquo;' + escapeHtmlClient(f.quote) + '&rdquo;</span>';
+          f.ignored = true;
+        })
+        .catch(function (err) { btn.disabled = false; alert('Could not save: ' + err.message); });
     }
 
     // Big weight differences with Neds (28 Oct 2026, per Dinesh): master admin
@@ -1370,6 +1390,10 @@
         else if (r.issue.indexOf('age issue') !== -1) issueClass = 'issue-cell age-issue';
         else if (r.issue.indexOf('Missing') === 0) issueClass = 'issue-cell missing';
         else if (r.issue.indexOf('Duplicate') === 0) issueClass = 'issue-cell duplicate';
+        // Comment issues (28 Oct 2026), only when the server sent commentFacts.
+        var cIssue = r.isScratched ? '' : commentIssueFor(race, r);
+        if (cIssue && !issueClass) issueClass = 'issue-cell missing';
+        var shownIssue = [r.issue, cIssue].filter(Boolean).join('; ');
         // 1st / 2nd / 3rd... (1 Oct 2026, per Dinesh), same as the PDF.
         var positionCell = race.hasResult ? '<td class="position-cell">' + (r.position != null ? reportOrdinal(r.position) : '-') + '</td>' : '';
         // Manual "confirm no form" tick -- lets someone who's actually
@@ -1447,7 +1471,7 @@
           (showWeight ? '<td class="weight-cell">' + (r.weightKg ? escapeHtmlClient(r.weightKg) + 'kg' : '-') + '</td>' : '') +
           (showWeight ? '<td class="form-figures-cell">' + (r.formFigures ? escapeHtmlClient(r.formFigures.slice(-10)) : '-') + '</td>' : '') +
           '<td class="odds-cell">' + oddsHtml + '</td>' +
-          '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(r.issue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + runnerCheckBtnHtml + siteCheckHtml)) + '</td>' +
+          '<td class="' + issueClass + '">' + (r.isScratched ? 'Scratched' : ((escapeHtmlClient(shownIssue) || '-') + formBtnHtml + ageBtnHtml + dupJockeyBtnHtml + missingJockeyBtnHtml + runnerCheckBtnHtml + siteCheckHtml)) + '</td>' +
           '</tr>';
       }).join('');
 
@@ -1646,7 +1670,7 @@
       lines.push('Date: ' + dateLong + ' · Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
       lines.push('Race ID: ' + race.id);
       lines.push('');
-      if (issue.code === 'comment-check') return lines.concat(commentIssueLines(race.commentFacts || [])).join('\n');
+      if (issue.code === 'comment-check') return lines.concat(commentIssueLines((race.commentFacts || []).filter(function (f) { return !f.ignored; }))).join('\n');
       lines.push('Issue: ' + label);
       issue.texts.forEach(function (t) { lines.push(' · ' + t); });
       // The runners whose Issue column shows this issue (a runners check one:
@@ -3722,6 +3746,55 @@
       setInterval(renderUpcomingTicker, 1000);
       setInterval(loadUpcomingRaces, 60000);
     }
+
+    // Comment issues on the grid (28 Oct 2026, per Dinesh: "Race number red
+    // colour aagi illa" -- for Comment Checks users only): the races with a
+    // finding not ignored get the red warning icon, a red race button in the
+    // popup and the runner's Issue column. Read from /api/comment-checks,
+    // which other users get a 403 for, so nothing changes for them.
+    var _commentIssueRaces = {};
+    function loadCommentIssues() {
+      fetch('/api/comment-checks?lite=1', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j) return;
+          _commentIssueRaces = {};
+          j.items.forEach(function (i) { if (!i.ignoredBy) (_commentIssueRaces[i.raceId] = _commentIssueRaces[i.raceId] || []).push(i); });
+          markCommentIssueCells();
+        })
+        .catch(function () { /* next time */ });
+    }
+    function commentIssueLabel(list) {
+      var race = list.some(function (f) { return f.where === 'race comment'; });
+      var runner = list.some(function (f) { return f.where === 'runner comment'; });
+      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
+    }
+    function markCommentIssueCells() {
+      document.querySelectorAll('td[data-race-id]').forEach(function (td) {
+        var list = _commentIssueRaces[td.getAttribute('data-race-id')];
+        var mine = td.querySelector('.cc-cell-icon');
+        if (!list) { if (mine) mine.remove(); return; }
+        var text = commentIssueLabel(list) + ' (' + list.map(function (f) { return '#' + f.tab + ' ' + f.horse + ': "' + f.quote + '"'; }).join('; ') + ')';
+        var icon = mine || td.querySelector('.cell-issue-icon');
+        if (!icon) {
+          var link = td.querySelector('a.race-cell-link');
+          if (!link) return;
+          icon = document.createElement('i');
+          icon.className = 'fa-solid fa-triangle-exclamation cell-issue-icon cc-cell-icon';
+          link.insertBefore(icon, link.querySelector('div'));
+        }
+        if (icon.classList.contains('cc-cell-icon')) icon.title = text;
+        else if (icon.title.indexOf('Comment Issue') === -1) icon.title += ', ' + text;
+      });
+    }
+    // A runner's comment issues for its Issue column.
+    function commentIssueFor(race, r) {
+      return (race.commentFacts || []).filter(function (f) { return !f.ignored && f.tab === r.tabNo; }).map(function (f) {
+        return (f.where === 'race comment' ? 'Race' : 'Runner') + ' comment issue: "' + f.quote + '" — ' + f.why;
+      }).join('; ');
+    }
+    loadCommentIssues();
+    setInterval(loadCommentIssues, 5 * 60 * 1000);
 
     // Bottom strip: times in the viewer's clock, and (admins only) the
     // overall health status from the System Health checks.
