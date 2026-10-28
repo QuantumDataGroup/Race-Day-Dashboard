@@ -150,9 +150,15 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
   function isDashboardTicket(t) {
     return Boolean(store.byTask[t.id] && store.byTask[t.id].raisedBy) || (t.tags || []).some((g) => g && g.name === TICKET_TAG);
   }
+  // A task the team raised straight in the shared support list: listed, never reminded.
+  function isTeamTask(t) {
+    return ticketListId !== listId && t.fromList === ticketListId && !isDashboardTicket(t);
+  }
 
-  // Every open task in the list, plus tasks closed in the last 14 days; from
-  // the ticket list, the dashboard's own tickets only.
+  // Every open task in both lists, plus tasks closed in the last 14 days --
+  // the team's own tickets in the support list too (28 Oct 2026, per
+  // Dinesh: "Open panna oru ticket kuda enakku kaattudilla"). Reminders skip
+  // those (sendReminders, isTeamTask).
   async function tasks(fresh) {
     if (!fresh && tasksCache && now() - tasksCache.at < TASKS_FRESH_MS) return tasksCache.list;
     const lists = [listId, ...(ticketListId && ticketListId !== listId ? [ticketListId] : [])];
@@ -160,7 +166,7 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     for (const list of lists) {
       const open = await allPages('include_closed=false', list);
       const recent = await allPages(`include_closed=true&date_updated_gt=${now() - 14 * 86400000}`, list);
-      found.push(...[...open, ...recent].filter((t) => list === listId || isDashboardTicket(t)));
+      found.push(...[...open, ...recent].map((t) => Object.assign(t, { fromList: list })));
     }
     const byId = new Map();
     // The daily / weekly report tasks share the list but aren't tickets.
@@ -256,7 +262,7 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     if (!enabled) return 0;
     let sent = 0;
     for (const t of await tasks(true)) {
-      if (statusKey(t) !== 'todo') continue;
+      if (statusKey(t) !== 'todo' || isTeamTask(t)) continue;
       const created = Number(t.date_created);
       if (!created) continue;
       const ageHours = (now() - created) / 3600000;
