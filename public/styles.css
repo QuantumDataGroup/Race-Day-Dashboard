@@ -930,7 +930,9 @@ body.past-race-page { max-width: 640px; margin: 24px auto; padding: 0 16px; }
   --adm-info: #1d4ed8; --adm-info-bg: rgba(29, 78, 216, 0.08);
   --adm-dl: #b45309; --adm-dl-bg: rgba(180, 83, 9, 0.1);
 }
-.adm-main { padding: 24px; display: flex; flex-direction: column; gap: 20px; max-width: 1400px; margin: 0 auto; }
+/* Full width (28 Oct 2026, per Dinesh: "Space irukku, ida use panunga" -- the
+   1400px cap left empty sides while the Users table scrolled sideways). */
+.adm-main { padding: 24px; display: flex; flex-direction: column; gap: 20px; margin: 0 auto; }
 .adm-page-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .adm-page-head h1 { margin: 0; font-size: 22px; }
 .adm-page-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 70ch; }
@@ -993,6 +995,7 @@ tr.adm-failed-row td { background: var(--adm-warn-bg); }
 .adm-btn.danger { color: var(--adm-warn); }
 .adm-btn.danger:hover { border-color: var(--adm-warn); }
 .adm-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.adm-row-actions .adm-btn { white-space: nowrap; }
 .adm-panel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 14px 18px; background: var(--sub-bg); border-bottom: 1px solid var(--border); }
 .adm-panel[hidden], .adm-main [hidden] { display: none; }
 .adm-panel label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted); }
