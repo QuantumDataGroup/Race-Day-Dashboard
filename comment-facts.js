@@ -156,8 +156,10 @@ const RULES = [
   },
   {
     claim: 'first-up / after a break',
-    // "his second start after a significant break" is second-up.
-    skipBefore: /\bsecond\b[^.;]{0,30}$/i,
+    // "his second start after a significant break" is second-up; "showed
+    // promise in her last race after a break" (Vaal R4 28 Oct 2026) is about
+    // that earlier race, not today's.
+    skipBefore: /\bsecond\b[^.;]{0,30}$|\b(?:last|previous|latest|prior|most recent)\s+(?:race|start|run|outing|time|effort|appearance)\b[^.;]{0,25}$|\b(?:showed|shown|ran|was|finished|won|placed|raced|performed|returned|came|resumed)\b[^.;]{0,40}$/i,
     re: /\b(?:first[- ]up|resum(?:es|ing)|returns? (?:from|after) (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence|rest)|after (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence)|first (?:run|start|outing) (?:back|since)|fresh(?:ened)? up)\b/gi,
     check(f) {
       const last = f.runs[0];
