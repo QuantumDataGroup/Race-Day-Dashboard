@@ -158,39 +158,67 @@
       if (!data.canTicket || i.ignoredBy) return '';
       return '<button type="button" class="adm-btn" data-cc-ticket="' + esc(i.raceId) + '"><i class="fa-solid fa-ticket"></i> Open ticket</button>';
     }
-    function ticketText(raceId) {
+    // Same layout as the race popup's ticket (views/dashboard.html
+    // ticketDetails / commentIssueLines): named after the comment, no jump
+    // time or status, each finding spelt out (28 Oct 2026, per Dinesh).
+    // detail: the race from /api/race (name, class, distance, runners), or null.
+    function commentIssueLabel(facts) {
+      var race = facts.some(function (f) { return f.where === 'race comment'; });
+      var runner = facts.some(function (f) { return f.where === 'runner comment'; });
+      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
+    }
+    function ticketText(raceId, detail) {
       var list = data.items.filter(function (i) { return i.raceId === raceId && !i.ignoredBy; });
       var r = list[0];
-      var start = Date.parse(r.startUtc);
-      var lines = [
-        'Race: ' + r.meeting + ' (' + r.country + ') R' + r.rNo + ' · Thoroughbred',
-        'Date: ' + dayLabel(r.date) + ' · Jump: ' + (r.time ? r.time + ' local / ' : '') +
-          new Date(start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' }) + ' Sri Lanka / ' + new Date(start).toISOString().slice(11, 16) + ' UTC',
-        'Status: Not run yet (starts ' + inText(r.startUtc) + ')',
-        'Race ID: ' + r.raceId,
-        '',
-        'Issue: Comment says something the horse\'s form doesn\'t show (' + list.length + ')',
-      ];
-      var comments = [];
+      var cap = function (t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; };
+      var label = commentIssueLabel(list);
+      var dateLong = new Date(r.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+      var lines = ['Race: ' + r.meeting + ' (' + r.country + ') R' + r.rNo + (detail && detail.rName ? ' – ' + detail.rName : '')];
+      if (detail) {
+        var runners = detail.runners || [];
+        var scratched = runners.filter(function (x) { return x.isScratched; }).length;
+        lines.push('Code: ' + (detail.disciplineLabel || 'Thoroughbred') + (detail.rClass ? ' · Class: ' + detail.rClass : '') + (detail.rDistance ? ' · Distance: ' + detail.rDistance + 'm' : ''));
+        lines.push('Date: ' + dateLong + ' · Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
+      } else {
+        lines.push('Code: Thoroughbred');
+        lines.push('Date: ' + dateLong);
+      }
+      lines.push('Race ID: ' + r.raceId);
+      lines.push('');
+      lines.push('Issue: ' + label + ' (' + list.length + ')');
+      lines.push('The comment below says something about the horse that its form doesn\'t show. Please check it and correct the comment.');
+      var shown = [];
       list.forEach(function (i, n) {
         lines.push('');
-        lines.push((n + 1) + '. #' + i.tab + ' ' + i.horse + ' – ' + i.where + ' (' + i.claim + ')');
-        lines.push('   Comment says: "' + i.quote + '"');
-        lines.push('   Form says: ' + i.why);
-        var c = i.where + '|' + (i.where === 'runner comment' ? i.tab : '') ;
-        if (i.comment && comments.indexOf(c) === -1) {
-          comments.push(c);
-          lines.push('   Full ' + i.where + ': ' + i.comment);
+        lines.push('—— ' + (n + 1) + ' of ' + list.length + ' ——');
+        lines.push('Horse: #' + i.tab + ' ' + i.horse);
+        lines.push('Where: ' + cap(i.where));
+        lines.push('What\'s wrong: ' + cap(i.claim));
+        lines.push('Comment says: "' + i.quote + '"');
+        lines.push('Form shows: ' + i.why);
+        if (i.recent) lines.push('Last 3 runs: ' + i.recent);
+        var c = i.where + '|' + (i.where === 'runner comment' ? i.tab : '');
+        if (i.comment && shown.indexOf(c) === -1) {
+          shown.push(c);
+          lines.push(cap(i.where) + ' (full):');
+          lines.push(i.comment);
         }
       });
-      return { title: '[Comment check] ' + r.meeting + ' R' + r.rNo + ' (' + r.country + ') · ' + dayLabel(r.date), details: lines.join('\n'), race: r };
+      return { title: '[' + label + '] ' + r.meeting + ' R' + r.rNo + ' (' + r.country + ') · ' + dayLabel(r.date), details: lines.join('\n'), race: r };
     }
     function closeTicketDialog() {
       var d = document.getElementById('tkDialog');
       if (d) d.remove();
     }
+    // The race's name, class and runners first (a second or so); without them if that fails.
     function openTicketDialog(raceId) {
-      var t = ticketText(raceId);
+      fetch('/api/race/' + encodeURIComponent(raceId))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (detail) { showTicketDialog(raceId, detail); });
+    }
+    function showTicketDialog(raceId, detail) {
+      var t = ticketText(raceId, detail);
       var mins = (Date.parse(t.race.startUtc) - Date.now()) / 60000;
       var prio = mins <= 30 ? 'urgent' : mins <= 60 ? 'high' : 'normal';
       closeTicketDialog();
@@ -202,7 +230,7 @@
         '<button type="button" class="adm-btn" id="tkClose" aria-label="Close">&times;</button></div>' +
         '<div class="tk-dialog-body">' +
         '<label>Title<input type="text" id="tkTitle" maxlength="250" value="' + esc(t.title) + '"></label>' +
-        '<label>Details (every finding of this race not ignored)<textarea id="tkDetails" rows="14">' + esc(t.details) + '</textarea></label>' +
+        '<label>Details (every finding of this race not ignored)<textarea id="tkDetails" rows="18">' + esc(t.details) + '</textarea></label>' +
         '<div class="tk-dialog-row"><label>Priority<select id="tkPriority">' +
         [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']].map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === prio ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
         '</select></label></div></div>' +
