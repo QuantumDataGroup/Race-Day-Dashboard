@@ -5361,7 +5361,8 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), async (req, r
   // Comment tickets (28 Oct 2026, per Dinesh: "comments-ku ticket open
   // pannanum"): one per race, issue code 'comment-check'; the open ones here.
   const tickets = {};
-  if (clickup.enabled && accessOf(req).work) {
+  // ?lite=1: the dashboard grid's red marks, no tickets needed.
+  if (clickup.enabled && accessOf(req).work && req.query.lite !== '1') {
     for (const raceId of new Set(items.map((i) => i.raceId))) {
       const t = await clickup.ticketForIssue(`${raceId}|comment-check`).catch(() => null);
       if (t) tickets[raceId] = { id: t.id, url: t.url, statusLabel: t.statusLabel };
