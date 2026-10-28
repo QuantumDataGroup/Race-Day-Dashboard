@@ -454,8 +454,10 @@ function isAdmin(req) {
 // plus user management; anyone else only the ones an admin ticked for them.
 // 'overview' (Oct 2026): the Overview page and its issue workflow -- a
 // top-level page, not an admin-area section, so it doesn't add the Admin link.
-const PERMISSIONS = ['activity', 'health', 'changes', 'missing', 'overview'];
-const ADMIN_AREA_PERMISSIONS = ['activity', 'health', 'changes', 'missing'];
+// 'commentChecks' (28 Oct 2026, per Dinesh: "inda page a also access
+// kudukkura madhri seinga"): the Comment Checks page, given like the others.
+const PERMISSIONS = ['activity', 'health', 'changes', 'missing', 'overview', 'commentChecks'];
+const ADMIN_AREA_PERMISSIONS = ['activity', 'health', 'changes', 'missing', 'commentChecks'];
 // User type (12 Oct 2026, per Dinesh): an admin picks User ('work': can make
 // dashboard changes -- Confirm / Ignore, issue status, tickets, alerts) or
 // View (looks only) for every non-admin, separate from the sections ticked.
@@ -476,8 +478,6 @@ function accessOf(req) {
   PERMISSIONS.forEach((p) => { access[p] = admin || granted.has(p); });
   access.any = ADMIN_AREA_PERMISSIONS.some((p) => access[p]);
   access.work = userType(user) !== 'view';
-  // Comment Checks page (27 Oct 2026): master admins only, see MASTER_ADMINS.
-  access.commentChecks = admin && MASTER_ADMINS.includes(String(user.username || '').toLowerCase());
   return access;
 }
 function cleanPermissions(list) {
@@ -3895,13 +3895,12 @@ app.get('/api/race/:id', async (req, res) => {
     logActivity(req, 'view-race', { detail: `${doc.rCourseDisplayName || doc.rCourse} R${doc.rNo} (${doc.rCountry}) ${doc.rDate}` }, { key: req.params.id, ms: 10 * 60 * 1000 });
     // canIgnoreRunnerCheck: the popup's runner check Ignore buttons, for
     // users with the Missing Data section (same as its Ignore endpoint).
-    // commentFacts: the comment fact check, master admin only (27 Oct 2026).
-    // commentFacts / weightChecks: master admin only (27 / 28 Oct 2026).
-    const master = isMasterAdmin(req);
+    // commentFacts: users with the Comment Checks page (28 Oct 2026);
+    // weightChecks: master admin only (28 Oct 2026).
     res.json({
       ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing),
-      commentFacts: master ? (doc.commentFacts || []).filter((f) => !commentFactIgnores[commentFactKey(doc._id, f)]) : [],
-      weightChecks: master ? (doc.weightChecks || []) : [],
+      commentFacts: accessOf(req).commentChecks ? (doc.commentFacts || []).filter((f) => !commentFactIgnores[commentFactKey(doc._id, f)]) : [],
+      weightChecks: isMasterAdmin(req) ? (doc.weightChecks || []) : [],
     });
     prefetchMeetingRaces(doc);
   } catch (err) {
@@ -5359,7 +5358,7 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), (req, res) =>
     everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
   });
 });
-app.post('/api/comment-checks/ignore', requirePermission('commentChecks'), (req, res) => {
+app.post('/api/comment-checks/ignore', requirePermission('commentChecks'), requireWork, (req, res) => {
   const { key, ignored, label } = req.body || {};
   if (!key || typeof key !== 'string' || key.length > 400) return res.status(400).json({ error: 'key is required' });
   logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Comment check ignored: ${String(label || key).slice(0, 200)}` });
