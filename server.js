@@ -2059,7 +2059,7 @@ function applyRacecardApi(doc, card, pending) {
 function commentFactsFor(doc, raceClass) {
   if (doc.rDiscipline !== 'T') return [];
   const runners = (doc.runners || []).filter((r) => !r.isScratched);
-  const race = { rDate: doc.rDate, rCountry: doc.rCountry, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
+  const race = { rDate: doc.rDate, rCountry: doc.rCountry, rDistance: doc.rDistance, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
   const out = [];
   // comment: the whole comment, for the ticket (28 Oct 2026).
   const add = (r, where, text, comment) => {
@@ -2071,6 +2071,11 @@ function commentFactsFor(doc, raceClass) {
     ms.forEach((m, i) => {
       if (!horses[i]) return;
       let text = sentence.slice(i === 0 ? 0 : m.index, i + 1 < ms.length ? ms[i + 1].index : sentence.length);
+      // A name not in capitals ("I'mamaterialgirl (2)") still starts another
+      // horse's part (Laurel R10 28 Oct 2026): cut at the next "(n)".
+      const own = /\(\d{1,2}\)/.exec(text);
+      const nextTab = own ? /\(\d{1,2}\)/.exec(text.slice(own.index + own[0].length)) : null;
+      if (nextTab) text = text.slice(0, own.index + own[0].length + nextTab.index);
       // "Both A (4) and B (5) ..., with the former coming off a win and the
       // latter ...": the former's part is A's (Will Rogers Downs R4 27 Oct).
       const former = i > 0 ? /\bthe former\b/i.exec(text) : null;
