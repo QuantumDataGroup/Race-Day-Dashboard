@@ -1603,7 +1603,7 @@
       var issues = raceIssuesForTickets(race);
       // Comment check findings (28 Oct 2026, per Dinesh: a ticket for them
       // too) -- the same per-race ticket as the Comment Checks page's.
-      if ((race.commentFacts || []).length) issues = issues.concat([{ code: 'comment-check', texts: ['Comment check (' + race.commentFacts.length + ')'] }]);
+      if ((race.commentFacts || []).length) issues = issues.concat([{ code: 'comment-check', texts: [commentIssueLabel(race.commentFacts) + ' (' + race.commentFacts.length + ')'] }]);
       if (!issues.length) return;
       _ticketCtx = { race: race, issues: issues, tickets: {}, members: [], enabled: null };
       var draw = function () {
@@ -1640,41 +1640,13 @@
       var dateLong = race.date ? new Date(race.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
       lines.push('Race: ' + race.meeting + ' (' + race.country + ') R' + race.rNo + (race.rName ? ' – ' + race.rName : ''));
       lines.push('Code: ' + race.disciplineLabel + (race.rClass ? ' · Class: ' + race.rClass : '') + (race.rDistance ? ' · Distance: ' + race.rDistance + 'm' : ''));
-      var start = Date.parse(race.startUtc || '');
-      var jump = [];
-      if (race.timeLabel) jump.push(race.timeLabel + ' local');
-      if (isFinite(start)) {
-        jump.push(new Date(start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' }) + ' Sri Lanka');
-        jump.push(new Date(start).toISOString().slice(11, 16) + ' UTC');
-      }
-      lines.push('Date: ' + dateLong + (jump.length ? ' · Jump: ' + jump.join(' / ') : ''));
-      var status = '';
-      if (race.hasResult) status = 'Resulted' + (race.resultString ? ' (' + race.resultString + ')' : '');
-      else if (isFinite(start)) {
-        var mins = Math.round((start - Date.now()) / 60000);
-        var span = function (m) { return m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min'; };
-        status = mins > 0 ? 'Not run yet (starts in ' + span(mins) + ')' : 'Ran ' + span(-mins) + ' ago, no result yet';
-      }
+      // No jump time or status line (28 Oct 2026, per Dinesh).
       var runners = race.runners || [];
       var scratched = runners.filter(function (r) { return r.isScratched; }).length;
-      lines.push((status ? 'Status: ' + status + ' · ' : '') + 'Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
+      lines.push('Date: ' + dateLong + ' · Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
       lines.push('Race ID: ' + race.id);
       lines.push('');
-      if (issue.code === 'comment-check') {
-        // What each comment says vs the form, with the whole comment once.
-        var facts = race.commentFacts || [];
-        var shown = [];
-        lines.push('Issue: Comment says something the horse\'s form doesn\'t show (' + facts.length + ')');
-        facts.forEach(function (f, n) {
-          lines.push('');
-          lines.push((n + 1) + '. #' + f.tab + ' ' + f.horse + ' – ' + f.where + ' (' + f.claim + ')');
-          lines.push('   Comment says: "' + f.quote + '"');
-          lines.push('   Form says: ' + f.why);
-          var c = f.where + '|' + (f.where === 'runner comment' ? f.tab : '');
-          if (f.comment && shown.indexOf(c) === -1) { shown.push(c); lines.push('   Full ' + f.where + ': ' + f.comment); }
-        });
-        return lines.join('\n');
-      }
+      if (issue.code === 'comment-check') return lines.concat(commentIssueLines(race.commentFacts || [])).join('\n');
       lines.push('Issue: ' + label);
       issue.texts.forEach(function (t) { lines.push(' · ' + t); });
       // The runners whose Issue column shows this issue (a runners check one:
@@ -1691,6 +1663,38 @@
         });
       }
       return lines.join('\n');
+    }
+    // Comment check tickets (28 Oct 2026, per Dinesh): named after the comment
+    // ("Runner Comment Issue" / "Race Comment Issue"), and each finding spelt
+    // out -- horse, which comment, what's wrong, what it says, what the form
+    // shows, the last three runs -- with the whole comment under it once.
+    function commentIssueLabel(facts) {
+      var race = facts.some(function (f) { return f.where === 'race comment'; });
+      var runner = facts.some(function (f) { return f.where === 'runner comment'; });
+      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
+    }
+    function commentIssueLines(facts) {
+      var cap = function (t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; };
+      var lines = ['Issue: ' + commentIssueLabel(facts) + ' (' + facts.length + ')',
+        'The comment below says something about the horse that its form doesn\'t show. Please check it and correct the comment.'];
+      var shown = [];
+      facts.forEach(function (f, n) {
+        lines.push('');
+        lines.push('—— ' + (n + 1) + ' of ' + facts.length + ' ——');
+        lines.push('Horse: #' + f.tab + ' ' + f.horse);
+        lines.push('Where: ' + cap(f.where));
+        lines.push('What\'s wrong: ' + cap(f.claim));
+        lines.push('Comment says: "' + f.quote + '"');
+        lines.push('Form shows: ' + f.why);
+        if (f.recent) lines.push('Last 3 runs: ' + f.recent);
+        var c = f.where + '|' + (f.where === 'runner comment' ? f.tab : '');
+        if (f.comment && shown.indexOf(c) === -1) {
+          shown.push(c);
+          lines.push(cap(f.where) + ' (full):');
+          lines.push(f.comment);
+        }
+      });
+      return lines;
     }
     function closeTicketDialog() {
       var d = document.getElementById('tkDialog');
@@ -1718,7 +1722,7 @@
         '<div class="tk-dialog-body">' +
         (notConnected ? '<p class="tk-dialog-msg ov-bad">' + escapeHtmlClient(ctx.reason) + '</p>' : '<p class="tk-dialog-msg ov-good"><i class="fa-solid fa-check"></i> No open ticket yet for this race and issue.</p>') +
         '<label>Title<input type="text" id="tkTitle" maxlength="250" value="' + escapeHtmlClient(title) + '"></label>' +
-        '<label>Details (filled in from the race)<textarea id="tkDetails" rows="14">' + escapeHtmlClient(details) + '</textarea></label>' +
+        '<label>Details (filled in from the race)<textarea id="tkDetails" rows="18">' + escapeHtmlClient(details) + '</textarea></label>' +
         '<div class="tk-dialog-row">' +
         '<label>Priority<select id="tkPriority">' + [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']].map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === prio ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') + '</select></label>' +
         '<label>Developer (optional)<select id="tkDev">' + devOptions + '</select></label>' +
