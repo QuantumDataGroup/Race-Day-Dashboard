@@ -89,6 +89,7 @@
           <label class="adm-check"><input type="checkbox" class="newPerm" value="changes"> Data Changes</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="missing"> Missing Data</label>
           <label class="adm-check"><input type="checkbox" class="newPerm" value="overview"> Overview</label>
+          <label class="adm-check"><input type="checkbox" class="newPerm" value="commentChecks"> Comment Checks</label>
           <label class="adm-check adm-check-admin"><input type="checkbox" id="newAdmin"> Admin (everything + add / delete users)</label>
         </fieldset>
         <p class="adm-msg" id="addUserMsg" hidden></p>
@@ -218,7 +219,7 @@
       return d;
     }
 
-    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Data'], ['overview', 'Overview']];
+    var SECTIONS = [['activity', 'User Activity'], ['health', 'System Health'], ['changes', 'Data Changes'], ['missing', 'Missing Data'], ['overview', 'Overview'], ['commentChecks', 'Comment Checks']];
     var COLS = 10;
     function accessChips(u) {
       if (u.role === 'admin') return '<span class="adm-chip-tag all">All + manage users</span>';

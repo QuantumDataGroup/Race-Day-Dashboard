@@ -1166,11 +1166,11 @@
     }
 
     // Comment fact check (27 Oct 2026, per Dinesh): what a comment says about
-    // a horse's form vs its form lines. The server only sends it to the master admin.
+    // a horse's form vs its form lines. The server sends it to users with Comment Checks.
     function commentFactsHtml(race) {
       var facts = race.commentFacts || [];
       if (!facts.length) return '';
-      return '<div class="cf-warn"><div class="cf-head"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Comment check <span class="cf-only">only you</span></div><ul>' +
+      return '<div class="cf-warn"><div class="cf-head"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Comment check</div><ul>' +
         facts.map(function (f) {
           return '<li><b>' + (f.tab != null ? escapeHtmlClient(String(f.tab)) + '. ' : '') + escapeHtmlClient(f.horse) + '</b> <span class="cf-where">' + escapeHtmlClient(f.where) + '</span> ' +
             '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + '</li>';

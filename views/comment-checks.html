@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/pager.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -35,12 +36,13 @@
 
   <!-- Comment Checks (27 Oct 2026, per Dinesh: "Inda Warning enakku wera oru
        pagela thanga"): what race / runner comments say about a horse's form
-       that its form lines say otherwise (comment-facts.js). Master admins only. -->
+       that its form lines say otherwise (comment-facts.js). Admins, and users given
+       "Comment Checks" on the Admin page (28 Oct 2026). -->
   <main class="adm-main">
     {{ADMIN_TABS_HTML}}
     <div class="adm-page-head">
       <div>
-        <h1>Comment Checks <span class="cf-only">only you</span></h1>
+        <h1>Comment Checks</h1>
       </div>
       <div class="chg-last-check"><span class="chg-dot" id="checkDot"></span>Last check: <b id="lastCheck">-</b></div>
     </div>
@@ -69,8 +71,9 @@
           <tbody id="rows"><tr><td colspan="4" class="adm-empty">Loading...</td></tr></tbody>
         </table>
       </div>
+      <div id="ccPager"></div>
     </section>
-    <p class="adm-foot">Checked every <span id="every">10</span> minutes: Thoroughbred races not run yet in the next <span id="window">12</span> hours. What the race comment and runner comments say about a horse (recent / last-start win, last-start placing, result at a course, step up / drop in class, first-up, maiden, debut, track / distance record) is compared with its form lines. A run missing from the form lines can make a correct comment look wrong, so check the race before changing it. A new finding is also sent to your phone / PC as a notification.</p>
+    <p class="adm-foot">Checked every <span id="every">10</span> minutes: Thoroughbred races not run yet in the next <span id="window">12</span> hours. What the race comment and runner comments say about a horse (recent / last-start win, last-start placing, result at a course, step up / drop in class, first-up, maiden, debut, track / distance record) is compared with its form lines. A run missing from the form lines can make a correct comment look wrong, so check the race before changing it. New findings are also pushed to the master admin's phone / PC.</p>
   </main>
 
   <script>
@@ -87,6 +90,8 @@
     }
 
     var data = null;
+    // 10 / 25 / 50 / 100 a page (public/pager.js; 28 Oct 2026, per Dinesh).
+    var ccPager = RddPager.create(document.getElementById('ccPager'), function () { render(); }, { label: 'findings' });
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function hhmm(iso) { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
     function dayLabel(d) {
@@ -123,11 +128,12 @@
       });
       var body = document.getElementById('rows');
       if (!rows.length) {
+        ccPager.slice(rows);
         body.innerHTML = '<tr><td colspan="4" class="adm-empty"><i class="fa-solid fa-circle-check"></i> ' +
           (data.items.length ? 'Nothing matches the filters.' : (data.lastRunAt ? 'No comment disagrees with the form right now.' : 'The first check runs about 2 minutes after the server starts.')) + '</td></tr>';
         return;
       }
-      body.innerHTML = rows.map(function (i) {
+      body.innerHTML = ccPager.slice(rows).map(function (i) {
         var soon = (Date.parse(i.startUtc) - Date.now()) / 60000 <= 30;
         // Ignore / Undo (28 Oct 2026, per Dinesh): an ignored finding stays, greyed.
         var action = i.ignoredBy
@@ -203,8 +209,9 @@
           document.getElementById('loadError').hidden = false;
         });
     }
-    ['fDate', 'fCountry', 'fClaim'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
-    document.getElementById('fText').addEventListener('input', render);
+    function refilter() { ccPager.reset(); render(); }
+    ['fDate', 'fCountry', 'fClaim'].forEach(function (id) { document.getElementById(id).addEventListener('change', refilter); });
+    document.getElementById('fText').addEventListener('input', refilter);
 
     (function init() {
       var savedTheme = 'dark';
