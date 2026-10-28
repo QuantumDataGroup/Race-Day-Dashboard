@@ -2487,6 +2487,7 @@ async function loadRaceById(id) {
     if (doc.rDiscipline === 'T') applyRacecardApi(doc, await freshCard);
     attachRunnersCheck([doc]);
     doc.commentFacts = commentFactsFor(doc);
+    syncCommentFactsFrom(doc);
   }
   return doc;
 }
@@ -5243,6 +5244,34 @@ function startMs(doc) {
   const raw = String(doc.rScheduleTimeUTC || '');
   return Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`);
 }
+// A race's line on the Comment Checks page (and its push), or null.
+function commentFactEntry(d, facts) {
+  if (!facts.length) return null;
+  // Ignored ones stay on the page (with Undo) but aren't pushed.
+  const lines = facts.filter((f) => !commentFactIgnores[commentFactKey(d._id, f)]).map(commentFactLine);
+  return {
+    key: lines.length ? `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}` : null,
+    raceId: d._id, date: d.rDate, meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, time: (parseClock(d.rScheduleTime) || {}).label || '',
+    startUtc: new Date(startMs(d)).toISOString(),
+    raceUrl: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
+    title: `Comment check · ${d.rCourseDisplayName} R${d.rNo} (${d.rCountry})`,
+    body: lines.join('\n'),
+    lines,
+    facts,
+  };
+}
+// A race opened in the popup is checked on its freshest comments: the page
+// follows straight away (28 Oct 2026) instead of at the next run.
+function syncCommentFactsFrom(doc) {
+  const had = commentFactState.byRace.get(doc._id);
+  const listed = commentFactState.open.some((a) => a.raceId === doc._id);
+  if (!had && !listed && !doc.commentFacts.length) return;
+  if (!(startMs(doc) > Date.now())) return;
+  commentFactState.byRace.set(doc._id, { hash: null, at: Date.now(), facts: doc.commentFacts });
+  const entry = commentFactEntry(doc, doc.commentFacts);
+  commentFactState.open = commentFactState.open.filter((a) => a.raceId !== doc._id).concat(entry ? [entry] : [])
+    .sort((a, b) => a.startUtc.localeCompare(b.startUtc));
+}
 async function dispatchCommentFactAlerts() {
   if (commentFactState.running) return;
   commentFactState.running = true;
@@ -5258,6 +5287,13 @@ async function dispatchCommentFactAlerts() {
         if (!d.raceComment && !(d.runners || []).some((r) => r.runnerComment)) continue;
         races.push(d);
       }
+    }
+    // Races with findings: their comments fresh from the racecard API first,
+    // so a fixed comment leaves the page at the next run (28 Oct 2026, per
+    // Dinesh: Dawwaas fixed but still shown -- the 10-minute copy lagged).
+    const flagged = races.filter((d) => ((commentFactState.byRace.get(d._id) || {}).facts || []).length);
+    for (let i = 0; i < flagged.length; i += 4) {
+      await Promise.all(flagged.slice(i, i + 4).map((d) => fetchRacecardCard(d._id).then((card) => applyRacecardApi(d, card)).catch(() => null)));
     }
     const hashOf = (d) => crypto.createHash('sha1').update([d.raceComment || '', ...(d.runners || []).map((r) => `${r.tabNo}|${r.isScratched ? 'S' : ''}|${r.runnerComment || ''}`)].join('\n')).digest('hex');
     const todo = races.filter((d) => {
@@ -5277,20 +5313,8 @@ async function dispatchCommentFactAlerts() {
     for (const id of commentFactState.byRace.keys()) if (!live.has(id)) commentFactState.byRace.delete(id);
     const open = [];
     for (const d of races) {
-      const facts = (commentFactState.byRace.get(d._id) || {}).facts || [];
-      if (!facts.length) continue;
-      // Ignored ones stay on the page (with Undo) but aren't pushed.
-      const lines = facts.filter((f) => !commentFactIgnores[commentFactKey(d._id, f)]).map(commentFactLine);
-      open.push({
-        key: lines.length ? `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}` : null,
-        raceId: d._id, date: d.rDate, meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, time: (parseClock(d.rScheduleTime) || {}).label || '',
-        startUtc: new Date(startMs(d)).toISOString(),
-        raceUrl: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
-        title: `Comment check · ${d.rCourseDisplayName} R${d.rNo} (${d.rCountry})`,
-        body: lines.join('\n'),
-        lines,
-        facts,
-      });
+      const entry = commentFactEntry(d, (commentFactState.byRace.get(d._id) || {}).facts || []);
+      if (entry) open.push(entry);
     }
     open.sort((a, b) => a.startUtc.localeCompare(b.startUtc));
     Object.assign(commentFactState, { open, races: races.length, lastRunAt: new Date(nowMs).toISOString(), lastError: null });
