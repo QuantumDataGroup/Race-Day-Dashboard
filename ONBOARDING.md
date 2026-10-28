@@ -423,10 +423,17 @@ and fix times start the day this went live. Kept 40 days.
 `CLICKUP_LIST_ID` (Portainer env; never in code/chat) — pages and the
 popup then say "not connected". Race popup: a **ClickUp ticket** bar lists
 the race's issues (from the grid cell's `data-issues`); a button opens a
-prefilled form (title, race + issue details + link, priority from the start
-time, optional developer) → `POST /api/tickets`, assigned to the first admin
-with a ClickUp email (or `CLICKUP_OWNER_EMAIL`), tags data-issue / issue /
-country. One open ticket per issue (duplicates link to the existing one).
+prefilled form (title, `ticketDetails`: race + name, code / class /
+distance, jump time local / Sri Lanka / UTC, status, runners, race ID, the
+issue and the runners with it — no race link or "Raised from" line since 28
+Oct 2026, per Dinesh; priority from the start time, optional developer) →
+`POST /api/tickets`, assigned to the first admin with a ClickUp email (or
+`CLICKUP_OWNER_EMAIL`), tags data-issue / issue / country. New tickets go to
+the **"Support related tasks"** list (`901613174764`, `CLICKUP_TICKET_LIST_ID`
+overrides; 28 Oct 2026); `CLICKUP_LIST_ID`'s list is still read for older
+tickets. From the support list only the dashboard's tickets (tag `data-issue`
+or in `tickets.json`) are listed and reminded — never the team's other tasks.
+One open ticket per issue (duplicates link to the existing one).
 **All tickets** (admin): tickets in the list assigned to them, To Do / In
 Progress / Review / Done / Ignored, developer dropdown (adds the assignee in
 ClickUp + a comment), Ignore (dashboard only), "Data now" (issue still in
