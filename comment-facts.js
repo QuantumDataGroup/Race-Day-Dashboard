@@ -198,9 +198,12 @@ const RULES = [
   },
   {
     claim: 'debut',
-    re: /\b(?:makes? (?:his|her|its) (?:racecourse |career )?debut|debutant|first[- ]starter|on debut today)\b/gi,
+    // "no prior form" / "unraced" say the same (28 Oct 2026; "no recent form" is poor form, not this).
+    re: /\b(?:makes? (?:his|her|its) (?:racecourse |career )?debut|debutant|first[- ]starter|on debut today|unraced|yet to (?:race|run|start|face the starter)|never (?:raced|run)|no (?:prior|previous|past|race) (?:form|runs?|starts?|experience|race experience))\b/gi,
     check(f, m, text) {
-      if (/\b(?:for|with|over|in|at|under)\b/i.test(clauseAfter(text, m.index + m[0].length).slice(0, 12))) return null;
+      // "debut for a new stable / over fences / in Britain" is no first start;
+      // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
+      if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
       // The career figures say no start: form lines then are another horse's.
       if (f.career) return f.career.starts > 0 ? `career ${f.career.text}` : null;
       return f.runs.length ? `${f.runs.length} runs in the form, last ${runText(f.runs[0])}` : null;
