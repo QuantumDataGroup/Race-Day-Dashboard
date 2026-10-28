@@ -256,7 +256,8 @@ function checkClaims(text, runner, race) {
       const before = String(text).slice(Math.max(0, start - 40), start);
       if ((rule.negatable && NEGATED.test(before)) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
       const why = rule.check(f, m, String(text));
-      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why });
+      // recent: the last three runs, for the ticket (28 Oct 2026).
+      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why, recent: f.runs.slice(0, 3).map(runText).join(' · ') });
     }
   }
   return out;
