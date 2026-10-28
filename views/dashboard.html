@@ -1628,6 +1628,52 @@
       var m = (t - Date.now()) / 60000;
       return m <= 30 ? 'urgent' : m <= 60 ? 'high' : 'normal';
     }
+    // The ticket's details (28 Oct 2026, per Dinesh: no race link and no
+    // "Raised from the Race Day Dashboard by" line, more details instead):
+    // the race, its jump time in the venue / Sri Lanka / UTC, where it stands,
+    // the field, the race ID for the admin, the issue and the runners with it.
+    function ticketDetails(race, issue, label) {
+      var lines = [];
+      var dateLong = race.date ? new Date(race.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '';
+      lines.push('Race: ' + race.meeting + ' (' + race.country + ') R' + race.rNo + (race.rName ? ' – ' + race.rName : ''));
+      lines.push('Code: ' + race.disciplineLabel + (race.rClass ? ' · Class: ' + race.rClass : '') + (race.rDistance ? ' · Distance: ' + race.rDistance + 'm' : ''));
+      var start = Date.parse(race.startUtc || '');
+      var jump = [];
+      if (race.timeLabel) jump.push(race.timeLabel + ' local');
+      if (isFinite(start)) {
+        jump.push(new Date(start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' }) + ' Sri Lanka');
+        jump.push(new Date(start).toISOString().slice(11, 16) + ' UTC');
+      }
+      lines.push('Date: ' + dateLong + (jump.length ? ' · Jump: ' + jump.join(' / ') : ''));
+      var status = '';
+      if (race.hasResult) status = 'Resulted' + (race.resultString ? ' (' + race.resultString + ')' : '');
+      else if (isFinite(start)) {
+        var mins = Math.round((start - Date.now()) / 60000);
+        var span = function (m) { return m >= 60 ? Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : m + ' min'; };
+        status = mins > 0 ? 'Not run yet (starts in ' + span(mins) + ')' : 'Ran ' + span(-mins) + ' ago, no result yet';
+      }
+      var runners = race.runners || [];
+      var scratched = runners.filter(function (r) { return r.isScratched; }).length;
+      lines.push((status ? 'Status: ' + status + ' · ' : '') + 'Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
+      lines.push('Race ID: ' + race.id);
+      lines.push('');
+      lines.push('Issue: ' + label);
+      issue.texts.forEach(function (t) { lines.push(' · ' + t); });
+      // The runners whose Issue column shows this issue (a runners check one:
+      // every runner the check flagged).
+      var key = label.toLowerCase();
+      var flagged = runners.filter(function (r) {
+        return !r.isScratched && r.issue && (r.issue.toLowerCase().indexOf(key) !== -1 || (issue.code === 'runner-mismatch' && (r.runnerCheckItems || []).length));
+      });
+      if (flagged.length) {
+        lines.push('');
+        lines.push('Runners:');
+        flagged.forEach(function (r) {
+          lines.push(' · #' + r.tabNo + ' ' + r.horseName + (r.jockey ? ' (J: ' + r.jockey + ')' : '') + (r.barrierPosition ? ' · Barrier ' + r.barrierPosition : '') + ' — ' + r.issue);
+        });
+      }
+      return lines.join('\n');
+    }
     function closeTicketDialog() {
       var d = document.getElementById('tkDialog');
       if (d) d.remove();
@@ -1640,12 +1686,7 @@
       var label = issue.texts[0].split(' (')[0];
       var dateLabel = race.date ? new Date(race.date + 'T12:00:00Z').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '';
       var title = '[' + label + '] ' + race.meeting + ' R' + race.rNo + ' (' + race.country + ')' + (dateLabel ? ' · ' + dateLabel : '');
-      var link = location.origin + (race.url || '');
-      var me = (document.querySelector('.session-info strong') || {}).textContent || '';
-      var details = 'Race: ' + race.meeting + ' (' + race.country + ') R' + race.rNo + ' · ' + race.disciplineLabel + ' · ' + (race.date || '') + (race.timeLabel ? ', jump ' + race.timeLabel : '') + '\n' +
-        'Issue: ' + issue.texts.join('\n · ') + '\n' +
-        'Race link: ' + link + '\n' +
-        'Raised from the Race Day Dashboard by ' + me;
+      var details = ticketDetails(race, issue, label);
       var prio = ticketPriority(race);
       var notConnected = ctx.enabled === false;
       var devOptions = '<option value="">Not yet</option>' + (ctx.members || []).map(function (m) { return '<option value="' + escapeHtmlClient(m.id) + '">' + escapeHtmlClient(m.name) + '</option>'; }).join('');
@@ -1659,7 +1700,7 @@
         '<div class="tk-dialog-body">' +
         (notConnected ? '<p class="tk-dialog-msg ov-bad">' + escapeHtmlClient(ctx.reason) + '</p>' : '<p class="tk-dialog-msg ov-good"><i class="fa-solid fa-check"></i> No open ticket yet for this race and issue.</p>') +
         '<label>Title<input type="text" id="tkTitle" maxlength="250" value="' + escapeHtmlClient(title) + '"></label>' +
-        '<label>Details (filled in from the race)<textarea id="tkDetails" rows="6">' + escapeHtmlClient(details) + '</textarea></label>' +
+        '<label>Details (filled in from the race)<textarea id="tkDetails" rows="14">' + escapeHtmlClient(details) + '</textarea></label>' +
         '<div class="tk-dialog-row">' +
         '<label>Priority<select id="tkPriority">' + [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']].map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === prio ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') + '</select></label>' +
         '<label>Developer (optional)<select id="tkDev">' + devOptions + '</select></label>' +

@@ -813,7 +813,7 @@ async function runHealthChecks() {
   // ClickUp tickets (Oct 2026): a warning only when connected and failing.
   const cu = clickup.status();
   if (!cu.enabled) add('clickup', 'ClickUp tickets', 'ok', 'Not connected', 'Add CLICKUP_API_TOKEN and CLICKUP_LIST_ID to the server settings to turn tickets on');
-  else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `List ${cu.listId} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
+  else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `New tickets in list ${cu.ticketListId} ("Support related tasks")${cu.ticketListId !== cu.listId ? `, older ones still read from ${cu.listId}` : ''} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
 
   // Racecard API (20 Oct 2026): the comments the warnings check.
   const rcFails = racecardApi.failed && (!racecardApi.races || racecardApi.failed > racecardApi.races / 4);
