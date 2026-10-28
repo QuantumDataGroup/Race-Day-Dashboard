@@ -145,12 +145,106 @@
             '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div></td>' +
           '<td>' + (i.tab != null ? esc(i.tab) + '. ' : '') + esc(i.horse) + '<div class="cf-where">' + esc(i.where) + '</div></td>' +
           '<td>&ldquo;' + esc(i.quote) + '&rdquo;<div class="cc-why">' + esc(i.why) + '</div><div class="cf-where">' + esc(i.claim) + '</div></td>' +
-          '<td class="cc-actions"><a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' + action + '</td>' +
+          '<td class="cc-actions"><a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' + action + ticketCell(i) + '</td>' +
           '</tr>';
       }).join('');
     }
 
+    // ClickUp ticket (28 Oct 2026, per Dinesh: "comments-ku ticket open
+    // pannanum"): one per race, with every finding of it not ignored.
+    function ticketCell(i) {
+      var t = (data.tickets || {})[i.raceId];
+      if (t) return '<a class="tk-mark cc-ticket" href="' + esc(t.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket open (' + esc(t.statusLabel || 'to do') + ')</a>';
+      if (!data.canTicket || i.ignoredBy) return '';
+      return '<button type="button" class="adm-btn" data-cc-ticket="' + esc(i.raceId) + '"><i class="fa-solid fa-ticket"></i> Open ticket</button>';
+    }
+    function ticketText(raceId) {
+      var list = data.items.filter(function (i) { return i.raceId === raceId && !i.ignoredBy; });
+      var r = list[0];
+      var start = Date.parse(r.startUtc);
+      var lines = [
+        'Race: ' + r.meeting + ' (' + r.country + ') R' + r.rNo + ' · Thoroughbred',
+        'Date: ' + dayLabel(r.date) + ' · Jump: ' + (r.time ? r.time + ' local / ' : '') +
+          new Date(start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' }) + ' Sri Lanka / ' + new Date(start).toISOString().slice(11, 16) + ' UTC',
+        'Status: Not run yet (starts ' + inText(r.startUtc) + ')',
+        'Race ID: ' + r.raceId,
+        '',
+        'Issue: Comment says something the horse\'s form doesn\'t show (' + list.length + ')',
+      ];
+      var comments = [];
+      list.forEach(function (i, n) {
+        lines.push('');
+        lines.push((n + 1) + '. #' + i.tab + ' ' + i.horse + ' – ' + i.where + ' (' + i.claim + ')');
+        lines.push('   Comment says: "' + i.quote + '"');
+        lines.push('   Form says: ' + i.why);
+        var c = i.where + '|' + (i.where === 'runner comment' ? i.tab : '') ;
+        if (i.comment && comments.indexOf(c) === -1) {
+          comments.push(c);
+          lines.push('   Full ' + i.where + ': ' + i.comment);
+        }
+      });
+      return { title: '[Comment check] ' + r.meeting + ' R' + r.rNo + ' (' + r.country + ') · ' + dayLabel(r.date), details: lines.join('\n'), race: r };
+    }
+    function closeTicketDialog() {
+      var d = document.getElementById('tkDialog');
+      if (d) d.remove();
+    }
+    function openTicketDialog(raceId) {
+      var t = ticketText(raceId);
+      var mins = (Date.parse(t.race.startUtc) - Date.now()) / 60000;
+      var prio = mins <= 30 ? 'urgent' : mins <= 60 ? 'high' : 'normal';
+      closeTicketDialog();
+      var wrap = document.createElement('div');
+      wrap.className = 'tk-dialog';
+      wrap.id = 'tkDialog';
+      wrap.innerHTML = '<section class="tk-dialog-box" role="dialog" aria-modal="true" aria-labelledby="tkDlgTitle">' +
+        '<div class="tk-dialog-head"><h2 id="tkDlgTitle"><i class="fa-solid fa-ticket"></i> Open a ClickUp ticket</h2>' +
+        '<button type="button" class="adm-btn" id="tkClose" aria-label="Close">&times;</button></div>' +
+        '<div class="tk-dialog-body">' +
+        '<label>Title<input type="text" id="tkTitle" maxlength="250" value="' + esc(t.title) + '"></label>' +
+        '<label>Details (every finding of this race not ignored)<textarea id="tkDetails" rows="14">' + esc(t.details) + '</textarea></label>' +
+        '<div class="tk-dialog-row"><label>Priority<select id="tkPriority">' +
+        [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']].map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === prio ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
+        '</select></label></div></div>' +
+        '<div class="tk-dialog-foot"><span id="tkMsg">Goes to ClickUp "Support related tasks", assigned to the dashboard admin</span>' +
+        '<span><button type="button" class="adm-btn" id="tkCancel">Cancel</button> <button type="button" class="adm-btn primary" id="tkCreate">Create ticket</button></span></div>' +
+        '</section>';
+      wrap.addEventListener('click', function (e) { if (e.target === wrap || e.target.id === 'tkClose' || e.target.id === 'tkCancel') closeTicketDialog(); });
+      document.body.appendChild(wrap);
+      document.getElementById('tkCreate').addEventListener('click', function () { createTicket(raceId, t.race); });
+      document.getElementById('tkTitle').focus();
+    }
+    function createTicket(raceId, race) {
+      var btn = document.getElementById('tkCreate');
+      var msg = document.getElementById('tkMsg');
+      btn.disabled = true;
+      msg.textContent = 'Creating...';
+      fetch('/api/tickets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raceId: raceId, code: 'comment-check', date: race.date, country: race.country, raceUrl: location.origin + race.raceUrl,
+          title: document.getElementById('tkTitle').value, details: document.getElementById('tkDetails').value,
+          priority: document.getElementById('tkPriority').value,
+        }),
+      }).then(function (res) {
+        return res.json().then(function (j) {
+          if (res.status !== 201 && res.status !== 409) throw new Error(j.error || j.reason || ('Failed (' + res.status + ')'));
+          var tk = j.ticket;
+          data.tickets = data.tickets || {};
+          data.tickets[raceId] = { id: tk.id, url: tk.url, statusLabel: tk.statusLabel };
+          msg.innerHTML = (j.duplicate ? 'A ticket is already open for this race: ' : 'Ticket created: ') +
+            '<a href="' + esc(tk.url || '#') + '" target="_blank" rel="noopener">#' + esc(tk.id) + ' · open in ClickUp</a>';
+          render();
+        });
+      }).catch(function (err) {
+        msg.innerHTML = '<span class="ov-bad">' + esc(err.message) + '</span>';
+        btn.disabled = false;
+      });
+    }
+
     document.getElementById('rows').addEventListener('click', function (e) {
+      var tk = e.target.closest('[data-cc-ticket]');
+      if (tk) { openTicketDialog(tk.getAttribute('data-cc-ticket')); return; }
       var btn = e.target.closest('[data-cc-key]');
       if (!btn) return;
       var ignore = btn.getAttribute('data-cc-ignore') === '1';

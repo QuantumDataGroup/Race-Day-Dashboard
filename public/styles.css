@@ -516,6 +516,7 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
 .cc-why { color: var(--adm-warn); margin-top: 2px; }
 .cc-actions { white-space: nowrap; }
 .cc-actions .adm-btn + .adm-btn { margin-left: 6px; }
+.cc-actions .cc-ticket { display: flex; margin-top: 6px; }
 .cc-table tr.cc-ignored td:not(.cc-actions):not(:first-child) { opacity: .5; }
 .cc-table tr.cc-ignored .cc-why { color: var(--muted); text-decoration: line-through; }
 .cc-ignored-by { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; }
