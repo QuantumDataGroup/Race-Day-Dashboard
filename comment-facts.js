@@ -21,13 +21,15 @@ const daysBetween = (a, b) => Math.round((Date.parse(String(b).slice(0, 10)) - D
 const WORD_POS = { first: 1, '1st': 1, second: 2, '2nd': 2, 'runner-up': 2, third: 3, '3rd': 3, fourth: 4, '4th': 4, fifth: 5, '5th': 5 };
 
 // The horse's runs before today, newest first (trials left out).
-function runsBefore(runner, raceDate) {
+// withTrials: barrier trials too (see TRIALS_COUNT).
+function runsBefore(runner, raceDate, withTrials) {
   return (Array.isArray(runner.pastRaces) ? runner.pastRaces : [])
-    .filter((x) => x && x.Date && (!x.Type || String(x.Type).toUpperCase() === 'RACE') && String(x.Date).slice(0, 10) < raceDate)
+    .filter((x) => x && x.Date && (withTrials || !isTrial(x)) && String(x.Date).slice(0, 10) < raceDate)
     .sort((a, b) => String(b.Date).localeCompare(String(a.Date)));
 }
+const isTrial = (x) => Boolean(x.Type) && String(x.Type).toUpperCase() !== 'RACE';
 const posOf = (x) => (Number(x.FinishPosition) > 0 ? Number(x.FinishPosition) : null);
-const runText = (x) => `${posOf(x) ? ordinal(posOf(x)) : 'unplaced'} at ${x.Course || '?'} ${shortDate(x.Date)}`;
+const runText = (x) => `${posOf(x) ? ordinal(posOf(x)) : 'unplaced'}${isTrial(x) ? ' (trial)' : ''} at ${x.Course || '?'} ${shortDate(x.Date)}`;
 // "16:3-1-4" -> { starts, wins, places }
 function record(text) {
   const m = /^\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)/.exec(String(text || ''));
@@ -76,7 +78,7 @@ function clauseAfter(text, end) {
 }
 // Words just before a claim that turn it around: "lacks recent success",
 // "needs to find a win", "despite a lack of".
-const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from)\b[^.;,]{0,25}$/i;
+const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of)\b[^.;,]{0,25}$/i;
 // The form figures ("252379x314", newest last) as positions, newest first:
 // 0 = 10th or worse, letters (F, P, U...) = didn't finish; spells (x) dropped.
 function figures(text) {
@@ -94,15 +96,13 @@ const RULES = [
     re: /\b(?:just won|won (?:last start|last time(?: out)?|(?:his|her|its) (?:last|latest) (?:start|outing|race|run))|last[- ]start (?:win|winner|victory|success)|(?:coming|fresh|comes?|straight) off (?:a|an|his|her|its) (?:[a-z-]+ ){0,2}(?:win|victory|success|triumph)|off the back of (?:a|an|his|her|its) (?:[a-z-]+ ){0,2}(?:win|victory|success)|(?:won|scored|saluted) (?:at|on|in) (?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race)|broke (?:his|her|its) maiden last (?:start|time))/gi,
     check(f, m) {
       const last = f.runs[0];
-      if (!last || posOf(last) === 1) return null;
+      // No finishing position (not known) -- nothing to go on.
+      if (!last || !posOf(last) || posOf(last) === 1) return null;
       // "Coming off / fresh off / off the back of a win" is fine with a win
-      // in the last two runs within 60 days (28 Oct 2026, per Dinesh: Trinity
-      // State "coming off a solid maiden win" -- won its maiden 21 Sep, 2nd
-      // since). "Won last start" / "just won" still mean the last start.
-      if (/\boff\b/i.test(m[0])) {
-        const win = f.runs.slice(0, 2).find((x) => posOf(x) === 1);
-        if (win && daysBetween(win.Date, f.raceDate) <= 60) return null;
-      }
+      // in the last two runs (28 Oct 2026, per Dinesh: Trinity State "coming
+      // off a solid maiden win" -- won its maiden 21 Sep, 2nd since). "Won
+      // last start" / "just won" still mean the last start.
+      if (/\boff\b/i.test(m[0]) && f.runs.slice(0, 2).some((x) => posOf(x) === 1)) return null;
       return `last start ${runText(last)}`;
     },
   },
@@ -117,7 +117,11 @@ const RULES = [
       // The form lines can miss runs the figures have (Sujeed, "x314": a win the run before last).
       const fig = f.figures.indexOf(1);
       if (f.figures.length > f.runs.length && (fig === 0 || fig === 1)) return null;
-      if (i > 1 && daysBetween(f.runs[i].Date, f.raceDate) <= 45) return null;
+      // Recent enough: within 60 days, or two runs back within 120 days
+      // (28 Oct 2026, review: "has a recent win ... but has struggled after
+      // that", 56 days and 3 runs back, is fair).
+      if (i > 1 && daysBetween(f.runs[i].Date, f.raceDate) <= 60) return null;
+      if (i === 2 && daysBetween(f.runs[i].Date, f.raceDate) <= 120) return null;
       return i === -1
         ? `no win in the ${f.runs.length} runs shown; last start ${runText(f.runs[0])}`
         : `last win ${shortDate(f.runs[i].Date)} at ${f.runs[i].Course} (${i} runs ago); last start ${runText(f.runs[0])}`;
@@ -128,7 +132,7 @@ const RULES = [
     re: /\b(?:(close|narrow|tight|short-head|nose|neck|head)\s+)?(second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)(?:\s+place)?(?:\s+at\s+[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,2})?\s+(?:last (?:start|time(?: out)?|outing|run)|at (?:his|her|its) (?:last|latest) (?:start|outing|run)|(?:on|in) (?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race))\b|\blast[- ]start (second|2nd|third|3rd|runner-up)\b/gi,
     check(f, m) {
       const last = f.runs[0];
-      if (!last) return null;
+      if (!last || !posOf(last)) return null;
       const said = WORD_POS[String(m[2] || m[3] || '').toLowerCase()];
       if (said && posOf(last) !== said) return `last start ${runText(last)}`;
       const lengths = parseFloat(last.LengthsBehind);
@@ -167,9 +171,14 @@ const RULES = [
     // "his second start after a significant break" is second-up; "showed
     // promise in her last race after a break" (Vaal R4 28 Oct 2026) is about
     // that earlier race, not today's.
-    skipBefore: /\bsecond\b[^.;]{0,30}$|\b(?:last|previous|latest|prior|most recent)\s+(?:race|start|run|outing|time|effort|appearance)\b[^.;]{0,25}$|\b(?:showed|shown|ran|was|finished|won|placed|raced|performed|returned|came|resumed)\b[^.;]{0,40}$/i,
+    // "improvement after a layoff" is the run after the return (review 28 Oct 2026).
+    skipBefore: /\bsecond\b[^.;]{0,30}$|\b(?:last|previous|latest|prior|most recent)\s+(?:race|start|run|outing|time|effort|appearance)\b[^.;]{0,25}$|\b(?:showed|shown|ran|was|finished|won|placed|raced|performed|returned|came|resumed|improv\w*|benefit\w*|fitter|sharper|progress\w*)\b[^.;]{0,40}$/i,
     re: /\b(?:first[- ]up|resum(?:es|ing)|returns? (?:from|after) (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence|rest)|after (?:a |an )?(?:[a-z-]+ ){0,2}(?:break|spell|layoff|lay-off|absence)|first (?:run|start|outing) (?:back|since)|fresh(?:ened)? up)\b/gi,
-    check(f) {
+    check(f, m, text) {
+      // "a short break" is right for a few weeks; "absence from the winner's
+      // circle" is no break at all (review 28 Oct 2026).
+      if (/\b(?:short|brief|little|quick)\b/i.test(m[0])) return null;
+      if (/^\s*from the winner/i.test(text.slice(m.index + m[0].length))) return null;
       const last = f.runs[0];
       if (!last) return null;
       const gap = daysBetween(last.Date, f.raceDate);
@@ -192,16 +201,19 @@ const RULES = [
     re: /\b(?:makes? (?:his|her|its) (?:racecourse |career )?debut|debutant|first[- ]starter|on debut today)\b/gi,
     check(f, m, text) {
       if (/\b(?:for|with|over|in|at|under)\b/i.test(clauseAfter(text, m.index + m[0].length).slice(0, 12))) return null;
-      if (f.career && f.career.starts > 0) return `career ${f.career.text}`;
+      // The career figures say no start: form lines then are another horse's.
+      if (f.career) return f.career.starts > 0 ? `career ${f.career.text}` : null;
       return f.runs.length ? `${f.runs.length} runs in the form, last ${runText(f.runs[0])}` : null;
     },
   },
   {
     claim: 'record at this track',
     negatable: true,
-    re: /\b(?:(?:course|track)(?: and distance)? (?:winner|specialist)|c ?& ?d winner|(?:has |previously |already )?won (?:here|at this (?:track|course|venue)|at the (?:track|course|venue))|winner (?:here|at this (?:track|course|venue))|(?:strong|good|solid|excellent|impressive|great|fine|sound|proven|decent) (?:track |course )?(?:record|form) (?:(?:at|on|here at) (?:this|the) (?:track|course|venue)|here))\b/gi,
+    // No "winner here": "an unlikely winner here" is about today (review 28 Oct 2026).
+    re: /\b(?:(?:course|track)(?: and distance)? (?:winner|specialist)|c ?& ?d winner|(?:has |previously |already )?won (?:here|at this (?:track|course|venue)|at the (?:track|course|venue))|winner at this (?:track|course|venue)|(?:strong|good|solid|excellent|impressive|great|fine|sound|proven|decent) (?:track |course )?(?:record|form) (?:(?:at|on|here at) (?:this|the) (?:track|course|venue)|here))\b/gi,
     check(f, m) {
-      const winner = /winner|won|specialist/i.test(m[0]);
+      // A "specialist" with placings but no win is fair (review 28 Oct 2026).
+      const winner = /winner|won/i.test(m[0]);
       const cd = /distance|c ?& ?d/i.test(m[0]);
       const rec = cd ? f.trackDistance : f.track;
       if (!rec) return null;
@@ -218,7 +230,11 @@ const RULES = [
     check(f, m) {
       const rec = f.distance;
       if (!rec) return null;
-      if (/winner|won|proven/i.test(m[0]) ? rec.wins === 0 : rec.wins + rec.places === 0) return `distance record ${rec.text}`;
+      // "Proven" with placings is fair; a win the form shows at about today's
+      // distance (50 m either way) counts too (review 28 Oct 2026).
+      const won = /winner|won/i.test(m[0]);
+      if (won && f.raceDistance && f.allRuns.some((x) => posOf(x) === 1 && Math.abs(parseFloat(x.Distance) - f.raceDistance) <= 50)) return null;
+      if (won ? rec.wins === 0 : rec.wins + rec.places === 0) return `distance record ${rec.text}`;
       return null;
     },
   },
@@ -245,8 +261,10 @@ function checkClaims(text, runner, race) {
   const stats = runner.performanceStatistics || {};
   const f = {
     runs: runsBefore(runner, String(race.rDate || '').slice(0, 10)),
+    allRuns: runsBefore(runner, String(race.rDate || '').slice(0, 10), true),
     raceDate: String(race.rDate || '').slice(0, 10),
     raceClass: race.rClass || '',
+    raceDistance: parseFloat(race.rDistance) || null,
     country: race.rCountry,
     career: record(stats.career),
     track: record(stats.track),
@@ -263,14 +281,22 @@ function checkClaims(text, runner, race) {
       const end = m.index + m[0].length;
       if (spans.some(([a, b]) => start < b && end > a)) continue;
       spans.push([start, end]);
+      // All capitals is a horse's name ("RGS DEBUTANT"), not a claim (review 28 Oct 2026).
+      if (!/[a-z]/.test(m[0])) continue;
       const before = String(text).slice(Math.max(0, start - 40), start);
       if ((rule.negatable && NEGATED.test(before)) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
-      const why = rule.check(f, m, String(text));
-      // recent: the last three runs, for the ticket (28 Oct 2026).
-      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why, recent: f.runs.slice(0, 3).map(runText).join(' · ') });
+      let why = rule.check(f, m, String(text));
+      // A win / placing the comment can mean from a barrier trial is fine
+      // (28 Oct 2026, per Dinesh: Born To Fly "comes off an impressive win at
+      // Randwick" -- a trial win the form shows like a race).
+      if (why && TRIALS_COUNT.includes(rule.claim) && !rule.check({ ...f, runs: f.allRuns, figures: [] }, m, String(text))) why = null;
+      // recent: the last three runs (trials marked), for the ticket (28 Oct 2026).
+      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why, recent: f.allRuns.slice(0, 3).map(runText).join(' · ') });
     }
   }
   return out;
 }
+
+const TRIALS_COUNT = ['last-start win', 'recent win', 'last-start placing', 'result at a course'];
 
 module.exports = { checkClaims, classOf, compareClass };
