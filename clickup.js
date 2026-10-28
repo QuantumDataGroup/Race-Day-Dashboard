@@ -49,10 +49,18 @@ function statusKey(task) {
 // New tickets start in To Do, not the list's first status (Backlog).
 const NEW_TICKET_STATUS = 'to do';
 const REPORT_TAG = 'report';
+// Every dashboard ticket carries it (server.js POST /api/tickets).
+const TICKET_TAG = 'data-issue';
 
 function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => Date.now() }) {
   const token = env.CLICKUP_API_TOKEN || '';
   const listId = env.CLICKUP_LIST_ID || '';
+  // New tickets go to the "Support related tasks" list (28 Oct 2026, per
+  // Dinesh); CLICKUP_TICKET_LIST_ID overrides. CLICKUP_LIST_ID's list ("Race
+  // Day Dashboard Issues") is still read for the tickets raised there before.
+  // That list is the team's, so only the dashboard's own tickets in it count
+  // (see isDashboardTicket) -- no reminders on anyone else's tasks.
+  const ticketListId = env.CLICKUP_TICKET_LIST_ID || '901613174764';
   const baseUrl = (env.CLICKUP_API_BASE || API).replace(/\/$/, '');
   const enabled = Boolean(token && listId);
   // Critical race alerts go to a ClickUp Chat channel (Oct 2026, per Dinesh):
@@ -124,10 +132,10 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     return (await members()).find((m) => m.email === wanted) || null;
   }
 
-  async function allPages(query) {
+  async function allPages(query, list = listId) {
     const out = [];
     for (let page = 0; page < 20; page++) {
-      const json = await api('GET', `/list/${encodeURIComponent(listId)}/task?subtasks=true&page=${page}&${query}`);
+      const json = await api('GET', `/list/${encodeURIComponent(list)}/task?subtasks=true&page=${page}&${query}`);
       out.push(...(json.tasks || []));
       if (json.last_page !== false || !(json.tasks || []).length) break;
     }
@@ -138,14 +146,25 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     return Boolean(store.reports && store.reports[t.id]) || (t.tags || []).some((g) => g && g.name === REPORT_TAG);
   }
 
-  // Every open task in the list, plus tasks closed in the last 14 days.
+  // Raised from the dashboard: remembered in tickets.json, or carries its tag.
+  function isDashboardTicket(t) {
+    return Boolean(store.byTask[t.id] && store.byTask[t.id].raisedBy) || (t.tags || []).some((g) => g && g.name === TICKET_TAG);
+  }
+
+  // Every open task in the list, plus tasks closed in the last 14 days; from
+  // the ticket list, the dashboard's own tickets only.
   async function tasks(fresh) {
     if (!fresh && tasksCache && now() - tasksCache.at < TASKS_FRESH_MS) return tasksCache.list;
-    const open = await allPages('include_closed=false');
-    const recent = await allPages(`include_closed=true&date_updated_gt=${now() - 14 * 86400000}`);
+    const lists = [listId, ...(ticketListId && ticketListId !== listId ? [ticketListId] : [])];
+    const found = [];
+    for (const list of lists) {
+      const open = await allPages('include_closed=false', list);
+      const recent = await allPages(`include_closed=true&date_updated_gt=${now() - 14 * 86400000}`, list);
+      found.push(...[...open, ...recent].filter((t) => list === listId || isDashboardTicket(t)));
+    }
     const byId = new Map();
     // The daily / weekly report tasks share the list but aren't tickets.
-    for (const t of [...open, ...recent]) if (!isReportTask(t)) byId.set(t.id, t);
+    for (const t of found) if (!isReportTask(t)) byId.set(t.id, t);
     const list = [...byId.values()];
     tasksCache = { at: now(), list };
     return list;
@@ -203,11 +222,11 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
     };
     let task;
     try {
-      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, { ...body, status: NEW_TICKET_STATUS });
+      task = await api('POST', `/list/${encodeURIComponent(ticketListId || listId)}/task`, { ...body, status: NEW_TICKET_STATUS });
     } catch (err) {
       // A list without a "to do" status: the list's own first status then.
       if (!/status/i.test(err.message)) throw err;
-      task = await api('POST', `/list/${encodeURIComponent(listId)}/task`, body);
+      task = await api('POST', `/list/${encodeURIComponent(ticketListId || listId)}/task`, body);
     }
     store.byTask[task.id] = { issueKey: issueKey || null, raceDate: raceDate || null, raceUrl: raceUrl || null, raisedBy, raisedAt: new Date(now()).toISOString(), reminders: 0 };
     if (issueKey) store.byIssue[issueKey] = task.id;
@@ -315,7 +334,7 @@ function createClickUp({ dir, env = process.env, fetchImpl = fetch, now = () => 
   }
 
   function status() {
-    return { enabled, listId: enabled ? listId : null, chat: chatEnabled ? chatChannelId : null, lastError };
+    return { enabled, listId: enabled ? listId : null, ticketListId: enabled ? (ticketListId || listId) : null, chat: chatEnabled ? chatChannelId : null, lastError };
   }
 
   return { enabled, chatEnabled, reportChannelId: reportChatEnabled ? reportChannelId : null, status, members, memberByEmail, tasks, view, ticketForIssue, createTicket, addDeveloper, setIgnored, sendReminders, postChat, createReportTask, store: () => store };
