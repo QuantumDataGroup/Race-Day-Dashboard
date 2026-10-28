@@ -1466,7 +1466,7 @@ const ADMIN_SECTIONS = [
   { key: 'health', href: '/system-health', icon: 'fa-heart-pulse', label: 'System Health' },
   { key: 'changes', href: '/changes', icon: 'fa-clock-rotate-left', label: 'Data Changes' },
   { key: 'missing', href: '/missing-meetings', icon: 'fa-triangle-exclamation', label: 'Missing Data' },
-  // Master admins only (27 Oct 2026, accessOf in server.js).
+  // Given like the others since 28 Oct 2026 (master admins only before).
   { key: 'commentChecks', href: '/comment-checks', icon: 'fa-magnifying-glass', label: 'Comment Checks' },
 ];
 function renderAdminTabs(active, access) {

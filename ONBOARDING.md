@@ -321,8 +321,10 @@ min, T races in the next 12 h, today + tomorrow, rechecked when the comments
 change or after an hour) pushes new findings to `MASTER_ADMINS` only (key
 `cf|raceId|hash`, snooze kind `cf`), opening the **Comment Checks** page
 (`/comment-checks`, `views/comment-checks.html`, data from `/api/comment-checks`;
-an Admin tab shown only when `access.commentChecks`, i.e. an admin in
-`MASTER_ADMINS`). Not in the bell (per Dinesh: on its own page). Each row has
+an Admin tab when `access.commentChecks`: the `commentChecks` permission,
+every admin, and users ticked "Comment Checks" on the Admin page since 28 Oct
+2026 — master admins only before; the popup's Comment check box follows it,
+Ignore needs a User (not View) login; 25 a page with the shared pager). Not in the bell (per Dinesh: on its own page). Each row has
 its race, Open race and **Ignore** (28 Oct 2026): `POST /api/comment-checks/ignore`,
 key `raceId|tab|where|claim|quote`, kept 3 days in `comment-check-ignores.json`;
 an ignored finding stays greyed with Undo, isn't counted, isn't in the popup
