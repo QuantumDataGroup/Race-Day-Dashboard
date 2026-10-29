@@ -129,11 +129,13 @@ const RULES = [
   },
   {
     claim: 'last-start placing',
-    re: /\b(?:(close|narrow|tight|short-head|nose|neck|head)\s+)?(second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)(?:\s+place)?(?:\s+at\s+[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,2})?\s+(?:last (?:start|time(?: out)?|outing|run)|at (?:his|her|its) (?:last|latest) (?:start|outing|run)|(?:on|in) (?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race))\b|\blast[- ]start (second|2nd|third|3rd|runner-up)\b/gi,
+    re: /\b(?:(close|narrow|tight|short-head|nose|neck|head)\s+)?(second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)(?:\s+place)?(?:\s+at\s+[A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,2})?\s+(?:last (?:start|time(?: out)?|outing|run)|at (?:his|her|its) (?:last|latest) (?:start|outing|run)|(?:on|in) (?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race))\b|\blast[- ]start (second|2nd|third|3rd|runner-up)\b|\blast (?:start|time(?: out)?|run|outing),? (?:to (?:claim|finish|run|take)|finishing|(?:when )?(?:she|he|it) (?:finished|ran|was|ran on for)) (?:a |an )?(?:[a-z-]+ ){0,2}(second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)\b/gi,
     check(f, m) {
       const last = f.runs[0];
       if (!last || !posOf(last)) return null;
-      const said = WORD_POS[String(m[2] || m[3] || '').toLowerCase()];
+      // m[4]: the other word order (29 Oct 2026, Tuscan Rose: "Finished
+      // strongly last start to claim second").
+      const said = WORD_POS[String(m[2] || m[3] || m[4] || '').toLowerCase()];
       if (said && posOf(last) !== said) return `last start ${runText(last)}`;
       const lengths = parseFloat(last.LengthsBehind);
       if (m[1] && Number.isFinite(lengths) && lengths > 2.5) return `last start ${runText(last)}, beaten ${lengths}L — not close`;
