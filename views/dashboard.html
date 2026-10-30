@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="RacingHub">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
+<script src="/comment-ticket.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -1627,7 +1628,14 @@
       var issues = raceIssuesForTickets(race);
       // Comment check findings (28 Oct 2026, per Dinesh: a ticket for them
       // too) -- the same per-race ticket as the Comment Checks page's.
-      if ((race.commentFacts || []).length) issues = issues.concat([{ code: 'comment-check', texts: [commentIssueLabel(race.commentFacts) + ' (' + race.commentFacts.length + ')'] }]);
+      // One button per kind of comment issue (30 Oct 2026): its ticket covers
+      // every race with that kind (group 'comment-type').
+      var claims = [];
+      (race.commentFacts || []).forEach(function (f) { if (!f.ignored && claims.indexOf(f.claim) === -1) claims.push(f.claim); });
+      claims.forEach(function (claim) {
+        var mine = race.commentFacts.filter(function (f) { return f.claim === claim; });
+        issues = issues.concat([{ code: RddCommentTicket.slug(claim), group: 'comment-type', claim: claim, texts: [commentIssueLabel(mine) + ': ' + claim + ' (' + mine.length + ')'] }]);
+      });
       if (!issues.length) return;
       _ticketCtx = { race: race, issues: issues, tickets: {}, members: [], enabled: null };
       var draw = function () {
@@ -1670,7 +1678,6 @@
       lines.push('Date: ' + dateLong + ' · Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
       lines.push('Race ID: ' + race.id);
       lines.push('');
-      if (issue.code === 'comment-check') return lines.concat(commentIssueLines((race.commentFacts || []).filter(function (f) { return !f.ignored; }))).join('\n');
       lines.push('Issue: ' + label);
       issue.texts.forEach(function (t) { lines.push(' · ' + t); });
       // The runners whose Issue column shows this issue (a runners check one:
@@ -1688,37 +1695,20 @@
       }
       return lines.join('\n');
     }
-    // Comment check tickets (28 Oct 2026, per Dinesh): named after the comment
-    // ("Runner Comment Issue" / "Race Comment Issue"), and each finding spelt
-    // out -- horse, which comment, what's wrong, what it says, what the form
-    // shows, the last three runs -- with the whole comment under it once.
+    // "Runner Comment Issue" / "Race Comment Issue" (comment-ticket.js has the ticket text).
     function commentIssueLabel(facts) {
-      var race = facts.some(function (f) { return f.where === 'race comment'; });
-      var runner = facts.some(function (f) { return f.where === 'runner comment'; });
-      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
+      return RddCommentTicket.label(facts);
     }
-    function commentIssueLines(facts) {
-      var cap = function (t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; };
-      var lines = ['Issue: ' + commentIssueLabel(facts) + ' (' + facts.length + ')',
-        'The comment below says something about the horse that its form doesn\'t show. Please check it and correct the comment.'];
-      var shown = [];
-      facts.forEach(function (f, n) {
-        lines.push('');
-        lines.push('—— ' + (n + 1) + ' of ' + facts.length + ' ——');
-        lines.push('Horse: #' + f.tab + ' ' + f.horse);
-        lines.push('Where: ' + cap(f.where));
-        lines.push('What\'s wrong: ' + cap(f.claim));
-        lines.push('Comment says: "' + f.quote + '"');
-        lines.push('Form shows: ' + f.why);
-        if (f.recent) lines.push('Last 3 runs: ' + f.recent);
-        var c = f.where + '|' + (f.where === 'runner comment' ? f.tab : '');
-        if (f.comment && shown.indexOf(c) === -1) {
-          shown.push(c);
-          lines.push(cap(f.where) + ' (full):');
-          lines.push(f.comment);
-        }
-      });
-      return lines;
+    // Every finding of one kind (the Comment Checks list), this race's from
+    // the popup when the list doesn't have it yet.
+    function commentTypeItems(race, claim) {
+      var items = _commentIssueItems.filter(function (i) { return i.claim === claim; });
+      if (!items.some(function (i) { return i.raceId === race.id; })) {
+        (race.commentFacts || []).filter(function (f) { return f.claim === claim && !f.ignored; }).forEach(function (f) {
+          items.push(Object.assign({ raceId: race.id, date: race.date, meeting: race.meeting, country: race.country, rNo: race.rNo, startUtc: race.startUtc }, f));
+        });
+      }
+      return items;
     }
     function closeTicketDialog() {
       var d = document.getElementById('tkDialog');
@@ -1733,6 +1723,11 @@
       var dateLabel = race.date ? new Date(race.date + 'T12:00:00Z').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '';
       var title = '[' + label + '] ' + race.meeting + ' R' + race.rNo + ' (' + race.country + ')' + (dateLabel ? ' · ' + dateLabel : '');
       var details = ticketDetails(race, issue, label);
+      if (issue.group === 'comment-type') {
+        var tk = RddCommentTicket.ticket(issue.claim, commentTypeItems(race, issue.claim));
+        title = tk.title;
+        details = tk.details;
+      }
       var prio = ticketPriority(race);
       var notConnected = ctx.enabled === false;
       var devOptions = '<option value="">Not yet</option>' + (ctx.members || []).map(function (m) { return '<option value="' + escapeHtmlClient(m.id) + '">' + escapeHtmlClient(m.name) + '</option>'; }).join('');
@@ -1770,6 +1765,7 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           raceId: race.id, code: code, date: race.date, country: race.country, raceUrl: location.origin + (race.url || ''),
+          group: (ctx.issues.filter(function (i) { return i.code === code; })[0] || {}).group || null,
           title: document.getElementById('tkTitle').value, details: document.getElementById('tkDetails').value,
           priority: document.getElementById('tkPriority').value, developerId: document.getElementById('tkDev').value || null,
         }),
@@ -3753,21 +3749,19 @@
     // popup and the runner's Issue column. Read from /api/comment-checks,
     // which other users get a 403 for, so nothing changes for them.
     var _commentIssueRaces = {};
+    var _commentIssueItems = [];
     function loadCommentIssues() {
       fetch('/api/comment-checks?lite=1', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {
           if (!j) return;
           _commentIssueRaces = {};
-          j.items.forEach(function (i) { if (!i.ignoredBy) (_commentIssueRaces[i.raceId] = _commentIssueRaces[i.raceId] || []).push(i); });
+          // Not ignored, and its kind has no open ticket (30 Oct 2026).
+          _commentIssueItems = j.items.filter(function (i) { return !i.ignoredBy && !i.typeTicket; });
+          _commentIssueItems.forEach(function (i) { (_commentIssueRaces[i.raceId] = _commentIssueRaces[i.raceId] || []).push(i); });
           markCommentIssueCells();
         })
         .catch(function () { /* next time */ });
-    }
-    function commentIssueLabel(list) {
-      var race = list.some(function (f) { return f.where === 'race comment'; });
-      var runner = list.some(function (f) { return f.where === 'runner comment'; });
-      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
     }
     function markCommentIssueCells() {
       document.querySelectorAll('td[data-race-id]').forEach(function (td) {
