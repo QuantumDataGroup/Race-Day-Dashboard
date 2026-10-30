@@ -328,12 +328,19 @@ Ignore needs a User (not View) login; 25 a page with the shared pager). Not in t
 its race, Open race and **Ignore** (28 Oct 2026): `POST /api/comment-checks/ignore`,
 key `raceId|tab|where|claim|quote`, kept 3 days in `comment-check-ignores.json`;
 an ignored finding stays greyed with Undo, isn't counted, isn't in the popup
-box and is never pushed. **Open ticket** (28 Oct 2026): one ClickUp ticket per
-race (issue code `comment-check`, `POST /api/tickets`, tags data-issue /
-comment-check / country) with every finding of the race not ignored, each
-with the whole comment (`fact.comment`); `/api/comment-checks` returns the
-open ones (`tickets`) so the rows show "Ticket open (status)". Needs a User
-login and ClickUp connected (`canTicket`). Users with Comment Checks also get
+box and is never pushed. **Tickets, one per kind of issue** (30 Oct 2026, per
+Dinesh: the same comment mistake shows in many races): issue key
+`comment-type|<claim slug>` (`POST /api/tickets` with `group: 'comment-type'`,
+tags data-issue / comment-check / slug), text from `public/comment-ticket.js`
+(every race with that kind, the whole comment for the first few). While the
+ticket is open (`refreshCommentTypeTickets`, at most once a minute) that kind
+is hidden on every race — popup, Issue column, grid, pushes — and greyed on
+the page with "Ticket open (status)"; the page's "Kinds of issue" box has a
+ticket button per kind, and the popup's ticket bar one per kind in the race.
+Once ClickUp says Done (`ticketForIssue` → null), the next check shows
+whatever is still wrong again, ready for a new ticket. Needs a User login and
+ClickUp connected (`canTicket`). The 28 Oct per-race tickets (code
+`comment-check`) are no longer raised. Users with Comment Checks also get
 the findings on the dashboard (28 Oct 2026): `loadCommentIssues` reads
 `/api/comment-checks?lite=1` (403 for everyone else) and adds the red cell icon,
 the red race button in the popup and the runner's Issue column; the popup box

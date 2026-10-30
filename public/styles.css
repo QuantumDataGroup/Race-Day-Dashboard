@@ -515,6 +515,14 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
 .cc-when.cc-soon { color: var(--adm-warn); font-weight: 600; }
 .cc-why { color: var(--adm-warn); margin-top: 2px; }
 .cc-actions { white-space: nowrap; }
+/* Kinds of comment issue, each with its ticket (30 Oct 2026). */
+.cc-types { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cc-types-head { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 2px; }
+.cc-types-head span { font-size: 12px; color: var(--muted); }
+.cc-type { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+.cc-type-name { font-weight: 700; text-transform: capitalize; }
+.cc-type-count { font-size: 12px; color: var(--muted); }
+.cc-type-covered { opacity: .65; }
 .cc-actions .adm-btn + .adm-btn { margin-left: 6px; }
 .cc-actions .cc-ticket { display: flex; margin-top: 6px; }
 .cc-table tr.cc-ignored td:not(.cc-actions):not(:first-child) { opacity: .5; }

@@ -15,6 +15,7 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <script src="/app.js?v={{STYLES_VERSION}}" defer></script>
 <script src="/pager.js?v={{STYLES_VERSION}}"></script>
+<script src="/comment-ticket.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
@@ -63,6 +64,10 @@
       <select id="fClaim"><option value="">All claims</option></select>
       <input type="search" id="fText" placeholder="Search horse or meeting" aria-label="Search">
     </div>
+
+    <!-- One ticket per kind of issue (30 Oct 2026): while it's open that kind
+         is hidden on the dashboard and greyed here; Done shows it again. -->
+    <section class="adm-card cc-types" id="ccTypes" hidden></section>
 
     <section class="adm-card">
       <div class="adm-table-wrap">
@@ -115,6 +120,7 @@
 
     function render() {
       if (!data) return;
+      renderTypes();
       var fDate = document.getElementById('fDate').value;
       var fCountry = document.getElementById('fCountry').value;
       var fClaim = document.getElementById('fClaim').value;
@@ -139,7 +145,7 @@
         var action = i.ignoredBy
           ? '<button type="button" class="adm-btn" data-cc-key="' + esc(i.key) + '" data-cc-ignore="0">Undo</button><small class="cc-ignored-by">Ignored by ' + esc(i.ignoredBy) + (i.ignoredAt ? ', ' + esc(hhmm(i.ignoredAt)) : '') + '</small>'
           : '<button type="button" class="adm-btn" data-cc-key="' + esc(i.key) + '" data-cc-ignore="1" data-cc-label="' + esc(i.meeting + ' R' + i.rNo + ' ' + i.horse + ': ' + i.quote) + '"><i class="fa-solid fa-eye-slash"></i> Ignore</button>';
-        return '<tr class="cc-row' + (i.ignoredBy ? ' cc-ignored' : '') + '">' +
+        return '<tr class="cc-row' + (i.ignoredBy || i.typeTicket ? ' cc-ignored' : '') + '">' +
           // The race on every row (28 Oct 2026, per Dinesh: "Meeting name illa").
           '<td><b>' + esc(i.meeting) + ' R' + esc(i.rNo) + '</b> <span class="al-cc">' + esc(i.country) + '</span>' +
             '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div></td>' +
@@ -150,76 +156,44 @@
       }).join('');
     }
 
-    // ClickUp ticket (28 Oct 2026, per Dinesh: "comments-ku ticket open
-    // pannanum"): one per race, with every finding of it not ignored.
+    // ClickUp tickets, one per kind of issue (30 Oct 2026, per Dinesh: "same
+    // comment issue naraya racesku warudu"): the ticket lists every race with
+    // that kind; while it's open the kind is greyed here and hidden on the
+    // dashboard, and once it's Done whatever is still wrong shows again.
     function ticketCell(i) {
-      var t = (data.tickets || {})[i.raceId];
-      if (t) return '<a class="tk-mark cc-ticket" href="' + esc(t.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket open (' + esc(t.statusLabel || 'to do') + ')</a>';
+      if (i.typeTicket) return '<a class="tk-mark cc-ticket" href="' + esc(i.typeTicket.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket open (' + esc(i.typeTicket.statusLabel || 'to do') + ')</a>';
       if (!data.canTicket || i.ignoredBy) return '';
-      return '<button type="button" class="adm-btn" data-cc-ticket="' + esc(i.raceId) + '"><i class="fa-solid fa-ticket"></i> Open ticket</button>';
+      return '<button type="button" class="adm-btn" data-cc-ticket="' + esc(i.claim) + '"><i class="fa-solid fa-ticket"></i> Open ticket</button>';
     }
-    // Same layout as the race popup's ticket (views/dashboard.html
-    // ticketDetails / commentIssueLines): named after the comment, no jump
-    // time or status, each finding spelt out (28 Oct 2026, per Dinesh).
-    // detail: the race from /api/race (name, class, distance, runners), or null.
-    function commentIssueLabel(facts) {
-      var race = facts.some(function (f) { return f.where === 'race comment'; });
-      var runner = facts.some(function (f) { return f.where === 'runner comment'; });
-      return race && runner ? 'Race & Runner Comment Issue' : race ? 'Race Comment Issue' : 'Runner Comment Issue';
+    function openFindings(claim) {
+      return data.items.filter(function (i) { return i.claim === claim && !i.ignoredBy && !i.typeTicket; });
     }
-    function ticketText(raceId, detail) {
-      var list = data.items.filter(function (i) { return i.raceId === raceId && !i.ignoredBy; });
-      var r = list[0];
-      var cap = function (t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; };
-      var label = commentIssueLabel(list);
-      var dateLong = new Date(r.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-      var lines = ['Race: ' + r.meeting + ' (' + r.country + ') R' + r.rNo + (detail && detail.rName ? ' – ' + detail.rName : '')];
-      if (detail) {
-        var runners = detail.runners || [];
-        var scratched = runners.filter(function (x) { return x.isScratched; }).length;
-        lines.push('Code: ' + (detail.disciplineLabel || 'Thoroughbred') + (detail.rClass ? ' · Class: ' + detail.rClass : '') + (detail.rDistance ? ' · Distance: ' + detail.rDistance + 'm' : ''));
-        lines.push('Date: ' + dateLong + ' · Runners: ' + (runners.length - scratched) + ' running' + (scratched ? ', ' + scratched + ' scratched' : ''));
-      } else {
-        lines.push('Code: Thoroughbred');
-        lines.push('Date: ' + dateLong);
-      }
-      lines.push('Race ID: ' + r.raceId);
-      lines.push('');
-      lines.push('Issue: ' + label + ' (' + list.length + ')');
-      lines.push('The comment below says something about the horse that its form doesn\'t show. Please check it and correct the comment.');
-      var shown = [];
-      list.forEach(function (i, n) {
-        lines.push('');
-        lines.push('—— ' + (n + 1) + ' of ' + list.length + ' ——');
-        lines.push('Horse: #' + i.tab + ' ' + i.horse);
-        lines.push('Where: ' + cap(i.where));
-        lines.push('What\'s wrong: ' + cap(i.claim));
-        lines.push('Comment says: "' + i.quote + '"');
-        lines.push('Form shows: ' + i.why);
-        if (i.recent) lines.push('Last 3 runs: ' + i.recent);
-        var c = i.where + '|' + (i.where === 'runner comment' ? i.tab : '');
-        if (i.comment && shown.indexOf(c) === -1) {
-          shown.push(c);
-          lines.push(cap(i.where) + ' (full):');
-          lines.push(i.comment);
-        }
-      });
-      return { title: '[' + label + '] ' + r.meeting + ' R' + r.rNo + ' (' + r.country + ') · ' + dayLabel(r.date), details: lines.join('\n'), race: r };
+    // Each kind: how many races / findings, and its ticket.
+    function renderTypes() {
+      var box = document.getElementById('ccTypes');
+      var claims = uniq(data.items.filter(function (i) { return !i.ignoredBy; }).map(function (i) { return i.claim; }));
+      box.hidden = !claims.length;
+      box.innerHTML = '<div class="cc-types-head"><b>Kinds of issue</b><span>One ticket covers every race with that kind. While it\'s open they\'re hidden on the dashboard; when it\'s Done, anything still wrong shows again.</span></div>' +
+        claims.map(function (claim) {
+          var all = data.items.filter(function (i) { return i.claim === claim && !i.ignoredBy; });
+          var races = uniq(all.map(function (i) { return i.raceId; })).length;
+          var t = all[0].typeTicket;
+          var action = t
+            ? '<a class="tk-mark" href="' + esc(t.url || '#') + '" target="_blank" rel="noopener"><i class="fa-solid fa-ticket"></i> Ticket open (' + esc(t.statusLabel || 'to do') + ')</a>'
+            : (data.canTicket ? '<button type="button" class="adm-btn" data-cc-ticket="' + esc(claim) + '"><i class="fa-solid fa-ticket"></i> Open ticket</button>' : '');
+          return '<div class="cc-type' + (t ? ' cc-type-covered' : '') + '"><span class="cc-type-name">' + esc(claim) + '</span>' +
+            '<span class="cc-type-count">' + races + ' race' + (races === 1 ? '' : 's') + ' &middot; ' + all.length + '</span>' + action + '</div>';
+        }).join('');
     }
     function closeTicketDialog() {
       var d = document.getElementById('tkDialog');
       if (d) d.remove();
     }
-    // The race's name, class and runners first (a second or so); without them if that fails.
-    function openTicketDialog(raceId) {
-      fetch('/api/race/' + encodeURIComponent(raceId))
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .catch(function () { return null; })
-        .then(function (detail) { showTicketDialog(raceId, detail); });
-    }
-    function showTicketDialog(raceId, detail) {
-      var t = ticketText(raceId, detail);
-      var mins = (Date.parse(t.race.startUtc) - Date.now()) / 60000;
+    function openTicketDialog(claim) {
+      var items = openFindings(claim);
+      if (!items.length) return;
+      var t = RddCommentTicket.ticket(claim, items);
+      var mins = (Date.parse(t.items[0].startUtc) - Date.now()) / 60000;
       var prio = mins <= 30 ? 'urgent' : mins <= 60 ? 'high' : 'normal';
       closeTicketDialog();
       var wrap = document.createElement('div');
@@ -230,27 +204,28 @@
         '<button type="button" class="adm-btn" id="tkClose" aria-label="Close">&times;</button></div>' +
         '<div class="tk-dialog-body">' +
         '<label>Title<input type="text" id="tkTitle" maxlength="250" value="' + esc(t.title) + '"></label>' +
-        '<label>Details (every finding of this race not ignored)<textarea id="tkDetails" rows="18">' + esc(t.details) + '</textarea></label>' +
+        '<label>Details (every race with this kind of issue)<textarea id="tkDetails" rows="18">' + esc(t.details) + '</textarea></label>' +
         '<div class="tk-dialog-row"><label>Priority<select id="tkPriority">' +
         [['urgent', 'Urgent'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Low']].map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === prio ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
         '</select></label></div></div>' +
-        '<div class="tk-dialog-foot"><span id="tkMsg">Goes to ClickUp "Support related tasks", assigned to the dashboard admin</span>' +
+        '<div class="tk-dialog-foot"><span id="tkMsg">Goes to ClickUp "Support related tasks". These ' + items.length + ' findings are hidden on the dashboard until the ticket is Done.</span>' +
         '<span><button type="button" class="adm-btn" id="tkCancel">Cancel</button> <button type="button" class="adm-btn primary" id="tkCreate">Create ticket</button></span></div>' +
         '</section>';
       wrap.addEventListener('click', function (e) { if (e.target === wrap || e.target.id === 'tkClose' || e.target.id === 'tkCancel') closeTicketDialog(); });
       document.body.appendChild(wrap);
-      document.getElementById('tkCreate').addEventListener('click', function () { createTicket(raceId, t.race); });
+      document.getElementById('tkCreate').addEventListener('click', function () { createTicket(claim, t); });
       document.getElementById('tkTitle').focus();
     }
-    function createTicket(raceId, race) {
+    function createTicket(claim, t) {
       var btn = document.getElementById('tkCreate');
       var msg = document.getElementById('tkMsg');
+      var first = t.items[0];
       btn.disabled = true;
       msg.textContent = 'Creating...';
       fetch('/api/tickets', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          raceId: raceId, code: 'comment-check', date: race.date, country: race.country, raceUrl: location.origin + race.raceUrl,
+          raceId: first.raceId, code: t.code, group: 'comment-type', date: first.date, country: first.country, raceUrl: location.origin + first.raceUrl,
           title: document.getElementById('tkTitle').value, details: document.getElementById('tkDetails').value,
           priority: document.getElementById('tkPriority').value,
         }),
@@ -258,10 +233,10 @@
         return res.json().then(function (j) {
           if (res.status !== 201 && res.status !== 409) throw new Error(j.error || j.reason || ('Failed (' + res.status + ')'));
           var tk = j.ticket;
-          data.tickets = data.tickets || {};
-          data.tickets[raceId] = { id: tk.id, url: tk.url, statusLabel: tk.statusLabel };
-          msg.innerHTML = (j.duplicate ? 'A ticket is already open for this race: ' : 'Ticket created: ') +
+          data.items.forEach(function (i) { if (i.claim === claim) i.typeTicket = { id: tk.id, url: tk.url, statusLabel: tk.statusLabel }; });
+          msg.innerHTML = (j.duplicate ? 'A ticket is already open for this kind: ' : 'Ticket created: ') +
             '<a href="' + esc(tk.url || '#') + '" target="_blank" rel="noopener">#' + esc(tk.id) + ' · open in ClickUp</a>';
+          showCounts();
           render();
         });
       }).catch(function (err) {
@@ -269,6 +244,10 @@
         btn.disabled = false;
       });
     }
+    document.getElementById('ccTypes').addEventListener('click', function (e) {
+      var tk = e.target.closest('[data-cc-ticket]');
+      if (tk) openTicketDialog(tk.getAttribute('data-cc-ticket'));
+    });
 
     document.getElementById('rows').addEventListener('click', function (e) {
       var tk = e.target.closest('[data-cc-ticket]');
@@ -297,9 +276,9 @@
         });
     });
 
-    // Ignored findings aren't counted.
+    // Ignored findings, and kinds with an open ticket, aren't counted.
     function showCounts() {
-      var active = data.items.filter(function (i) { return !i.ignoredBy; });
+      var active = data.items.filter(function (i) { return !i.ignoredBy && !i.typeTicket; });
       document.getElementById('tRaces').textContent = uniq(active.map(function (i) { return i.raceId; })).length;
       document.getElementById('tItems').textContent = active.length;
     }
