@@ -2068,9 +2068,19 @@ function commentFactsFor(doc, raceClass) {
   for (const sentence of String(doc.raceComment || '').split(/(?<=[.!?])\s+(?=[A-Z])/)) {
     const ms = [...sentence.matchAll(COMMENT_MENTION_RE)];
     const horses = ms.map((m) => matchHorse(m[1].trim(), runners).runner || null);
+    // Where each horse's part starts: the words leading into its name after
+    // the last comma / "while" / "and" are about it ("..., while the
+    // debutant RÜZGARSELI (7)", Veliefendi R1 30 Oct 2026), not the horse before.
+    const starts = ms.map((m, i) => {
+      if (i === 0) return 0;
+      const prevEnd = ms[i - 1].index + ms[i - 1][0].length;
+      let cut = null;
+      for (const sep of sentence.slice(prevEnd, m.index).matchAll(/,|;|\b(?:while|and|but|whereas)\b/g)) cut = sep;
+      return cut ? prevEnd + cut.index + cut[0].length : m.index;
+    });
     ms.forEach((m, i) => {
       if (!horses[i]) return;
-      let text = sentence.slice(i === 0 ? 0 : m.index, i + 1 < ms.length ? ms[i + 1].index : sentence.length);
+      let text = sentence.slice(starts[i], i + 1 < ms.length ? starts[i + 1] : sentence.length);
       // A name not in capitals ("I'mamaterialgirl (2)") still starts another
       // horse's part (Laurel R10 28 Oct 2026): cut at the next "(n)".
       const own = /\(\d{1,2}\)/.exec(text);
@@ -3908,8 +3918,9 @@ app.get('/api/race/:id', async (req, res) => {
     res.json({
       ...buildRaceDetail(doc), canIgnoreRunnerCheck: Boolean(accessOf(req).missing),
       // key: for the popup's Ignore (28 Oct 2026); canIgnoreComment: a User login.
-      commentFacts: accessOf(req).commentChecks
-        ? (doc.commentFacts || []).map((f) => ({ ...f, key: commentFactKey(doc._id, f) })).filter((f) => !commentFactIgnores[f.key]) : [],
+      // Not those whose kind of issue has an open ticket (30 Oct 2026).
+      commentFacts: accessOf(req).commentChecks && (await refreshCommentTypeTickets())
+        ? (doc.commentFacts || []).map((f) => ({ ...f, key: commentFactKey(doc._id, f) })).filter((f) => !commentFactIgnores[f.key] && !commentFactCovered(f)) : [],
       canIgnoreComment: Boolean(accessOf(req).commentChecks && accessOf(req).work),
       weightChecks: isMasterAdmin(req) ? (doc.weightChecks || []) : [],
     });
@@ -5205,6 +5216,31 @@ try {
 function commentFactKey(raceId, f) {
   return `${raceId}|${f.tab}|${f.where}|${f.claim}|${f.quote}`;
 }
+// One ClickUp ticket per kind of comment issue, not per race (30 Oct 2026,
+// per Dinesh: "same comment issue naraya racesku warudu"): issue key
+// "comment-type|<claim slug>". While it's open, that kind of finding is
+// hidden on every race (dashboard, popup, pushes; greyed on the page); once
+// it's Done the check shows whatever is still wrong again, ready for a new
+// ticket. Read from tickets.json + ClickUp at most once a minute.
+function commentTypeSlug(claim) {
+  return String(claim || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-+|-+$/g, '');
+}
+let commentTypeTickets = { at: 0, bySlug: new Map() };
+async function refreshCommentTypeTickets(force) {
+  if (!clickup.enabled) return commentTypeTickets.bySlug;
+  if (!force && Date.now() - commentTypeTickets.at < 60 * 1000) return commentTypeTickets.bySlug;
+  const bySlug = new Map();
+  for (const key of Object.keys(clickup.store().byIssue || {})) {
+    if (!key.startsWith('comment-type|')) continue;
+    const t = await clickup.ticketForIssue(key).catch(() => null);
+    if (t) bySlug.set(key.slice('comment-type|'.length), { id: t.id, url: t.url, statusLabel: t.statusLabel });
+  }
+  commentTypeTickets = { at: Date.now(), bySlug };
+  return bySlug;
+}
+function commentFactCovered(f) {
+  return commentTypeTickets.bySlug.has(commentTypeSlug(f.claim));
+}
 function masterAdminUsers() {
   return (authConfig.users || []).filter((u) => u.role === 'admin' && MASTER_ADMINS.includes(String(u.username).toLowerCase())).map((u) => u.username);
 }
@@ -5248,7 +5284,7 @@ function startMs(doc) {
 function commentFactEntry(d, facts) {
   if (!facts.length) return null;
   // Ignored ones stay on the page (with Undo) but aren't pushed.
-  const lines = facts.filter((f) => !commentFactIgnores[commentFactKey(d._id, f)]).map(commentFactLine);
+  const lines = facts.filter((f) => !commentFactIgnores[commentFactKey(d._id, f)] && !commentFactCovered(f)).map(commentFactLine);
   return {
     key: lines.length ? `cf|${d._id}|${crypto.createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12)}` : null,
     raceId: d._id, date: d.rDate, meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, time: (parseClock(d.rScheduleTime) || {}).label || '',
@@ -5311,6 +5347,7 @@ async function dispatchCommentFactAlerts() {
     }
     const live = new Set(races.map((d) => d._id));
     for (const id of commentFactState.byRace.keys()) if (!live.has(id)) commentFactState.byRace.delete(id);
+    await refreshCommentTypeTickets(true);
     const open = [];
     for (const d of races) {
       const entry = commentFactEntry(d, (commentFactState.byRace.get(d._id) || {}).facts || []);
@@ -5388,21 +5425,18 @@ app.get('/api/comment-checks', requirePermission('commentChecks'), async (req, r
       });
     }
   }
-  // Comment tickets (28 Oct 2026, per Dinesh: "comments-ku ticket open
-  // pannanum"): one per race, issue code 'comment-check'; the open ones here.
-  const tickets = {};
-  // ?lite=1: the dashboard grid's red marks, no tickets needed.
-  if (clickup.enabled && accessOf(req).work && req.query.lite !== '1') {
-    for (const raceId of new Set(items.map((i) => i.raceId))) {
-      const t = await clickup.ticketForIssue(`${raceId}|comment-check`).catch(() => null);
-      if (t) tickets[raceId] = { id: t.id, url: t.url, statusLabel: t.statusLabel };
-    }
+  // A finding whose kind of issue has an open ticket (30 Oct 2026, see
+  // commentTypeTickets) carries it and isn't counted.
+  const types = await refreshCommentTypeTickets();
+  for (const i of items) {
+    const t = types.get(commentTypeSlug(i.claim));
+    if (t) i.typeTicket = t;
   }
   res.json({
     lastRunAt: commentFactState.lastRunAt, lastError: commentFactState.lastError, racesChecked: commentFactState.races,
-    racesFlagged: new Set(items.filter((i) => !i.ignoredBy).map((i) => i.raceId)).size,
+    racesFlagged: new Set(items.filter((i) => !i.ignoredBy && !i.typeTicket).map((i) => i.raceId)).size,
     everyMin: COMMENT_FACT_EVERY_MS / 60000, windowHours: COMMENT_FACT_WINDOW_MS / 3600000, items,
-    tickets, canTicket: clickup.enabled && accessOf(req).work,
+    canTicket: clickup.enabled && accessOf(req).work,
   });
 });
 app.post('/api/comment-checks/ignore', requirePermission('commentChecks'), requireWork, (req, res) => {
@@ -5681,13 +5715,15 @@ app.post('/api/tickets', async (req, res) => {
   if (code && !/^[a-z-]{2,40}$/.test(code)) return res.status(400).json({ error: 'Bad issue code' });
   try {
     const result = await clickup.createTicket({
-      issueKey: raceId && code ? `${raceId}|${code}` : null,
+      // group 'comment-type': one ticket for a kind of comment issue, every race (30 Oct 2026).
+      issueKey: b.group === 'comment-type' && code ? `comment-type|${code}` : raceId && code ? `${raceId}|${code}` : null,
       raceDate: /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : null,
       raceUrl: typeof b.raceUrl === 'string' ? b.raceUrl.slice(0, 300) : null,
       title, details: b.details, priority: b.priority, developerId: b.developerId || null,
       raisedBy: req.session.username, ownerEmail: ticketOwnerEmail(),
-      tags: ['data-issue', code, String(b.country || '').toLowerCase()].filter(Boolean),
+      tags: (b.group === 'comment-type' ? ['data-issue', 'comment-check', code] : ['data-issue', code, String(b.country || '').toLowerCase()]).filter(Boolean),
     });
+    if (b.group === 'comment-type') commentTypeTickets.at = 0;
     if (!result.duplicate) logActivity(req, 'ticket-create', { detail: `${result.ticket.id}: ${title}` });
     res.status(result.duplicate ? 409 : 201).json(result);
   } catch (err) {
