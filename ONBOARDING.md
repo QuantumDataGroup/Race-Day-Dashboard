@@ -172,7 +172,7 @@ breakdown of exactly which checks fired.
 | **Missing Speed Map** | per-race | Greyhound only | The external Speed Map feed HAS a prediction for this race, but our own `speedMaps` collection doesn't (a genuine sync gap, not "no prediction made yet") |
 | **Scratching Not Updated** | per-race AND per-runner | all | The external Scratchings feed lists a runner (by tab/box number) as scratched, but our own race doc doesn't have that runner marked `isScratched` yet |
 | **Scratched Runner in Comment** (15 Oct 2026) | per-race: every race from tomorrow on, plus today's races still more than 12 h from the jump (a runner scratched closer to the race is a late scratching, not an issue) | Thoroughbred (wherever there's a race comment) | The race comment still mentions a runner scratched in our race doc — by tab number in brackets "(8)" or by the horse's name in capitals (`scratchedInComment` in raceView.js). The popup shows a warning and strikes the name through in the comment |
-| **Results Missing** | per-race | all | This race has no result, but a LATER race (higher race number) at the SAME meeting already does — abandoned races and trials are excluded (no result is ever expected there) |
+| **Results Missing** | per-race | all | This race has no result, but a LATER race (higher race number) at the SAME meeting already does, or (31 Oct 2026) it jumped `RESULTS_LATE_MIN` (20) minutes ago — abandoned races and trials are excluded (no result is ever expected there) |
 | **Time Mismatch** | per-race | all, AUS/MEX/PAN/SPA/CHI/ARG/URU/BRZ/SAU/GB/IRE | A race not run yet whose RAS API start time (Neds day page when RAS fails) is more than 2 min from ours. Popup **Ignore** (per race + that RAS time). See "Time mismatch (RAS)" below |
 | **Schedule Issue** | per-race | all | Either: (a) scheduled time is a placeholder `00:00`, (b) two races at the same meeting share the exact same scheduled time, or (c) this race is scheduled less than 15 minutes after the previous race at the same meeting |
 
@@ -528,7 +528,7 @@ races (today + tomorrow, Sri Lanka day) that jump within 3 h and still have
 an issue not marked fixed, plus any late scratching not yet updated
 (`missing-scratching`) whatever the time, and today's **Results missing**
 (`missing-results`: a race run with no results while a later race at the
-meeting has them), which pops up / pushes once straight away. Missing jockeys carry a source
+meeting has them, or 20 min after its jump), which pops up / pushes once straight away. Missing jockeys carry a source
 hint from the Runners check state ("Source (Neds) has: …" / "Not on the
 source (Neds) either"). Pop-ups fire once per race at **3 h, 2 h, 1 h,
 30 min, 10 min** before the jump and once straight away for a late
