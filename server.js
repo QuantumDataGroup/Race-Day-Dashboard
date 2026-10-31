@@ -1081,13 +1081,24 @@ async function videoFileExists(key, dateStr) {
   }
 }
 
+// A course whose videos are sometimes named with the track it ran on --
+// ours TURFFONTEIN, the file SAF_TURFFONTEIN_STANDSIDE_race1_... on 31 Oct
+// 2026, plain SAF_TURFFONTEIN_... other days (per Dinesh: "TURFFONTEIN
+// STANDSIDE-nu irukku ada add pannunga").
+const VIDEO_TRACK_NAMES = { 'SAF|TURFFONTEIN': ['STANDSIDE'] };
+
 // File names to try for a race when there's no listing to match against:
 // ours, then with " PARK" added for GB/IRE (ours KEMPTON, the file
-// GB_KEMPTON_PARK_... -- see similarVideoKey).
+// GB_KEMPTON_PARK_... -- see similarVideoKey), then with a track name from
+// VIDEO_TRACK_NAMES.
 function videoKeyCandidates(dateStr, doc) {
-  const keys = [buildVideoKey(dateStr, doc.rCountry, doc.rCourseDisplayName, doc.rNo)];
-  if ((doc.rCountry === 'GB' || doc.rCountry === 'IRE') && !/\bPARK$/i.test(String(doc.rCourseDisplayName || '').trim())) {
-    keys.push(buildVideoKey(dateStr, doc.rCountry, `${doc.rCourseDisplayName} PARK`, doc.rNo));
+  const course = String(doc.rCourseDisplayName || '').trim();
+  const keys = [buildVideoKey(dateStr, doc.rCountry, course, doc.rNo)];
+  if ((doc.rCountry === 'GB' || doc.rCountry === 'IRE') && !/\bPARK$/i.test(course)) {
+    keys.push(buildVideoKey(dateStr, doc.rCountry, `${course} PARK`, doc.rNo));
+  }
+  for (const track of VIDEO_TRACK_NAMES[`${doc.rCountry}|${course.toUpperCase()}`] || []) {
+    keys.push(buildVideoKey(dateStr, doc.rCountry, `${course} ${track}`, doc.rNo));
   }
   return keys;
 }
