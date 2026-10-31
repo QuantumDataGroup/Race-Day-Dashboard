@@ -99,10 +99,11 @@ const RULES = [
       // No finishing position (not known) -- nothing to go on.
       if (!last || !posOf(last) || posOf(last) === 1) return null;
       // "Coming off / fresh off / off the back of a win" is fine with a win
-      // in the last two runs (28 Oct 2026, per Dinesh: Trinity State "coming
-      // off a solid maiden win" -- won its maiden 21 Sep, 2nd since). "Won
-      // last start" / "just won" still mean the last start.
-      if (/\boff\b/i.test(m[0]) && f.runs.slice(0, 2).some((x) => posOf(x) === 1)) return null;
+      // in the last three runs (28 Oct 2026, per Dinesh: Trinity State
+      // "coming off a solid maiden win" -- won its maiden 21 Sep, 2nd since;
+      // 31 Oct: Yasup, maiden win then two poor runs the comment mentions).
+      // "Won last start" / "just won" still mean the last start.
+      if (/\boff\b/i.test(m[0]) && f.runs.slice(0, 3).some((x) => posOf(x) === 1)) return null;
       return `last start ${runText(last)}`;
     },
   },
