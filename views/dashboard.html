@@ -1899,7 +1899,35 @@
       var doc = _currentRaceCardDocs[_currentRaceCardVersionIdx];
       if (!doc) return;
       var namePrefix = (_currentRaceData.country || '').toUpperCase() + ' - ' + (_currentRaceData.meeting || '').toUpperCase() + ' - R' + _currentRaceData.rNo;
-      downloadJsonFile(namePrefix + ' - Version ' + (_currentRaceCardVersionIdx + 1) + '.json', raceCardForDownload(doc));
+      downloadJsonFile(namePrefix + ' - Version ' + (_currentRaceCardVersionIdx + 1) + '.json', withRaceCardMeta(raceCardForDownload(doc), doc.client));
+    }
+
+    // The "Meta" header on the race card, shown and downloaded (31 Oct 2026,
+    // per Dinesh: as the Troyen Data API's get-race-card answers). PascalCase
+    // like the API's own; the card's fields stay as they are. Client: that
+    // version's client ("Default" when it has none); a new RequestId and
+    // time each time it's shown or downloaded.
+    function newRequestId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+    function withRaceCardMeta(doc, client) {
+      var out = {
+        Meta: {
+          Origin: 'Troyen Data API',
+          Environment: 'Production',
+          Endpoint: 'api/v1/Races/get-race-card',
+          ApiVersion: 'v1',
+          Client: client || 'Default',
+          RequestId: newRequestId(),
+          GeneratedAtUtc: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        },
+      };
+      Object.keys(doc).forEach(function (key) { out[key] = doc[key]; });
+      return out;
     }
 
     // Fetches and renders the raw upstream document(s) for the "Race Card"
@@ -1976,7 +2004,7 @@
       _currentRaceCardVersionIdx = idx;
       var namePrefix = (_currentRaceData.country || '').toUpperCase() + ' - ' + (_currentRaceData.meeting || '').toUpperCase() + ' - R' + _currentRaceData.rNo;
       document.getElementById('raceCardHeading').textContent = namePrefix + ' - Version ' + (idx + 1);
-      document.getElementById('raceCardJson').textContent = JSON.stringify(doc, null, 2);
+      document.getElementById('raceCardJson').textContent = JSON.stringify(withRaceCardMeta(doc, doc.client), null, 2);
       _currentRaceCardDocs.forEach(function (_, i) {
         var btn = document.getElementById('raceCardVersionBtn' + i);
         if (btn) btn.classList.toggle('active', i === idx);
