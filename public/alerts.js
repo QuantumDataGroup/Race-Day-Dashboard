@@ -214,7 +214,7 @@
         }
         if (i.missingResult && i.workflow !== 'fixed' && !seen['mr|' + i.key]) {
           seen['mr|' + i.key] = Date.now();
-          due.push({ title: 'Results missing · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + (race.time || '') + ': no results yet, a later race already has them', url: race.raceUrl, tag: 'mr-' + race.raceId, snooze: { kind: 'race', ids: [race.raceId] } });
+          due.push({ title: 'Results missing · ' + discName(race), body: raceTitle(race) + ' (' + race.country + ') ' + (race.time || '') + ': ' + i.detail, url: race.raceUrl, tag: 'mr-' + race.raceId, snooze: { kind: 'race', ids: [race.raceId] } });
         }
       });
       var milestone = milestoneFor(m);

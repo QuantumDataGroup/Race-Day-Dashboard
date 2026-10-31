@@ -54,6 +54,9 @@ const STATUS_LABELS = {
 //   - rStatus "INTERIM"                                -> completed (provisional, pending confirmation)
 //   - isOpen === false (none of the above matched)     -> running (betting closed, no result yet -- in/near its live window)
 //   - anything else (isOpen true or missing)           -> upcoming
+// Results Missing once a race has run this long with no result (31 Oct
+// 2026, per Dinesh: 20 minutes); RESULTS_LATE_MIN overrides.
+const RESULTS_LATE_MIN = Number(process.env.RESULTS_LATE_MIN || 20);
 // Every issue field of a schedule race, emptied -- what an abandoned race
 // gets (buildSchedule; schedule issues are dropped there too).
 const ABANDONED_QUIET = {
@@ -659,13 +662,23 @@ function buildSchedule(docs, dateStr) {
     // which don't get published results either) are excluded -- no result
     // is ever expected there, so that's not a gap to flag ("Without
     // abandoned, or canceled race ha irunda ignore pannunga").
+    // Also (31 Oct 2026, per Dinesh: BARCALDINE R1-R3 ran with no results
+    // and no later race had any): no result RESULTS_LATE_MIN minutes after
+    // the jump.
     {
       let laterHasResult = false;
+      const nowMs = Date.now();
       for (let i = raceNos.length - 1; i >= 0; i--) {
         const race = races[raceNos[i]];
         if (!race) continue;
         const hasResult = Boolean(race.resultString);
-        race.missingResult = !hasResult && race.status !== 'abandoned' && !race.isTrial && laterHasResult;
+        const raw = String(race.startUtc || '');
+        const start = Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`);
+        const minsSince = Number.isFinite(start) ? Math.floor((nowMs - start) / 60000) : null;
+        const late = minsSince != null && minsSince >= RESULTS_LATE_MIN;
+        race.missingResult = !hasResult && race.status !== 'abandoned' && !race.isTrial && (laterHasResult || late);
+        race.missingResultText = !race.missingResult ? null
+          : laterHasResult ? 'no results yet, a later race already has them' : `no results ${minsSince} min after the jump`;
         if (hasResult) laterHasResult = true;
       }
     }
@@ -1552,7 +1565,7 @@ function raceIssueList(race) {
     if (race.runnerMismatchCount) lines.push(`Runner Mismatched (${race.runnerMismatchCount} runner${race.runnerMismatchCount === 1 ? '' : 's'})`);
     lines.forEach((line) => add('runner-mismatch', line));
   }
-  if (race.missingResult) add('missing-results', 'Results Missing');
+  if (race.missingResult) add('missing-results', `Results Missing (${race.missingResultText || 'no results yet'})`);
   if (race.timeMismatch) add('time-mismatch', timeMismatchText(race.label, race.timeMismatch));
   if (race.missingRaceComment) add('missing-race-comment', 'Missing Race Comment');
   if (race.scratchedInComment && race.scratchedInComment.length) {

@@ -4685,8 +4685,8 @@ async function buildAlerts() {
       // looked like a wrong time).
       const anyTime = lateScratching && dateStr === today;
       // Results missing (21 Oct 2026, per Dinesh): a race that has run with
-      // no result while a later race at the meeting has one -- alerted
-      // straight away, after the jump, like a late scratching.
+      // no result while a later race at the meeting has one, or (31 Oct 2026)
+      // RESULTS_LATE_MIN after its jump -- alerted then, like a late scratching.
       const missingResult = i.code === 'missing-results' && dateStr === today;
       if ((mins < -5 && !missingResult) || (mins > ALERT_WINDOW_MIN && !anyTime && !missingResult)) continue;
       const w = issueTracker.statusOf(i.key);
@@ -4786,7 +4786,7 @@ async function dispatchAlerts() {
       }
       if (i.missingResult && i.workflow !== 'fixed' && !alertsSent[`mr|${i.key}`]) {
         alertsSent[`mr|${i.key}`] = nowMs;
-        due.push({ title: `Results missing · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${race.time || ''}: no results yet, a later race already has them`, url: race.raceUrl, tag: `mr-${race.raceId}`, snooze: { kind: 'race', ids: [race.raceId] } });
+        due.push({ title: `Results missing · ${disc}`, body: `${race.meeting} R${race.rNo} (${race.country}) ${race.time || ''}: ${i.detail}`, url: race.raceUrl, tag: `mr-${race.raceId}`, snooze: { kind: 'race', ids: [race.raceId] } });
       }
     }
     // A race that has run only had its results-missing alert above.
