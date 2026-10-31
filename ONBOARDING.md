@@ -91,6 +91,10 @@ restart (a restart is still harmless/recommended for consistency).
   bucket file listing, used to check whether a video exists for
   today's race (by building the expected S3 key from
   date+country+course+race-number) and for past races (by horse's region).
+  The listing is refused (403) since 9 Oct 2026, so each race's file is
+  checked by name: ours, then "<course> PARK" for GB/IRE, then a track name
+  from `VIDEO_TRACK_NAMES` in server.js (TURFFONTEIN → TURFFONTEIN_STANDSIDE).
+  A course whose videos come under another name: add it there.
 - **Country flags** (client-side only, not fetched by the server):
   `https://flagcdn.com/20x15/{iso2}.png` — a free public flag-image CDN.
 
