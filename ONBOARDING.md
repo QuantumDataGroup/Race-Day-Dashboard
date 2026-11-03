@@ -360,7 +360,8 @@ ahead, for meetings we have: AUS + NZ (all three codes) plus the Missing
 Data countries (thoroughbred). Every run reads both sources at the same
 time (since 8 Oct 2026; they used to take turns): the RAS API
 (`http://nextdc.racingandsports.com:9542/api/v1/neds/meetings?date=`, one
-request per day) and the nedsform.com.au website (one page per day + one
+request per day, through `fetchRasMeetings` -- see "RAS API politeness"
+below) and the nedsform.com.au website (one page per day + one
 per race we have, two at a time, ~5 min). `mergeRunnerChecks` shows the
 differences from both, each tagged with its source (`src`: ras / neds /
 both; the same difference from both shows once) -- the two sometimes list
@@ -370,6 +371,14 @@ race's RAS flags and replaces its Neds ones. If one source fails, the other
 is used alone. "Check now" on
 Missing Data > Missing / Mismatched Runners runs it at once (at most once
 every 10 minutes). Races already resulted are skipped.
+
+**RAS API politeness (3 Nov 2026, per Dinesh: "konjo slow ha check
+pannunga, 1h-ku oru thadava"):** every RAS request goes through
+`fetchRasMeetings(date)` in server.js. A day's list is read from RAS at most
+once an hour (`RAS_EVERY_MS`) and shared by the time check and the runners
+check, "Check now" included; a failure is kept for the hour too. Requests go
+one at a time, `RAS_GAP_MS` (5 s) apart.
+
 Flags: Runner Missing (in the source, not ours), Runner Mismatched (cut-off
 name / not in the field / scratched there), Runner Count Mismatched, and a
 whole field that doesn't match. Runners are matched by name (the API's tab
@@ -497,7 +506,8 @@ run yet, again only if the list changes (`cv|` keys in alerts-sent.json, kept
 
 ### Time mismatch (RAS, 22 Oct 2026)
 `refreshRasTimes` reads the RAS meetings API (`RUNNERS_API_URL?date=`, same as the runners
-check) for today and tomorrow every 10 min. Its `start_time` is UTC. The reply for a date
+check) for today and tomorrow every 10 min -- from `fetchRasMeetings`' hourly copy, so RAS
+itself is asked once an hour. Its `start_time` is UTC. The reply for a date
 **mixes the day before and after** (Healesville came twice: the 22nd's and the 23rd's), so
 only meetings whose `local_race_dates` has the date are used, and of two with the same name
 the one closest to our times. Matched on country (RAS `UK` = our `GB`) + course name
