@@ -827,7 +827,7 @@ async function runHealthChecks() {
   const viaNeds = rasTimes.source === 'Neds';
   add('ras-times', 'Race times (RAS / Neds)', rasTimes.lastError || (rasTimes.nedsPageErrors || []).length ? 'warn' : 'ok',
     rasTimes.lastRunAt ? `${rasTimes.races} races${viaNeds ? ' via Neds' : ''}` : rasTimes.lastError ? 'Failed' : 'Starting',
-    [`${TIME_CHECK_COUNTRIES.join(', ')} · RAS every ${RAS_TIMES_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
+    [`${TIME_CHECK_COUNTRIES.join(', ')} · RAS every ${RAS_EVERY_MS / 60000} min, today + tomorrow; warns when more than ${TIME_MISMATCH_MIN} min out`,
       viaNeds && rasTimes.rasError ? `RAS not reachable (${rasTimes.rasError}), so Neds day pages every ${NEDS_TIMES_EVERY_MS / 60000} min (no MEX/SPA/ARG/URU/BRZ/SAU there)` : '',
       rasTimes.lastRunAt ? `last ${new Date(rasTimes.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
       (rasTimes.nedsPageErrors || []).length ? `Neds pages failed: ${rasTimes.nedsPageErrors.join('; ')}` : '',
@@ -1372,6 +1372,39 @@ async function fetchSource(label, url, options = {}) {
   return res;
 }
 
+// --- RAS API politeness (3 Nov 2026, per Dinesh: "RAS Api-la check
+// pandrappo konjo slow ha check pannunga, 1h-ku oru thadava check
+// pannunga") -------------------------------------------------------------
+// Every RAS request goes through fetchRasMeetings(): a day's meeting list is
+// read at most once an hour and shared by the time check and the runners
+// check ("Check now" included; a failure is also kept for the hour), and
+// the requests go one at a time, RAS_GAP_MS apart.
+const RAS_EVERY_MS = 60 * 60 * 1000;
+const RAS_GAP_MS = 5 * 1000;
+const rasDays = new Map(); // dateStr -> { at, pending } | { at, json } | { at, error }
+let rasQueue = Promise.resolve();
+let rasLastAt = 0;
+function fetchRasMeetings(dateStr) {
+  const hit = rasDays.get(dateStr);
+  if (hit && (hit.pending || Date.now() - hit.at < RAS_EVERY_MS)) {
+    return hit.pending || (hit.error ? Promise.reject(hit.error) : Promise.resolve(hit.json));
+  }
+  for (const [d, v] of rasDays) if (!v.pending && Date.now() - v.at >= RAS_EVERY_MS) rasDays.delete(d);
+  const pending = rasQueue.then(async () => {
+    const wait = rasLastAt + RAS_GAP_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    try {
+      return await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json();
+    } finally {
+      rasLastAt = Date.now();
+    }
+  });
+  rasQueue = pending.catch(() => {});
+  rasDays.set(dateStr, { at: Date.now(), pending });
+  pending.then((json) => rasDays.set(dateStr, { at: Date.now(), json }), (error) => rasDays.set(dateStr, { at: Date.now(), error }));
+  return pending;
+}
+
 // --- Neds website politeness (5 Oct 2026, per Dinesh: "Ipdi panna inda site
 // enga IP block pannuma?") -------------------------------------------------
 // Every Neds page goes through fetchNeds(): a gap between requests, and if
@@ -1513,7 +1546,7 @@ async function fetchSourceMeetings(source, listDates, keepDates, inScope) {
   const byKey = new Map();
   for (const dateStr of listDates) {
     const list = source === 'ras'
-      ? parseRunnerMeetings(await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json())
+      ? parseRunnerMeetings(await fetchRasMeetings(dateStr))
       : parseNedsSiteMeetings(await fetchNeds(`${NEDS_SITE_BASE}/${dateStr}`));
     for (const m of list) {
       if (!keepDates.includes(m.date) || !inScope(m.country, m.discipline)) continue;
@@ -2642,9 +2675,8 @@ const RAS_COUNTRY_ALIAS = { UK: 'GB', ESP: 'SPA', BRA: 'BRZ', URY: 'URU', KSA: '
 const RAS_COURSE_ALIAS = { 'PAN|PANAMA': 'HIPODROMOPRESIDENTEREMON' };
 const TIME_MISMATCH_MIN = 2;
 // RAS once an hour (26 Oct 2026, per Dinesh: "1h ku oru thadawa check
-// pannunga, appo block aagadu"); the timer still ticks every 10 min for the
-// Neds fallback (NEDS_TIMES_EVERY_MS).
-const RAS_TIMES_EVERY_MS = 60 * 60 * 1000;
+// pannunga, appo block aagadu" -- fetchRasMeetings' hourly copy); the timer
+// ticks every 10 min for the Neds fallback (NEDS_TIMES_EVERY_MS).
 const RAS_TIMES_TICK_MS = 10 * 60 * 1000;
 const rasTimes = { byRace: new Map(), lastRunAt: null, lastError: null, races: 0, mismatches: 0, running: false };
 const courseKey = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -2700,12 +2732,10 @@ async function refreshRasTimes() {
     const byRace = new Map();
     let races = 0;
     let rasMeetings = null;
-    const rasDue = !rasTimes.rasTriedAt || Date.now() - rasTimes.rasTriedAt >= RAS_TIMES_EVERY_MS;
-    if (rasDue) try {
-      rasTimes.rasTriedAt = Date.now();
+    try {
       rasMeetings = [];
       for (const dateStr of dates) {
-        const j = await (await fetchSource(RUNNERS_SOURCES.ras, `${RUNNERS_API_URL}?date=${dateStr}`)).json();
+        const j = await fetchRasMeetings(dateStr);
         rasMeetings.push((j.meetings || [])
           .map((m) => ({ ...m, country: RAS_COUNTRY_ALIAS[m.country] || m.country }))
           .filter((m) => TIME_CHECK_COUNTRIES.includes(m.country) && (m.local_race_dates || []).includes(dateStr))
@@ -2721,8 +2751,6 @@ async function refreshRasTimes() {
       Object.assign(rasTimes, { byRace, races, source: 'RAS', lastRunAt: new Date().toISOString(), lastError: null, nedsPageErrors: [] });
       return;
     }
-    // Between the hourly RAS checks the last RAS times stay in use.
-    if (!rasDue && rasTimes.source === 'RAS' && !rasTimes.rasError) return;
     if (rasTimes.nedsTriedAt && Date.now() - rasTimes.nedsTriedAt < NEDS_TIMES_EVERY_MS) return;
     rasTimes.nedsTriedAt = Date.now();
     const pool = [];
