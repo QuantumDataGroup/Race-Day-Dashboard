@@ -1553,6 +1553,7 @@
         popupTopRowHtml +
         '<div class="modal-head-row"><div>' +
         '<h2>' + countryFlagImg(race.country) + ' ' + escapeHtmlClient(race.meeting) + ' (' + escapeHtmlClient(race.country) + ') - Race ' + race.rNo + '</h2>' +
+        (race.meetingType === 'Metro' ? '<span class="metro-tag" title="Metropolitan meeting (Racing Australia)">Metropolitan</span>' : '') +
         (race.rName ? '<p class="modal-race-name">' + escapeHtmlClient(race.rName) + '</p>' : '') +
         '<p class="modal-sub">' + escapeHtmlClient(race.disciplineLabel) +
           (race.timeLabel ? ' | ' + escapeHtmlClient(race.timeLabel) : '') +

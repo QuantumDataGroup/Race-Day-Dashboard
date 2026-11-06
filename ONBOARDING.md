@@ -529,6 +529,24 @@ MEX/SPA/ARG/URU/BRZ/SAU. The warning says which source ("Neds 19:02"); the healt
 "N races via Neds". RAS and Neds don't always agree (22 Oct: RAS had all 7 Northam races out,
 Neds only R2-R4).
 
+### Metropolitan meetings (Racing Australia, 6 Nov 2026)
+A "METROPOLITAN" label under the meeting name on the grid and in the race popup
+header, for AUS Thoroughbred meetings Racing Australia calls Metro (listed first in their
+country on the grid). Its meeting pages
+say `Meeting Type: Metro (TAB MEETING)` (or Provincial / Country); its home page
+(`https://www.racingaustralia.horse/`) lists the coming meetings without the type.
+`runMetroCheck` (server.js), once a day (`METRO_EVERY_MS`, from the last run): the home
+page, then for each meeting from today to the day after tomorrow without a type yet, its
+`FreeFields/Scratchings.aspx?Key=` page (the smallest one with the type, ~33 KB), one a
+minute (`METRO_GAP_MS`). The site showed an "Are you human?" page after ~15 quick
+requests while this was built, so that page (or 403/429) stops every request to it for
+24 hours (`fetchRa`). Types are kept in `metro-meetings.json` in the data folder (saved
+after every page, a week kept), so a meeting is read once. Trials and picnic meetings
+(a 4th key part) are skipped. `applyMeetingType` (on every read) sets `doc.meetingType`,
+matching by date, state (from `rCourse`, "ROSEHILL-NSW-AUS") and name (`sameCourse`:
+ROSEHILL in "Rosehill Gardens", GEELONG in "Ladbrokes Geelong"; an exact name first).
+System Health row "Metropolitan meetings (Racing Australia)".
+
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into
 the DB: `https://troyendata.com/Race?raceId=<race _id>` (same id as ours). The race
