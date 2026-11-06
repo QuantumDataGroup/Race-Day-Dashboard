@@ -546,6 +546,13 @@ after every page, a week kept), so a meeting is read once. Trials and picnic mee
 matching by date, state (from `rCourse`, "ROSEHILL-NSW-AUS") and name (`sameCourse`:
 ROSEHILL in "Rosehill Gardens", GEELONG in "Ladbrokes Geelong"; an exact name first).
 System Health row "Metropolitan meetings (Racing Australia)".
+Racing Australia answered our production server 403 from its first request (6 Nov
+2026), so a meeting without a type from there is Metro when its course is in
+`METRO_TRACKS` (server.js, our names by state: Randwick, Randwick Kensington, Rosehill,
+Warwick Farm, Canterbury, Flemington, Caulfield, Caulfield Heath, Moonee Valley,
+Sandown-Hillside/-Lakeside, Eagle Farm, Doomben, Morphettville, Morphettville Parks,
+Ascot, Belmont Park). Racing Australia's type wins when it has one. The daily check
+still tries Racing Australia (one request while it refuses).
 
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into
