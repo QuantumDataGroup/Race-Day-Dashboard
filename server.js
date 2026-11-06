@@ -325,6 +325,7 @@ function applyAllIgnores(docs) {
   applyMissingJockeyIgnores(docs);
   applyTimeMismatch(docs);
   applyVideoIgnores(docs);
+  applyMeetingType(docs);
 }
 
 // --- Response cache (1 Oct 2026, per Dinesh: "site a konjo optimize panni
@@ -853,6 +854,16 @@ async function runHealthChecks() {
       videoAlertState.lastRunAt ? `last ${fmtTime(videoAlertState.lastRunAt)}` : '',
       `${Object.keys(videoIgnores).length} race${Object.keys(videoIgnores).length === 1 ? '' : 's'} ignored`,
       videoAlertState.lastError ? `failed: ${videoAlertState.lastError}` : ''].filter(Boolean).join(' · '));
+
+  // Metropolitan meetings from Racing Australia (6 Nov 2026).
+  const metroKnown = Object.values(metroState.meetings).filter((v) => v.type);
+  const metroPaused = Date.now() < (metroState.pausedUntil || 0);
+  add('metro', 'Metropolitan meetings (Racing Australia)', metroPaused || metroState.lastError ? 'warn' : 'ok',
+    metroPaused ? 'Paused' : metroState.lastRunAt ? `${metroKnown.filter((v) => v.type === 'Metro').length} metro of ${metroKnown.length}` : 'Starting',
+    ['Once a day, today to +2, one page a minute; a meeting read once is kept',
+      metroState.lastRunAt ? `last ${fmtTime(metroState.lastRunAt)} (${metroState.lastRead} page${metroState.lastRead === 1 ? '' : 's'})` : '',
+      metroPaused ? `paused until ${fmtTime(new Date(metroState.pausedUntil).toISOString())}: ${metroState.pauseReason}` : '',
+      metroState.lastError && !metroPaused ? `failed: ${metroState.lastError}` : ''].filter(Boolean).join(' · '));
 
   // Comment fact check (27 Oct 2026): master admin only.
   add('comment-facts', 'Comment fact check', commentFactState.lastError ? 'warn' : 'ok',
@@ -2458,7 +2469,7 @@ async function loadRaceDocs(dateStr, includeTrials) {
   const rawDocs = await client.db().collection('races')
     .find(filter)
     .project({
-      _id: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1,
+      _id: 1, rCourseDisplayName: 1, rCourse: 1, rCountry: 1, rDiscipline: 1, rNo: 1, rClass: 1, rDistance: 1, rPrizeMoney: 1, rScheduleTime: 1,
       meetingId: 1, rStatus: 1, isOpen: 1, isAbandoned: 1, isTrail: 1, resultString: 1, createdAt: 1, rScheduleTimeUTC: 1, rDate: 1,
       'runners.jockey': 1, 'runners.isScratched': 1, 'runners.tabNo': 1, 'runners.fp': 1,
       'runners.trainer': 1, 'runners.horseName': 1, 'runners.runnerId': 1, 'runners.age': 1, 'runners.sex': 1,
@@ -2794,6 +2805,146 @@ setTimeout(refreshRasTimes, 30 * 1000);
 setInterval(refreshRasTimes, RAS_TIMES_TICK_MS);
 setInterval(() => refreshRacecardApi(false), RACECARD_API_EVERY_MS);
 setInterval(() => refreshRacecardApi(true), RACECARD_API_SOON_EVERY_MS);
+
+// --- Metropolitan meetings (6 Nov 2026, per Dinesh: "Metro meetings irunda
+// Metronu kaattanu ... oru thadava per day check panni") --------------------
+// Racing Australia's meeting pages say "Meeting Type: Metro (TAB MEETING)"
+// (or Provincial / Country). Its home page lists the coming week's meetings
+// without the type, so once a day this reads that list and then, for each
+// AUS Thoroughbred meeting from today to the day after tomorrow without a
+// type yet, that meeting's Scratchings page (the smallest page with the
+// type, ~33 KB) -- one page a minute: the site showed an "Are you human?"
+// page after ~15 quick requests while this was built. A type once read is
+// kept (metro-meetings.json, saved after every page); "Are you human?"
+// (or 403/429) stops every request to the site for 24 hours.
+const RA_BASE = 'https://www.racingaustralia.horse';
+const METRO_EVERY_MS = 24 * 60 * 60 * 1000;
+const METRO_GAP_MS = 60 * 1000;
+const METRO_PAUSE_MS = 24 * 60 * 60 * 1000;
+const METRO_STATE_PATH = path.join(ACTIVITY_LOG_DIR, 'metro-meetings.json');
+let metroState = { meetings: {}, lastRunAt: null, lastError: null, lastRead: 0, pausedUntil: 0, pauseReason: null };
+try {
+  if (fs.existsSync(METRO_STATE_PATH)) metroState = { ...metroState, ...JSON.parse(fs.readFileSync(METRO_STATE_PATH, 'utf8')) };
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${METRO_STATE_PATH}: ${err.message} -- starting fresh`);
+}
+let metroRunning = false;
+let metroIndex = null; // `${date}|${state}` -> [{ track, type }]
+function saveMetroState() {
+  metroIndex = null;
+  try { fs.writeFileSync(METRO_STATE_PATH, JSON.stringify(metroState), 'utf8'); } catch (err) { /* in-memory state still works */ }
+}
+
+async function fetchRa(url) {
+  if (Date.now() < (metroState.pausedUntil || 0)) {
+    throw Object.assign(new Error(`Racing Australia paused until ${new Date(metroState.pausedUntil).toISOString()} (${metroState.pauseReason})`), { paused: true });
+  }
+  let res;
+  try {
+    res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'text/html' }, signal: AbortSignal.timeout(60 * 1000) });
+  } catch (err) {
+    throw new Error(`Racing Australia not reachable: ${networkReason(err)}`);
+  }
+  const html = await res.text();
+  if (res.status === 403 || res.status === 429 || /Are you human\?/i.test(html)) {
+    metroState.pausedUntil = Date.now() + METRO_PAUSE_MS;
+    metroState.pauseReason = `${res.status === 200 ? '"Are you human?" page' : `answered ${res.status}`} at ${new Date().toISOString()}`;
+    saveMetroState();
+    console.warn(`[race-dashboard] WARNING: Racing Australia ${metroState.pauseReason} -- no requests for 24 hours`);
+    throw Object.assign(new Error(`Racing Australia ${metroState.pauseReason} -- paused for 24 hours`), { paused: true });
+  }
+  if (!res.ok) throw new Error(`Racing Australia answered ${res.status}`);
+  return html;
+}
+
+// Home page -> [{ key: "2026Nov07,NSW,Rosehill Gardens", date, state, track }].
+// Trials and picnic meetings (a 4th key part) are left out.
+const RA_MONTHS = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+function parseRaMeetingList(html) {
+  const out = new Map();
+  for (const m of html.matchAll(/FreeFields\/Form\.aspx\?Key=([^"'&]+)/g)) {
+    let key;
+    try { key = decodeURIComponent(m[1]); } catch (err) { continue; }
+    const parts = key.split(',');
+    const d = /^(\d{4})([A-Za-z]{3})(\d{2})$/.exec(parts[0] || '');
+    if (parts.length !== 3 || !d || !RA_MONTHS[d[2].toLowerCase()]) continue;
+    out.set(key, { key, date: `${d[1]}-${RA_MONTHS[d[2].toLowerCase()]}-${d[3]}`, state: parts[1].toUpperCase(), track: parts[2].trim() });
+  }
+  return [...out.values()];
+}
+function parseRaMeetingType(html) {
+  const text = html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const m = /Meeting Type:\s*([A-Za-z]+)(?:\s*\(([^)]*)\))?/.exec(text);
+  return m ? { type: m[1], note: m[2] || null } : null;
+}
+
+async function runMetroCheck() {
+  if (metroRunning) return;
+  metroRunning = true;
+  const startedAt = Date.now();
+  let read = 0;
+  try {
+    const today = todayStr();
+    const dates = [today, shiftDate(today, 1), shiftDate(today, 2)];
+    for (const [k, v] of Object.entries(metroState.meetings)) if (v.date < shiftDate(today, -7)) delete metroState.meetings[k];
+    const wanted = parseRaMeetingList(await fetchRa(`${RA_BASE}/`))
+      .filter((m) => dates.includes(m.date) && !(metroState.meetings[m.key] && metroState.meetings[m.key].type));
+    for (const m of wanted) {
+      await sleep(METRO_GAP_MS);
+      const found = parseRaMeetingType(await fetchRa(`${RA_BASE}/FreeFields/Scratchings.aspx?Key=${encodeURIComponent(m.key)}`));
+      read++;
+      // No type on the page yet: tried again on tomorrow's run.
+      metroState.meetings[m.key] = { date: m.date, state: m.state, track: m.track, type: found ? found.type : null, note: found ? found.note : null, at: new Date().toISOString() };
+      saveMetroState();
+    }
+    Object.assign(metroState, { lastRunAt: new Date().toISOString(), lastError: null, lastRead: read });
+  } catch (err) {
+    // A failed run is tried again the next day like any other (the pages
+    // already read are kept).
+    Object.assign(metroState, { lastRunAt: new Date().toISOString(), lastError: err.message, lastRead: read });
+    console.warn(`[race-dashboard] WARNING: metro meetings check failed: ${err.message}`);
+  } finally {
+    metroRunning = false;
+    saveMetroState();
+    console.log(`[race-dashboard] Metro meetings check: ${read} meeting page${read === 1 ? '' : 's'} read in ${Math.round((Date.now() - startedAt) / 1000)} s`);
+    scheduleMetroCheck();
+  }
+}
+// Once a day from the last run (two minutes after start-up when overdue),
+// so restarts don't add extra runs.
+let metroTimer = null;
+function scheduleMetroCheck() {
+  clearTimeout(metroTimer);
+  const last = metroState.lastRunAt ? Date.parse(metroState.lastRunAt) : 0;
+  metroTimer = setTimeout(runMetroCheck, Math.max(2 * 60 * 1000, last + METRO_EVERY_MS - Date.now()));
+}
+
+// Applied on every read: doc.meetingType ("Metro" / "Provincial" /
+// "Country") for AUS Thoroughbred races. Our course is matched by date,
+// state (from rCourse, "ROSEHILL-NSW-AUS") and name (ROSEHILL in "Rosehill
+// Gardens"; an exact name first when two of theirs fit).
+function applyMeetingType(docs) {
+  if (!metroIndex) {
+    metroIndex = new Map();
+    for (const v of Object.values(metroState.meetings)) {
+      if (!v.type) continue;
+      for (const k of [`${v.date}|${v.state}`, `${v.date}|`]) {
+        if (!metroIndex.has(k)) metroIndex.set(k, []);
+        metroIndex.get(k).push(v);
+      }
+    }
+  }
+  for (const doc of docs) {
+    doc.meetingType = null;
+    if (doc.rCountry !== 'AUS' || doc.rDiscipline !== 'T') continue;
+    const state = (/-([A-Z]+)-AUS$/i.exec(String(doc.rCourse || '')) || [])[1] || '';
+    // No state on ours: any state that day (the `${date}|` list).
+    const fits = (metroIndex.get(`${doc.rDate}|${state.toUpperCase()}`) || []).filter((v) => sameCourseName(doc.rCourseDisplayName, v.track));
+    const exact = fits.find((v) => courseKey(v.track) === courseKey(doc.rCourseDisplayName));
+    const pick = exact || (fits.length && fits.every((v) => v.type === fits[0].type) ? fits[0] : null);
+    if (pick) doc.meetingType = pick.type;
+  }
+}
 
 async function attachSpotlights(doc) {
   doc.llmSpotlights = null;
@@ -5815,6 +5966,7 @@ app.listen(PORT, () => {
   setInterval(keepTodayWarm, 60 * 1000);
   scheduleRunnersCheck();
   scheduleJockeyCheck();
+  scheduleMetroCheck();
   console.log(`[race-dashboard] Jockey check: every ${JOCKEY_CHECK_EVERY_MS / 3600000} h (Neds website, races missing a jockey)`);
   console.log(`[race-dashboard] Runners check: every ${RUNNERS_CHECK_EVERY_MS / 3600000} h${runnersCheckState.lastRunAt ? `, last run ${runnersCheckState.lastRunAt}` : ', first run in a minute'}`);
 });
