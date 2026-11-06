@@ -467,6 +467,8 @@ function buildSchedule(docs, dateStr) {
         races: new Map(),
       });
     }
+    // Racing Australia's meeting type (server.js applyMeetingType, 6 Nov 2026).
+    if (doc.meetingType && !groups.get(key).meetingType) groups.get(key).meetingType = doc.meetingType;
     // Duplicate race documents for the same meeting+race number do happen
     // (confirmed 15 Sep 2026, per Dinesh -- Greyhound MANDURAH had a full
     // second doc per race, an older one whose rScheduleTime never got
@@ -736,7 +738,7 @@ function buildSchedule(docs, dateStr) {
     const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasTimeMismatch || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || hasScheduleIssue;
 
     meetings.push({
-      meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB,
+      meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB, meetingType: g.meetingType || null,
       hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasTimeMismatch, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
       scheduleNote,
       races,
@@ -993,6 +995,7 @@ function buildRaceDetail(doc) {
     date: doc.rDate,
     url: raceUrl({ discipline: doc.rDiscipline, country: doc.rCountry, meeting: doc.rCourseDisplayName, date: doc.rDate, rNo: doc.rNo }),
     meeting: doc.rCourseDisplayName,
+    meetingType: doc.meetingType || null,
     rName: doc.rName || doc.rDisplayName || '',
     country: doc.rCountry,
     discipline: doc.rDiscipline,
@@ -1846,9 +1849,14 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         const mIssueCount = meetingRaceIssues.length
           ? `<span class="m-issue-count" title="${meetingRaceIssues.length} race${meetingRaceIssues.length === 1 ? '' : 's'} with an issue"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ${meetingRaceIssues.length}</span>`
           : '';
+        // Metropolitan meeting (6 Nov 2026, per Dinesh: "Metropolitan-nu
+        // podunga meeting keela") -- under the name.
+        const metroTag = m.meetingType === 'Metro'
+          ? '<span class="metro-tag" title="Metropolitan meeting (Racing Australia)">Metropolitan</span>'
+          : '';
         const mToggle = `<button type="button" class="m-toggle" aria-expanded="false" aria-label="Show races at ${escapeHtml(m.meeting)}" onclick="toggleMeetingRaces(this)">+</button>`;
         const meetingCell = `<td class="meeting"><div class="meeting-cell-inner">` +
-          `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span>${scheduleNoteTag}</span>` +
+          `<span class="meeting-name-group">${escapeHtml(m.meeting)} <span class="country">${escapeHtml(m.country)}</span>${scheduleNoteTag}${metroTag}</span>` +
           `<span class="meeting-tags-group">${tabMeetingTag}${abandonedTag}${downloadWidget}${mIssueCount}${mToggle}</span>` +
           `</div><div class="m-races" hidden></div></td>`;
 
