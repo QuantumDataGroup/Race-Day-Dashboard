@@ -531,7 +531,8 @@ Neds only R2-R4).
 
 ### Metropolitan meetings (Racing Australia, 6 Nov 2026)
 A "METROPOLITAN" label under the meeting name on the grid and in the race popup
-header, for AUS Thoroughbred meetings Racing Australia calls Metro. Its meeting pages
+header, for AUS Thoroughbred meetings Racing Australia calls Metro (listed first in their
+country on the grid). Its meeting pages
 say `Meeting Type: Metro (TAB MEETING)` (or Provincial / Country); its home page
 (`https://www.racingaustralia.horse/`) lists the coming meetings without the type.
 `runMetroCheck` (server.js), once a day (`METRO_EVERY_MS`, from the last run): the home

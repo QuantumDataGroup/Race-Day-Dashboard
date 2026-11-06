@@ -749,8 +749,12 @@ function buildSchedule(docs, dateStr) {
   for (const disc of DISCIPLINE_ORDER) {
     const discMeetings = meetings
       .filter((m) => m.discipline === disc)
-      // country-wise grouping first, then meeting name within each country
-      .sort((a, b) => a.country.localeCompare(b.country) || a.meeting.localeCompare(b.meeting));
+      // country-wise grouping first, then meeting name within each country;
+      // Metropolitan meetings at the top of theirs (6 Nov 2026, per Dinesh:
+      // "Metropolitan meetings ella AUS listala Topku konduvanga").
+      .sort((a, b) => a.country.localeCompare(b.country)
+        || (b.meetingType === 'Metro') - (a.meetingType === 'Metro')
+        || a.meeting.localeCompare(b.meeting));
     const maxRaceNo = discMeetings.reduce((max, m) => {
       const nums = Object.keys(m.races).map(Number);
       return Math.max(max, nums.length ? Math.max(...nums) : 0);
