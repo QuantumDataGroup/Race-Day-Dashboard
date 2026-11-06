@@ -17,7 +17,7 @@
 <script src="/comment-ticket.js?v={{STYLES_VERSION}}"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
-<body>
+<body class="hide-downloads">
   <header class="app-header">
     <div class="app-header-left">
       <a class="brand" href="/">
@@ -134,7 +134,7 @@
           </select>
         </label>
         <label class="show-downloads-filter">
-          <input type="checkbox" id="showDownloadsToggle" checked onchange="toggleMeetingDownloads()">
+          <input type="checkbox" id="showDownloadsToggle" onchange="toggleMeetingDownloads()">
           Show meeting downloads
         </label>
       </div>
@@ -3853,8 +3853,10 @@
       var savedTheme = 'dark';
       try { savedTheme = localStorage.getItem('rdd_theme_v2') || 'dark'; } catch (e) { /* ignore */ }
       applyTheme(savedTheme);
-      var savedShowDownloads = true;
-      try { savedShowDownloads = localStorage.getItem('rdd_showDownloads') !== '0'; } catch (e) { /* ignore */ }
+      // Off unless this browser turned it on (6 Nov 2026, per Dinesh: it came
+      // back on after a fresh login -- "default ha off aagi da varanum").
+      var savedShowDownloads = false;
+      try { savedShowDownloads = localStorage.getItem('rdd_showDownloads') === '1'; } catch (e) { /* ignore */ }
       applyDownloadsVisibility(savedShowDownloads);
       restoreFilterState();
       applyFilters();
