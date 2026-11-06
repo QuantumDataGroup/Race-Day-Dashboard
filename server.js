@@ -4875,7 +4875,7 @@ async function buildAlerts() {
       const anyTime = lateScratching && dateStr === today;
       // Results missing (21 Oct 2026, per Dinesh): a race that has run with
       // no result while a later race at the meeting has one, or (31 Oct 2026)
-      // RESULTS_LATE_MIN after its jump -- alerted then, like a late scratching.
+      // RESULTS_LATE_MIN after its scheduled time -- alerted then, like a late scratching.
       const missingResult = i.code === 'missing-results' && dateStr === today;
       if ((mins < -5 && !missingResult) || (mins > ALERT_WINDOW_MIN && !anyTime && !missingResult)) continue;
       const w = issueTracker.statusOf(i.key);
