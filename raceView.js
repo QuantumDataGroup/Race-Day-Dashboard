@@ -54,9 +54,10 @@ const STATUS_LABELS = {
 //   - rStatus "INTERIM"                                -> completed (provisional, pending confirmation)
 //   - isOpen === false (none of the above matched)     -> running (betting closed, no result yet -- in/near its live window)
 //   - anything else (isOpen true or missing)           -> upcoming
-// Results Missing once a race has run this long with no result (31 Oct
-// 2026, per Dinesh: 20 minutes); RESULTS_LATE_MIN overrides.
-const RESULTS_LATE_MIN = Number(process.env.RESULTS_LATE_MIN || 20);
+// Results Missing once a race is this long past its scheduled time with no
+// result (31 Oct 2026, per Dinesh: 20 minutes; 1 hour since 6 Nov 2026 --
+// races can start later than scheduled); RESULTS_LATE_MIN overrides.
+const RESULTS_LATE_MIN = Number(process.env.RESULTS_LATE_MIN || 60);
 // Every issue field of a schedule race, emptied -- what an abandoned race
 // gets (buildSchedule; schedule issues are dropped there too).
 const ABANDONED_QUIET = {
@@ -666,7 +667,7 @@ function buildSchedule(docs, dateStr) {
     // abandoned, or canceled race ha irunda ignore pannunga").
     // Also (31 Oct 2026, per Dinesh: BARCALDINE R1-R3 ran with no results
     // and no later race had any): no result RESULTS_LATE_MIN minutes after
-    // the jump.
+    // its scheduled time.
     {
       let laterHasResult = false;
       const nowMs = Date.now();
@@ -680,7 +681,7 @@ function buildSchedule(docs, dateStr) {
         const late = minsSince != null && minsSince >= RESULTS_LATE_MIN;
         race.missingResult = !hasResult && race.status !== 'abandoned' && !race.isTrial && (laterHasResult || late);
         race.missingResultText = !race.missingResult ? null
-          : laterHasResult ? 'no results yet, a later race already has them' : `no results ${minsSince} min after the jump`;
+          : laterHasResult ? 'no results yet, a later race already has them' : `no results ${minsSince} min after its scheduled time`;
         if (hasResult) laterHasResult = true;
       }
     }
