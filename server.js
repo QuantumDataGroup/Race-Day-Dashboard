@@ -859,8 +859,8 @@ async function runHealthChecks() {
   const metroKnown = Object.values(metroState.meetings).filter((v) => v.type);
   const metroPaused = Date.now() < (metroState.pausedUntil || 0);
   add('metro', 'Metropolitan meetings (Racing Australia)', metroPaused || metroState.lastError ? 'warn' : 'ok',
-    metroPaused ? 'Paused' : metroState.lastRunAt ? `${metroKnown.filter((v) => v.type === 'Metro').length} metro of ${metroKnown.length}` : 'Starting',
-    ['Once a day, today to +2, one page a minute; a meeting read once is kept',
+    metroPaused ? 'Paused (track list in use)' : metroState.lastRunAt ? `${metroKnown.filter((v) => v.type === 'Metro').length} metro of ${metroKnown.length}` : 'Starting',
+    ['Once a day, today to +2, one page a minute; a meeting read once is kept; without a type there, the metro track list (METRO_TRACKS)',
       metroState.lastRunAt ? `last ${fmtTime(metroState.lastRunAt)} (${metroState.lastRead} page${metroState.lastRead === 1 ? '' : 's'})` : '',
       metroPaused ? `paused until ${fmtTime(new Date(metroState.pausedUntil).toISOString())}: ${metroState.pauseReason}` : '',
       metroState.lastError && !metroPaused ? `failed: ${metroState.lastError}` : ''].filter(Boolean).join(' · '));
@@ -2919,10 +2919,24 @@ function scheduleMetroCheck() {
   metroTimer = setTimeout(runMetroCheck, Math.max(2 * 60 * 1000, last + METRO_EVERY_MS - Date.now()));
 }
 
+// The capital-city metro tracks, our names (checked against the DB 6 Nov
+// 2026), used when Racing Australia has no type for the meeting -- it
+// answered our production server 403 from the first request (6 Nov 2026,
+// per Dinesh: "Metro track list + RA").
+const METRO_TRACKS = {
+  NSW: ['RANDWICK', 'RANDWICK KENSINGTON', 'ROSEHILL', 'WARWICK FARM', 'CANTERBURY'],
+  VIC: ['FLEMINGTON', 'CAULFIELD', 'CAULFIELD HEATH', 'MOONEE VALLEY', 'SANDOWN-HILLSIDE', 'SANDOWN-LAKESIDE'],
+  QLD: ['EAGLE FARM', 'DOOMBEN'],
+  SA: ['MORPHETTVILLE', 'MORPHETTVILLE PARKS'],
+  WA: ['ASCOT', 'BELMONT PARK'],
+};
+const metroTrackKeys = new Set(Object.entries(METRO_TRACKS).flatMap(([state, names]) => names.map((n) => `${state}|${courseKey(n)}`)));
+
 // Applied on every read: doc.meetingType ("Metro" / "Provincial" /
 // "Country") for AUS Thoroughbred races. Our course is matched by date,
 // state (from rCourse, "ROSEHILL-NSW-AUS") and name (ROSEHILL in "Rosehill
-// Gardens"; an exact name first when two of theirs fit).
+// Gardens"; an exact name first when two of theirs fit); without a Racing
+// Australia type, METRO_TRACKS.
 function applyMeetingType(docs) {
   if (!metroIndex) {
     metroIndex = new Map();
@@ -2943,6 +2957,7 @@ function applyMeetingType(docs) {
     const exact = fits.find((v) => courseKey(v.track) === courseKey(doc.rCourseDisplayName));
     const pick = exact || (fits.length && fits.every((v) => v.type === fits[0].type) ? fits[0] : null);
     if (pick) doc.meetingType = pick.type;
+    else if (metroTrackKeys.has(`${state.toUpperCase()}|${courseKey(doc.rCourseDisplayName)}`)) doc.meetingType = 'Metro';
   }
 }
 

@@ -1857,7 +1857,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         // Metropolitan meeting (6 Nov 2026, per Dinesh: "Metropolitan-nu
         // podunga meeting keela") -- under the name.
         const metroTag = m.meetingType === 'Metro'
-          ? '<span class="metro-tag" title="Metropolitan meeting (Racing Australia)">Metropolitan</span>'
+          ? '<span class="metro-tag" title="Metropolitan meeting">Metropolitan</span>'
           : '';
         const mToggle = `<button type="button" class="m-toggle" aria-expanded="false" aria-label="Show races at ${escapeHtml(m.meeting)}" onclick="toggleMeetingRaces(this)">+</button>`;
         const meetingCell = `<td class="meeting"><div class="meeting-cell-inner">` +
