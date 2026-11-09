@@ -69,7 +69,7 @@
       applyTheme(next);
     }
 
-    var LABEL = { ok: 'OK', warn: 'Warning', bad: 'Down' };
+    var LABEL = { ok: 'OK', warn: 'Warning', bad: 'Down', off: 'Off' };
     var REFRESH_S = 60;
     var left = REFRESH_S;
     var busy = false;
@@ -90,8 +90,14 @@
       document.getElementById('bannerTitle').textContent = h.summary;
       document.getElementById('bannerText').textContent = h.problems.length ? 'Needs a look: ' + h.problems.join(', ') + '.' : 'Every check passed.';
       document.getElementById('grid').innerHTML = h.checks.map(function (c) {
+        // Job switch (9 Nov 2026): master admins turn a background job off / on.
+        var off = c.status === 'off';
+        var sw = c.switchable && h.canSwitch
+          ? '<button type="button" class="sh-switch' + (off ? ' is-off' : '') + '" data-job="' + esc(c.key) + '" data-on="' + (off ? '1' : '0') + '" data-name="' + esc(c.name) + '" title="' + (off ? 'Turn this job back on' : 'Stop this job (no requests, no alerts) until turned on again') + '">' +
+            '<i class="fa-solid fa-power-off"></i> ' + (off ? 'Turn on' : 'Turn off') + '</button>'
+          : '';
         return '<article class="sh-check sh-' + c.status + '"><div class="sh-check-top"><h2>' + esc(c.name) + '</h2>' +
-          '<span class="sh-pill sh-' + c.status + '"><i></i>' + LABEL[c.status] + '</span></div>' +
+          '<span class="sh-top-right">' + sw + '<span class="sh-pill sh-' + c.status + '"><i></i>' + LABEL[c.status] + '</span></span></div>' +
           '<div class="sh-main">' + localTimes(c.main) + '</div><div class="sh-sub">' + localTimes(c.sub) + '</div>' +
           // Weekly report (Oct 2026): preview the PDF, or send last week's to ClickUp now.
           (c.key === 'reports' ? '<div class="sh-actions"><a class="adm-btn" href="/api/reports/preview?kind=weekly" target="_blank" rel="noopener"><i class="fa-regular fa-file-pdf"></i> Preview PDF</a> ' +
@@ -132,6 +138,17 @@
     document.getElementById('checkNow').addEventListener('click', function () { load(true); });
     var reportMsg = '';
     document.getElementById('grid').addEventListener('click', function (e) {
+      var sw = e.target.closest('[data-job]');
+      if (sw) {
+        var on = sw.getAttribute('data-on') === '1';
+        if (!confirm((on ? 'Turn ON: ' : 'Turn OFF: ') + sw.getAttribute('data-name') + '?' + (on ? '' : '\n\nIt stops running (no requests, no alerts) until you turn it on again.'))) return;
+        sw.disabled = true;
+        fetch('/api/admin/jobs/' + encodeURIComponent(sw.getAttribute('data-job')), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: on }) })
+          .then(function (res) { return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || 'Failed'); return j; }); })
+          .then(function () { load(true); })
+          .catch(function (err) { alert('Not changed: ' + err.message); sw.disabled = false; });
+        return;
+      }
       var btn = e.target.closest('[data-send-report]');
       if (!btn) return;
       btn.disabled = true;
