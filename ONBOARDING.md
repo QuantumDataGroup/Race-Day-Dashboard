@@ -554,6 +554,14 @@ Sandown-Hillside/-Lakeside, Eagle Farm, Doomben, Morphettville, Morphettville Pa
 Ascot, Belmont Park). Racing Australia's type wins when it has one. The daily check
 still tries Racing Australia (one request while it refuses).
 
+**Metro meeting alerts (9 Nov 2026):** `dispatchMetroAlerts`, every 5 min from 06:00
+(`METRO_ALERT_FROM_HOUR`, DASHBOARD_TIMEZONE). Today's Metropolitan meetings: a race not
+run yet with "Scratching not updated" (scratchings feed) or "Runner missing / mismatched"
+(runners check) is pushed to the bell's people and posted to the ClickUp Chat alerts
+channel, marked METRO; once per issue + detail (`mt|` keys in `alerts-sent.json`), so a
+new scratching in the same race alerts again. Issues carry `metro` (collectIssues) and the
+bell shows a "Metro" tag on those races. System Health row "Metro meeting alerts".
+
 ### Open in Admin (22 Oct 2026)
 A race with an issue links straight to it in the Troyen admin, where fixes go into
 the DB: `https://troyendata.com/Race?raceId=<race _id>` (same id as ours). The race
