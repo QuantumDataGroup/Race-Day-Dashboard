@@ -2631,6 +2631,28 @@
     // table view in place (with a "Back to race" button) rather than a
     // second nested popup -- data comes from the SAME /api/race/:id payload
     // already loaded (server.js's racecards join), so this needs no fetch.
+    // Copies the runner ID; falls back to a hidden textarea where the
+    // clipboard API isn't allowed.
+    function copyRunnerId(btn) {
+      var id = btn.getAttribute('data-id');
+      function done() {
+        btn.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Copied';
+        setTimeout(function () { btn.innerHTML = '<i class="fa-regular fa-copy" aria-hidden="true"></i> Copy'; }, 1500);
+      }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = id;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) { /* nothing more to try */ }
+        document.body.removeChild(ta);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(id).then(done, fallback);
+      else fallback();
+    }
+
     function showHorseDetail(runnerId) {
       var content = document.getElementById('detailContent');
       if (!_currentRaceData) return;
@@ -2710,6 +2732,10 @@
       content.innerHTML =
         '<button type="button" class="back-to-race-btn" onclick="renderRacePopup(_currentRaceData)">&larr; Back to race</button>' +
         '<h2 class="horse-detail-name">' + escapeHtmlClient(r.horseName) + (r.region ? ' <span class="horse-region">(' + escapeHtmlClient(r.region) + ')</span>' : '') + '</h2>' +
+        // Runner ID with a Copy button (9 Nov 2026, per Dinesh).
+        (r.runnerId
+          ? '<p class="runner-id-row">ID: <code>' + escapeHtmlClient(r.runnerId) + '</code> <button type="button" class="copy-id-btn" data-id="' + escapeHtmlClient(r.runnerId) + '" onclick="copyRunnerId(this)"><i class="fa-regular fa-copy" aria-hidden="true"></i> Copy</button></p>'
+          : '') +
         detailGridHtml +
         runnerCommentHtml +
         '<div class="popup-tabs">' +
