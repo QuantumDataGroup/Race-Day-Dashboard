@@ -1158,6 +1158,13 @@ body.race-standalone-view .health-strip { display: none; }
 .sh-check { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .sh-check.sh-warn { border-color: var(--adm-dl); }
 .sh-check.sh-bad { border-color: var(--adm-warn); }
+/* Job switches (9 Nov 2026): a job turned off on System Health. */
+.sh-check.sh-off { border-style: dashed; opacity: .75; }
+.sh-pill.sh-off { background: var(--border); color: var(--text-muted, #8a94a6); }
+.sh-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; border: 1px solid var(--adm-ok); background: transparent; color: var(--adm-ok); }
+.sh-switch.is-off { border-color: var(--adm-warn); color: var(--adm-warn); }
+.sh-switch:disabled { opacity: .5; cursor: default; }
+.sh-check-top .sh-top-right { display: inline-flex; align-items: center; gap: 6px; }
 .sh-check-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sh-check h2 { margin: 0; font-size: 14px; }
 .sh-main { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }

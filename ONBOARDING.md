@@ -672,6 +672,16 @@ bottom of the dashboard shows "Data last scraped / Changes checked / Page
 updated" to everyone, plus the overall health status and a link for
 admins. The public `/health` (DB ping only) stays for the uptime monitor.
 
+**Job switches (9 Nov 2026, per Dinesh):** master admins (`MASTER_ADMINS`) get a
+"Turn off / Turn on" button on each background job's row (`JOB_SWITCHES` in server.js:
+runners, jockeys, video, racecard-api, ras-times, missing-alerts, video-alerts, metro,
+metro-alerts, comment-facts, alerts, reports, changes), via `POST /api/admin/jobs/:key
+{ on }`. Off, the job skips every run (`jobOn(key)` at its start): no requests to its
+source, no alerts; what it found last stays. The row shows "Off" (who and when), the
+banner counts it ("· N turned off"), "Check now" on Missing Runners refuses, and timer
+jobs look again every 10 min. Kept in `jobs-off.json` in the data folder, so a restart
+keeps it off.
+
 ### Admin page (`/admin`, admins only)
 One login per person. Admins (e.g. `Dinesh`) see an **Admin** link in the
 header: add users (username + password, optional admin role), reset a
