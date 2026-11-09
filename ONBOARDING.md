@@ -775,7 +775,8 @@ and get swapped for the readable one. A shared link opened while logged out
 returns to that race after login.
 
 ### Runner detail (click a horse name)
-Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
+Under the name, the runner ID (`runners.runnerId`) with a **Copy** button
+(`copyRunnerId`, 9 Nov 2026). Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
 (most recent past race's date) / Sire / Dam / Weight. Runner's narrative
 comment shown inline below that (always visible, not a tab). Then three
 tabs: **Past Form** (full past-races table, click a row to open that old
