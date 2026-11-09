@@ -637,7 +637,7 @@ function trackedDates() {
 let changeCheckRunning = false;
 let changeCleanupDate = null;
 async function checkDataChanges() {
-  if (changeCheckRunning) return;
+  if (changeCheckRunning || !jobOn('changes')) return;
   changeCheckRunning = true;
   try {
     const db = (await getClient()).db();
@@ -739,6 +739,29 @@ async function fetchFeedRows(url) {
   return Array.isArray(json.data) ? json.data.length : 0;
 }
 
+// --- Job switches (9 Nov 2026, per Dinesh: "System Health irukka ellathukku
+// ... on off button ... edawadu oru API stop panni vekkanum na") -----------
+// Each background job below can be turned off from its System Health row
+// (master admins). Off, the job skips every run -- no requests to its source,
+// no alerts -- and what it found last stays as it was. Kept in jobs-off.json
+// in the data folder, so a restart keeps it off.
+const JOB_SWITCHES = new Set(['runners', 'jockeys', 'video', 'racecard-api', 'ras-times', 'missing-alerts', 'video-alerts', 'metro', 'metro-alerts', 'comment-facts', 'alerts', 'reports', 'changes']);
+const JOB_OFF_RETRY_MS = 10 * 60 * 1000; // a timer job that's off looks again this often
+const JOBS_OFF_PATH = path.join(ACTIVITY_LOG_DIR, 'jobs-off.json');
+let jobsOff = {}; // key -> { by, at }
+try {
+  if (fs.existsSync(JOBS_OFF_PATH)) jobsOff = JSON.parse(fs.readFileSync(JOBS_OFF_PATH, 'utf8')) || {};
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${JOBS_OFF_PATH}: ${err.message} -- every job on`);
+}
+function jobOn(key) { return !jobsOff[key]; }
+function setJob(key, on, by) {
+  if (on) delete jobsOff[key];
+  else jobsOff[key] = { by, at: new Date().toISOString() };
+  fs.writeFileSync(JOBS_OFF_PATH, JSON.stringify(jobsOff), 'utf8');
+  healthCache = null;
+}
+
 async function runHealthChecks() {
   const now = Date.now();
   const today = todayStr();
@@ -754,6 +777,7 @@ async function runHealthChecks() {
     timed(() => fetchFeedRows(SPEED_MAP_GREYHOUND_STATS_URL + today)),
     timed(() => fetchFeedRows(SCRATCHINGS_STATS_URL + today)),
     timed(async () => {
+      if (!jobOn('video')) return 'off'; // turned off: not asked
       const url = new URL(VIDEO_LIST_URL);
       url.searchParams.set('list-type', '2');
       url.searchParams.set('max-keys', '1');
@@ -920,11 +944,19 @@ async function runHealthChecks() {
   add('deploy', 'Deployed code', stale.length ? 'warn' : 'ok', newest ? new Date(newest).toISOString() : '-',
     stale.length ? `Uploaded after the server started, restart WinSW to load: ${stale.join(', ')}` : `Latest code file upload${cssTime ? ` · styles.css ${cssTime}` : ''}`);
 
+  for (const c of checks) {
+    if (!JOB_SWITCHES.has(c.key)) continue;
+    c.switchable = true;
+    const off = jobsOff[c.key];
+    if (off) Object.assign(c, { status: 'off', main: 'Off', sub: `Turned off by ${off.by} at ${off.at} -- not running, last data kept · ${c.sub || ''}` });
+  }
   const bad = checks.filter((c) => c.status === 'bad');
   const warn = checks.filter((c) => c.status === 'warn');
   const overall = bad.length ? 'bad' : warn.length ? 'warn' : 'ok';
-  const summary = overall === 'ok' ? 'All systems OK'
-    : [bad.length ? `${bad.length} down` : '', warn.length ? `${warn.length} warning${warn.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+  const offCount = checks.filter((c) => c.status === 'off').length;
+  const summary = (overall === 'ok' ? 'All systems OK'
+    : [bad.length ? `${bad.length} down` : '', warn.length ? `${warn.length} warning${warn.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(', '))
+    + (offCount ? ` · ${offCount} turned off` : '');
   return { checkedAt: new Date().toISOString(), overall, summary, problems: [...bad, ...warn].map((c) => c.name), checks };
 }
 
@@ -1151,7 +1183,7 @@ async function attachVideoStatus(docs, dateStr) {
   // A future day's races have no videos yet (and Missing Video is today
   // only), so there is nothing to look up -- the alerts bell loads tomorrow
   // every minute (Oct 2026).
-  if (dateStr > todayStr()) return;
+  if (dateStr > todayStr() || !jobOn('video')) return;
   const eligible = docs.filter((d) => d.rDiscipline === 'T' && VIDEO_COUNTRIES.has(d.rCountry) && !d.isTrail);
   if (!eligible.length) return;
 
@@ -1671,6 +1703,11 @@ async function checkRunnersWith(source, dates, dbRaces, inScope) {
 
 async function runRunnersCheck(trigger = 'schedule') {
   if (runnersCheckRunning) return false;
+  if (!jobOn('runners')) {
+    clearTimeout(runnersCheckTimer);
+    runnersCheckTimer = setTimeout(runRunnersCheck, JOB_OFF_RETRY_MS);
+    return false;
+  }
   runnersCheckRunning = true;
   const startedAt = Date.now();
   const dates = trackedDates().slice(1); // today, tomorrow, day after -- same days as Missing Meetings
@@ -1724,7 +1761,7 @@ async function runRunnersCheck(trigger = 'schedule') {
 // The RAS API has no barrier or weight, so these come from Neds only.
 const WEIGHT_CHECK_WINDOW_MS = 12 * 60 * 60 * 1000;
 async function runJockeyCheck() {
-  if (jockeyCheckRunning || runnersCheckRunning) { scheduleJockeyCheck(10 * 60 * 1000); return; }
+  if (jockeyCheckRunning || runnersCheckRunning || !jobOn('jockeys')) { scheduleJockeyCheck(10 * 60 * 1000); return; }
   jockeyCheckRunning = true;
   const startedAt = Date.now();
   const stats = { meetings: 0, meetingsNotInDb: [], pageErrors: 0 };
@@ -2635,7 +2672,7 @@ async function fetchRacecardCard(raceId) {
 const RACECARD_API_SOON_EVERY_MS = 2 * 60 * 1000;
 const RACECARD_API_SOON_WINDOW_MS = 3 * 60 * 60 * 1000;
 async function refreshRacecardApi(soonOnly) {
-  if (racecardApi.running) return;
+  if (racecardApi.running || !jobOn('racecard-api')) return;
   racecardApi.running = true;
   try {
     const today = todayStr();
@@ -2743,7 +2780,7 @@ async function matchSourceTimes(dateStr, meetings, src, byRace) {
   return races;
 }
 async function refreshRasTimes() {
-  if (rasTimes.running) return;
+  if (rasTimes.running || !jobOn('ras-times')) return;
   rasTimes.running = true;
   try {
     const today = todayStr();
@@ -2887,6 +2924,11 @@ function parseRaMeetingType(html) {
 
 async function runMetroCheck() {
   if (metroRunning) return;
+  if (!jobOn('metro')) {
+    clearTimeout(metroTimer);
+    metroTimer = setTimeout(runMetroCheck, JOB_OFF_RETRY_MS);
+    return;
+  }
   metroRunning = true;
   const startedAt = Date.now();
   let read = 0;
@@ -3768,6 +3810,7 @@ app.post('/api/missing-runners/check', requirePermission('missing'), (req, res) 
   const attempt = runnersCheckState.lastAttemptAt ? Date.parse(runnersCheckState.lastAttemptAt) : 0;
   const waitMs = attempt + RUNNERS_CHECK_MANUAL_GAP_MS - Date.now();
   if (waitMs > 0) return res.status(429).json({ error: `Checked less than 10 minutes ago -- try again in ${Math.ceil(waitMs / 60000)} min`, retryInMs: waitMs });
+  if (!jobOn('runners')) return res.status(409).json({ error: 'The runners check is turned off on System Health' });
   const source = runnersSourceLabel('both');
   logActivity(req, 'runners-check', { detail: `Ran the runners check (${source})` });
   runRunnersCheck('manual');
@@ -3897,10 +3940,26 @@ app.get('/system-health', requirePermission('health'), (req, res) => {
 
 app.get('/api/admin/health', requirePermission('health'), async (req, res) => {
   try {
-    res.json(await getHealth(req.query.fresh === '1'));
+    res.json({ ...(await getHealth(req.query.fresh === '1')), canSwitch: isMasterAdmin(req) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Job switch (9 Nov 2026): { on: true|false }, master admins only.
+app.post('/api/admin/jobs/:key', requireWork, (req, res) => {
+  if (!isMasterAdmin(req)) return res.status(403).json({ error: 'Only the master admin can turn jobs on or off' });
+  const key = String(req.params.key || '');
+  if (!JOB_SWITCHES.has(key)) return res.status(404).json({ error: 'No such job' });
+  const on = Boolean(req.body && req.body.on);
+  try {
+    setJob(key, on, req.session.username);
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  logActivity(req, on ? 'job-on' : 'job-off', { job: key });
+  console.log(`[race-dashboard] Job ${key} turned ${on ? 'on' : 'off'} by ${req.session.username}`);
+  res.json({ ok: true, key, on });
 });
 
 app.get('/api/admin/overview', requirePermission('activity'), (req, res) => {
@@ -4337,6 +4396,7 @@ app.post('/api/race/:raceId/time-mismatch-ignore', requireWork, (req, res) => {
 // (the S3 key simply won't match), never a wrong video, so this degrades
 // safely.
 app.post('/api/video-check', async (req, res) => {
+  if (!jobOn('video')) return res.json({ results: [] }); // turned off on System Health
   const candidates = Array.isArray(req.body && req.body.candidates) ? req.body.candidates : [];
   const keysByDate = new Map();
   const results = [];
@@ -4983,6 +5043,7 @@ function chatMessage(race, milestone, issues) {
 }
 
 async function dispatchAlerts() {
+  if (!jobOn('alerts')) return;
   const recipients = alertRecipients().filter((u) => push.users().includes(u) && !snoozedAll(u));
   if (!recipients.length && !clickup.chatEnabled) return;
   const data = await buildAlerts();
@@ -5059,7 +5120,7 @@ function localHour() {
   return Number(new Date().toLocaleString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', hour12: false }));
 }
 async function dispatchMetroAlerts() {
-  if (localHour() < METRO_ALERT_FROM_HOUR) return;
+  if (localHour() < METRO_ALERT_FROM_HOUR || !jobOn('metro-alerts')) return;
   const nowMs = Date.now();
   const { issues } = await currentIssues(todayStr());
   const open = issues.filter((i) => i.metro && METRO_ALERT_CODES.has(i.code) && !i.resulted
@@ -5201,6 +5262,7 @@ async function dispatchMissingMeetingAlerts() {
   if (sent) saveAlertsSent(nowMs);
 }
 function runMissingMeetingAlerts() {
+  if (!jobOn('missing-alerts')) return;
   dispatchMissingMeetingAlerts().catch((err) => {
     missingAlertState.lastError = err.message;
     console.warn(`[race-dashboard] WARNING: missing meeting alerts failed: ${err.message}`);
@@ -5291,6 +5353,7 @@ async function dispatchVideoAlerts() {
   saveAlertsSent(nowMs);
 }
 function runVideoAlerts() {
+  if (!jobOn('video-alerts')) return;
   dispatchVideoAlerts()
     .then(() => Object.assign(videoAlertState, { lastRunAt: new Date().toISOString(), lastError: null }))
     .catch((err) => {
@@ -5576,7 +5639,7 @@ function syncCommentFactsFrom(doc) {
     .sort((a, b) => a.startUtc.localeCompare(b.startUtc));
 }
 async function dispatchCommentFactAlerts() {
-  if (commentFactState.running) return;
+  if (commentFactState.running || !jobOn('comment-facts')) return;
   commentFactState.running = true;
   try {
     const nowMs = Date.now();
@@ -5858,8 +5921,8 @@ const reports = createReports({
   dir: ACTIVITY_LOG_DIR, logoPath: path.join(__dirname, 'public', 'logo.png'), siteUrl: PUBLIC_URL,
   ownerEmail: () => ticketOwnerEmail(), daily: process.env.REPORTS_DAILY === 'on',
 });
-setInterval(() => { reports.runDue().catch(() => {}); }, 5 * 60 * 1000);
-setTimeout(() => { reports.runDue().catch(() => {}); }, 2 * 60 * 1000);
+setInterval(() => { if (jobOn('reports')) reports.runDue().catch(() => {}); }, 5 * 60 * 1000);
+setTimeout(() => { if (jobOn('reports')) reports.runDue().catch(() => {}); }, 2 * 60 * 1000);
 // A sent report's PDF (the link in the Chat message), admins only.
 app.get('/reports/:file', requireAdmin, (req, res) => {
   const file = reports.pdfFile(req.params.file);
