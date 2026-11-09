@@ -814,6 +814,10 @@ td.position-cell { font-weight: 700; }
 .horse-stat-bar { width: 100%; height: 15px; border: 1px solid #a78143; border-radius: 4px; overflow: hidden; margin-top: 6px; background: #000000; }
 .horse-stat-bar-fill { height: 100%; background: var(--accent); }
 .horse-detail-name { text-transform: uppercase; }
+/* Runner ID + Copy (9 Nov 2026). */
+.runner-id-row { margin: -4px 0 10px; font-size: 12px; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.runner-id-row code { font-size: 12px; color: var(--fg); background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; word-break: break-all; }
+.copy-id-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
 .horse-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 24px; background: var(--sub-bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; margin: 10px 0 14px; }
 @media (max-width: 480px) { .horse-detail-grid { grid-template-columns: repeat(2, 1fr); } }
 .horse-detail-cell { font-size: 13px; color: var(--fg); }
@@ -1160,7 +1164,7 @@ body.race-standalone-view .health-strip { display: none; }
 .sh-check.sh-bad { border-color: var(--adm-warn); }
 /* Job switches (9 Nov 2026): a job turned off on System Health. */
 .sh-check.sh-off { border-style: dashed; opacity: .75; }
-.sh-pill.sh-off { background: var(--border); color: var(--text-muted, #8a94a6); }
+.sh-pill.sh-off { background: var(--border); color: var(--muted); }
 .sh-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; cursor: pointer; border: 1px solid var(--adm-ok); background: transparent; color: var(--adm-ok); }
 .sh-switch.is-off { border-color: var(--adm-warn); color: var(--adm-warn); }
 .sh-switch:disabled { opacity: .5; cursor: default; }
