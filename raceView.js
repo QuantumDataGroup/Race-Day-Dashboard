@@ -1650,6 +1650,7 @@ function collectIssues(schedule) {
             key: `${race.id}|${code}`, raceId: race.id, code, label: ISSUE_LABELS[code] || code, detail: texts.join(' · '),
             meeting: m.meeting, country: m.country, discipline: m.discipline, rNo: Number(rNo),
             time: race.label, startUtc: race.startUtc || null, status: race.status, resulted: Boolean(race.resultString),
+            metro: m.meetingType === 'Metro',
           });
         }
       }

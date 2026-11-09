@@ -865,6 +865,13 @@ async function runHealthChecks() {
       metroPaused ? `paused until ${fmtTime(new Date(metroState.pausedUntil).toISOString())}: ${metroState.pauseReason}` : '',
       metroState.lastError && !metroPaused ? `failed: ${metroState.lastError}` : ''].filter(Boolean).join(' · '));
 
+  // Metro meeting scratching / runner alerts (9 Nov 2026).
+  add('metro-alerts', 'Metro meeting alerts', metroAlertState.lastError ? 'warn' : 'ok',
+    metroAlertState.lastRunAt ? `${metroAlertState.open} open · ${metroAlertState.sent} sent` : `From ${String(METRO_ALERT_FROM_HOUR).padStart(2, '0')}:00`,
+    ['Scratching not updated / runner missing or mismatched at today\'s Metropolitan meetings, every 5 min from 06:00, push + ClickUp Chat',
+      metroAlertState.lastRunAt ? `last ${fmtTime(metroAlertState.lastRunAt)}` : '',
+      metroAlertState.lastError ? `failed: ${metroAlertState.lastError}` : ''].filter(Boolean).join(' · '));
+
   // Comment fact check (27 Oct 2026): master admin only.
   add('comment-facts', 'Comment fact check', commentFactState.lastError ? 'warn' : 'ok',
     commentFactState.lastRunAt ? `${commentFactState.open.filter((a) => a.key).length} race${commentFactState.open.filter((a) => a.key).length === 1 ? '' : 's'} flagged` : 'Starting',
@@ -4898,7 +4905,7 @@ async function buildAlerts() {
       if (w.status === 'fixed') continue;
       const race = byRace.get(i.raceId) || {
         raceId: i.raceId, date: dateStr, meeting: i.meeting, country: i.country, discipline: i.discipline, rNo: i.rNo,
-        time: i.time, startUtc: i.startUtc, startsInMin: Math.round(mins),
+        time: i.time, startUtc: i.startUtc, startsInMin: Math.round(mins), metro: Boolean(i.metro),
         raceUrl: raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: dateStr, rNo: i.rNo }),
         issues: [],
       };
@@ -5034,6 +5041,61 @@ function saveAlertsSent(nowMs) {
 setInterval(() => {
   dispatchAlerts().catch((err) => { alertDispatch.lastError = err.message; console.warn(`[race-dashboard] WARNING: alert dispatch failed: ${err.message}`); });
 }, ALERT_DISPATCH_EVERY_MS);
+
+// Metro meeting alerts (9 Nov 2026, per Dinesh: "Metro meetings check
+// pannumpodu adoda meetings and Scratching also check pannunga ... Every day
+// morning after 6am"). Every 5 min from 06:00 (DASHBOARD_TIMEZONE), today's
+// Metropolitan meetings: a race not run yet with a scratching not updated in
+// ours or a runner missing / mismatched (the runners check, RAS + Neds) is
+// pushed once to the bell's people and posted to the ClickUp Chat alerts
+// channel, marked METRO. The same issue alerts again only when its detail
+// changes (another scratching). Before 06:00 nothing is sent; at 06:00
+// whatever is open goes out.
+const METRO_ALERT_EVERY_MS = 5 * 60 * 1000;
+const METRO_ALERT_FROM_HOUR = 6;
+const METRO_ALERT_CODES = new Set(['missing-scratching', 'runner-mismatch']);
+const metroAlertState = { lastRunAt: null, lastError: null, sent: 0, open: 0 };
+function localHour() {
+  return Number(new Date().toLocaleString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', hour12: false }));
+}
+async function dispatchMetroAlerts() {
+  if (localHour() < METRO_ALERT_FROM_HOUR) return;
+  const nowMs = Date.now();
+  const { issues } = await currentIssues(todayStr());
+  const open = issues.filter((i) => i.metro && METRO_ALERT_CODES.has(i.code) && !i.resulted
+    && !(Date.parse(i.startUtc || '') < nowMs - 5 * 60 * 1000)
+    && issueTracker.statusOf(i.key).status !== 'fixed');
+  metroAlertState.open = open.length;
+  const due = open.filter((i) => !alertsSent[`mt|${i.key}|${i.detail}`]);
+  if (due.length) {
+    const recipients = alertRecipients().filter((u) => push.users().includes(u) && !snoozedAll(u));
+    const urlOf = (i) => raceUrl({ discipline: i.discipline, country: i.country, meeting: i.meeting, date: todayStr(), rNo: i.rNo });
+    if (recipients.length) {
+      const batch = due.length > 3
+        ? [{ title: `METRO · ${due.length} scratching / runner issues`, body: due.slice(0, 4).map((i) => `${i.meeting} R${i.rNo}: ${i.label}`).join('\n') + (due.length > 4 ? '\n…' : ''), url: '/overview', tag: 'metro-alerts', snooze: { kind: 'race', ids: [...new Set(due.map((i) => i.raceId))] } }]
+        : due.map((i) => ({ title: `METRO · ${i.label} · ${i.meeting} R${i.rNo}`, body: `${i.meeting} R${i.rNo} (${i.country}) ${i.time || ''}: ${i.detail}`, url: urlOf(i), tag: `mt-${i.raceId}`, snooze: { kind: 'race', ids: [i.raceId] } }));
+      for (const p of batch) await push.sendTo(recipients, p);
+    }
+    metroAlertState.lastError = null;
+    if (clickup.chatEnabled) {
+      try {
+        await clickup.postChat([
+          `**[Race Day Dashboard] METRO meeting${due.length > 1 ? ` · ${due.length} issues` : ''}** — scratchings / runners not matching`,
+          ...due.map((i) => `- **${i.meeting} R${i.rNo}** (${i.country}) ${i.time || ''} · ${i.label}: ${i.detail} — [Open race](${PUBLIC_URL}${urlOf(i)})`),
+        ].join('\n'));
+      } catch (err) {
+        metroAlertState.lastError = `ClickUp Chat: ${err.message}`;
+      }
+    }
+    due.forEach((i) => { alertsSent[`mt|${i.key}|${i.detail}`] = nowMs; });
+    metroAlertState.sent += due.length;
+    saveAlertsSent(nowMs);
+  }
+  metroAlertState.lastRunAt = new Date().toISOString();
+}
+setInterval(() => {
+  dispatchMetroAlerts().catch((err) => { metroAlertState.lastError = err.message; console.warn(`[race-dashboard] WARNING: metro alerts failed: ${err.message}`); });
+}, METRO_ALERT_EVERY_MS);
 
 // Missing meeting alerts (25 Oct 2026, per Dinesh: WOODBINE was in the feed
 // and nobody picked it up -- "meetings vandu edukkama irunda oru notification

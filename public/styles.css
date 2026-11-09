@@ -168,6 +168,7 @@ body.hide-downloads .meeting-download:not(.export-data-menu) { display: none; }
 .meeting-name-group { white-space: nowrap; }
 .meeting-tags-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 /* Metropolitan meeting (6 Nov 2026) -- a small label under the name. */
+.metro-tag.al-metro { display: inline-block; margin: 0 4px; vertical-align: middle; }
 .metro-tag { display: block; width: fit-content; margin-top: 2px; font-size: 10px; font-weight: 700; letter-spacing: .3px; padding: 0 6px; border-radius: 4px; color: var(--accent); border: 1px solid var(--accent); text-transform: uppercase; line-height: 15px; }
 
 /* Trailing per-meeting Status column -- a single check/warning icon

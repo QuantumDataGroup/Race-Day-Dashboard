@@ -298,6 +298,7 @@
       var soon = m != null && m <= 30;
       return '<article class="al-race">' +
         '<div class="al-race-head"><a href="' + esc(race.raceUrl) + '">' + esc(race.meeting) + ' <b>R' + esc(race.rNo) + '</b> <span class="al-cc">' + esc(race.country) + '</span></a>' + discTag(race) +
+          (race.metro ? '<span class="metro-tag al-metro" title="Metropolitan meeting">Metro</span>' : '') +
         '<span class="al-when' + (soon ? ' al-soon' : '') + '">' + esc(inText(m)) + ' · ' + esc(dayLabel(race)) + esc(race.time || '') + '</span>' +
         snoozeBtn('race', race.raceId, raceTitle(race) + ' (' + race.country + ')', race.issues.map(function (i) { return i.detail || i.label; }).join(', '), race.raceUrl) + '</div>' +
         race.issues.map(function (i) {
