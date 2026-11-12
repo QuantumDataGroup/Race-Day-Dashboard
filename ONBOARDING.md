@@ -317,7 +317,16 @@ Group/Listed everywhere; mixed scales aren't compared), first-up / after a break
 (< 42 days = wrong), maiden / yet to win, debut, track / distance record.
 Keyword rules only, no AI. Negated phrases ("lacks recent success") and
 qualified ones ("yet to win over hurdles") are skipped, and one phrase gives one
-finding. `commentFactsFor` (server.js) gives each race-comment claim to the
+finding. "Missed / denied / failed to land" before a win means it did NOT win (12 Nov
+2026: Orsa Suprema "narrowly missed victory at MILAN", 2nd there). **Whole sentence
+(12 Nov 2026, per Dinesh: "full sentence-a read pannanum"):** each phrase is read
+with its sentence (`sentencesOf` / `clausesOf`: a "but" / "however" / "while" / ";"
+starts another clause, a comma doesn't). A clause that says where the last run
+finished ("…last start, finishing 2nd") settles a last-start win / course-result
+phrase in it, and is itself checked against the last run (or the last form figure)
+-- not when it also names another run ("two starts back", "prior"). Every finding
+carries `sentence`, shown under it on Comment Checks, in the popup and in tickets.
+Checked against 11-12 Nov 2026 (606 T races): the same 56 findings as before. `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10

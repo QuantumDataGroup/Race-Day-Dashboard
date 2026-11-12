@@ -1191,7 +1191,9 @@
           var ignore = race.canIgnoreComment && f.key
             ? ' <button type="button" class="missing-jockey-ignore-btn" onclick="ignoreCommentFact(this, ' + n + ')">&#10003; Ignore</button>' : '';
           return '<li><b>' + (f.tab != null ? escapeHtmlClient(String(f.tab)) + '. ' : '') + escapeHtmlClient(f.horse) + '</b> <span class="cf-where">' + escapeHtmlClient(f.where) + '</span> ' +
-            '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + ignore + '</li>';
+            '&ldquo;' + escapeHtmlClient(f.quote) + '&rdquo; &mdash; ' + escapeHtmlClient(f.why) + ignore +
+            // The whole sentence it's in (12 Nov 2026).
+            (f.sentence && f.sentence !== f.quote ? '<div class="cf-sentence">' + escapeHtmlClient(f.sentence) + '</div>' : '') + '</li>';
         }).join('') + '</ul></div>';
     }
     function ignoreCommentFact(btn, n) {

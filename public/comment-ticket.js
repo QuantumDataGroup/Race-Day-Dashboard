@@ -58,6 +58,8 @@
         'Where: ' + cap(i.where),
         'Comment says: "' + i.quote + '"',
         'Form shows: ' + i.why];
+      // The whole sentence it's in (12 Nov 2026).
+      if (i.sentence && i.sentence !== i.quote) block.splice(5, 0, 'In the sentence: "' + i.sentence + '"');
       if (i.recent) block.push('Last 3 runs: ' + i.recent);
       // The whole comment once per comment, for the first few races.
       var c = i.raceId + '|' + i.where + '|' + (i.where === 'runner comment' ? i.tab : '');
