@@ -641,13 +641,22 @@
       var bodyPatterns = [], capPatterns = [], sleevePatterns = [];
       var ADJACENT_GAP = 3; // just whitespace between the pattern word and the region word
       var unassigned = [];
+      // An armlet / armband is always on the sleeves, wherever it's
+      // mentioned (12 Nov 2026, per Dinesh: "Sleeves-la Armlet vanda adukku
+      // Armband generate pannunga" -- "grey armlets on black sleeves",
+      // "red sleeves with green armlet" and "white star & armlet" put it on
+      // the body). Another pattern goes on the sleeves only when a real
+      // sleeve word ("sleeves", "arms", "slvs") follows it -- the "arm" inside
+      // "armlet" made "white star & armlet" put the star on the sleeves.
+      var ARM_BAND_WORD = /^arm(let|band)s?$/;
+      var sleeveWord = /sleeve|slvs|\barms?\b/.exec(text);
+      var sleeveWordIdx = sleeveWord ? sleeveWord.index : -1;
       patternMentions.forEach(function (p) {
-        if (!capPatterns.length && capIdx !== -1 && capIdx >= p.end && capIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.end, capIdx)) {
+        if (ARM_BAND_WORD.test(p.word)) {
+          sleevePatterns.push(p);
+        } else if (!capPatterns.length && capIdx !== -1 && capIdx >= p.end && capIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.end, capIdx)) {
           capPatterns.push(p);
-        // sleeveIdx >= p.index (not p.end) also catches a pattern word that
-        // IS itself the sleeve marker, e.g. "armband" -- sleeveIdx points at
-        // the "arm" inside it, which sits before the pattern's own end.
-        } else if (!sleevePatterns.length && sleeveIdx !== -1 && sleeveIdx >= p.index && sleeveIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.index, sleeveIdx)) {
+        } else if (!sleevePatterns.some(function (q) { return !ARM_BAND_WORD.test(q.word); }) && sleeveWordIdx !== -1 && sleeveWordIdx >= p.end && sleeveWordIdx - p.end <= ADJACENT_GAP && noCommaBetween(p.end, sleeveWordIdx)) {
           sleevePatterns.push(p);
         } else {
           unassigned.push(p);
@@ -733,11 +742,16 @@
       // Sep 2026, per Dinesh: "Cap-la color mention panna illanna, Default
       // ha body color cap edukkanu"); an EXPLICIT "<region> <colour>"
       // clause (above) always wins over that default.
+      // An armlet doesn't count as the sleeve's own pattern here: "red
+      // sleeves with green armlet" / "grey armlets on black sleeves" take
+      // the colour before the sleeve word, and "Purple, royal blue armlets"
+      // (no sleeve word) keeps the body colour.
+      var sleeveOwnPatterns = sleevePatterns.filter(function (p) { return !ARM_BAND_WORD.test(p.word); });
       var sleeveColor = explicitSleeveColor
         ? explicitSleeveColor
-        : (sleevePatterns.length
+        : (sleeveOwnPatterns.length
             ? baseColor
-            : (sleeveIdx !== -1 ? (nearestColorBefore(mentions, sleeveIdx) || baseColor) : baseColor));
+            : (sleeveWordIdx !== -1 ? (nearestColorBefore(mentions, sleeveWordIdx) || baseColor) : baseColor));
       var capColor = explicitCapColor
         ? explicitCapColor
         : (capPatterns.length
