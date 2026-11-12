@@ -2758,6 +2758,9 @@
           '<button type="button" class="popup-tab-btn" id="runnerChartTabBtn" onclick="switchRunnerTab(\'chart\')">Chart</button>' +
         '</div>' +
         '<div id="runnerPastFormView" class="popup-tab-panel">' +
+          // Upcoming races in the DB (12 Nov 2026), filled by loadRunnerUpcoming.
+          '<h3 class="horse-past-races-heading">Upcoming Races</h3>' +
+          '<div id="runnerUpcoming"><p class="modal-sub">Looking for upcoming races…</p></div>' +
           '<h3 class="horse-past-races-heading">Past Races</h3>' +
           pastRacesHtml +
         '</div>' +
@@ -2769,6 +2772,38 @@
         '</div>';
 
       if (pastRaces.length) checkPastRaceVideos(pastRaces);
+      if (r.runnerId) loadRunnerUpcoming(r.runnerId, _currentRaceData.id);
+    }
+
+    // The horse's other races still to come, from our DB (12 Nov 2026, per
+    // Dinesh) -- /api/runner/:runnerId/upcoming, without the race open now.
+    function loadRunnerUpcoming(runnerId, raceId) {
+      fetch('/api/runner/' + encodeURIComponent(runnerId) + '/upcoming?exclude=' + encodeURIComponent(raceId || ''))
+        .then(function (res) { return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || 'Failed'); return j; }); })
+        .then(function (j) {
+          var box = document.getElementById('runnerUpcoming');
+          if (!box || !_currentHorseDetailRunner || _currentHorseDetailRunner.runnerId !== runnerId) return; // another profile opened since
+          box.innerHTML = j.races.length
+            ? '<table class="horse-past-races"><thead><tr><th>Date</th><th>Time</th><th>Meeting</th><th>Race</th><th>Dist</th><th>Tab</th><th>BP</th><th>Jockey</th><th></th></tr></thead><tbody>' +
+              j.races.map(function (u) {
+                return '<tr' + (u.scratched ? ' class="scratched"' : '') + '>' +
+                  '<td>' + escapeHtmlClient(u.date) + '</td>' +
+                  '<td>' + escapeHtmlClient(u.time || '-') + '</td>' +
+                  '<td>' + escapeHtmlClient(u.meeting) + ' <span class="horse-region">' + escapeHtmlClient(u.country) + '</span></td>' +
+                  '<td>R' + escapeHtmlClient(u.rNo) + (u.name ? ' · ' + escapeHtmlClient(u.name) : '') + (u.trial ? ' <span class="horse-region">(trial)</span>' : '') + (u.scratched ? ' <b>Scratched</b>' : '') + '</td>' +
+                  '<td>' + (u.distance ? escapeHtmlClient(u.distance) + 'm' : '-') + '</td>' +
+                  '<td>' + escapeHtmlClient(u.tab != null ? u.tab : '-') + '</td>' +
+                  '<td>' + escapeHtmlClient(u.barrier || '-') + '</td>' +
+                  '<td>' + escapeHtmlClient(u.jockey || '-') + '</td>' +
+                  '<td><a href="' + escapeHtmlClient(u.url) + '">Open race</a></td>' +
+                  '</tr>';
+              }).join('') + '</tbody></table>'
+            : '<p class="modal-sub">No upcoming races in the DB.</p>';
+        })
+        .catch(function (err) {
+          var box = document.getElementById('runnerUpcoming');
+          if (box) box.innerHTML = '<p class="modal-sub">Could not load upcoming races: ' + escapeHtmlClient(err.message) + '</p>';
+        });
     }
 
     var RUNNER_POPUP_TABS = [

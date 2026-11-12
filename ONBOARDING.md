@@ -776,7 +776,12 @@ returns to that race after login.
 
 ### Runner detail (click a horse name)
 Under the name, the runner ID (`runners.runnerId`) with a **Copy** button
-(`copyRunnerId`, 9 Nov 2026). Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
+(`copyRunnerId`, 9 Nov 2026). The Past Form tab starts with **Upcoming Races**
+(12 Nov 2026): `GET /api/runner/:runnerId/upcoming?exclude=<race id>` -- runnerId is
+the horse's own id in every race it runs, so races from yesterday on with it, not
+resulted / abandoned / started over 10 min ago, without the race open (cached 60 s;
+the rDate index keeps the scan small), each with tab, barrier, jockey, scratched and
+an "Open race" link. Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
 (most recent past race's date) / Sire / Dam / Weight. Runner's narrative
 comment shown inline below that (always visible, not a tab). Then three
 tabs: **Past Form** (full past-races table, click a row to open that old
