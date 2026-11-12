@@ -4238,6 +4238,47 @@ app.get('/api/upcoming', async (req, res) => {
   }
 });
 
+// A horse's races still to come (12 Nov 2026, per Dinesh: "Horse profile
+// open pannadu anda horse upcoming races DB-la irunda, ada add pannunga").
+// runnerId is the horse's own id, the same in every race it runs (checked
+// 12 Nov 2026 against Dream Shadow and Midnight Special), so this is the
+// races from yesterday on (an overseas date can be a day behind ours) with
+// that runner, not resulted, not abandoned, not started more than 10 min
+// ago, and not the race the profile was opened from (?exclude=). The rDate
+// index keeps the scan to the coming days.
+app.get('/api/runner/:runnerId/upcoming', async (req, res) => {
+  try {
+    const runnerId = String(req.params.runnerId || '');
+    if (!/^[0-9a-f-]{8,64}$/i.test(runnerId)) return res.status(400).json({ error: 'Bad runner id' });
+    const exclude = String(req.query.exclude || '');
+    const docs = await cached(`runner-upcoming|${runnerId}`, 60 * 1000, 5 * 60 * 1000, async () => (await getClient()).db().collection('races')
+      .find({ rDate: { $gte: shiftDate(todayStr(), -1) }, isHidden: { $ne: true }, 'runners.runnerId': runnerId })
+      .project({
+        rDate: 1, rNo: 1, rName: 1, rDisplayName: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, rScheduleTime: 1, rScheduleTimeUTC: 1,
+        rDistance: 1, rClass: 1, resultString: 1, isAbandoned: 1, isTrail: 1, 'runners.$': 1,
+      })
+      .sort({ rDate: 1, rScheduleTimeUTC: 1 })
+      .limit(20)
+      .toArray());
+    const nowMs = Date.now();
+    const races = docs
+      .filter((d) => d._id !== exclude && !d.resultString && !d.isAbandoned && !(utcMs(d.rScheduleTimeUTC) < nowMs - 10 * 60 * 1000))
+      .map((d) => {
+        const r = (d.runners || [])[0] || {};
+        return {
+          id: d._id, date: d.rDate, time: String(d.rScheduleTime || '').slice(11, 16) || null,
+          meeting: d.rCourseDisplayName, country: d.rCountry, rNo: d.rNo, name: d.rName || d.rDisplayName || '',
+          distance: d.rDistance || null, raceClass: d.rClass || null, trial: Boolean(d.isTrail),
+          tab: r.tabNo != null ? r.tabNo : null, barrier: r.bp || null, jockey: r.jockey || null, scratched: Boolean(r.isScratched),
+          url: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
+        };
+      });
+    res.json({ races });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Raw source documents for a race -- "Race Card" (the `racecards` documents,
 // one per Style/Client variant) and "Data Dump" (the `datadumps` collection,
 // a separate, richer per-runner feed with narrative last-run comments) --
