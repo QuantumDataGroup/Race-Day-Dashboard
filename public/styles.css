@@ -814,6 +814,9 @@ td.position-cell { font-weight: 700; }
 .horse-stat-bar { width: 100%; height: 15px; border: 1px solid #a78143; border-radius: 4px; overflow: hidden; margin-top: 6px; background: #000000; }
 .horse-stat-bar-fill { height: 100%; background: var(--accent); }
 .horse-detail-name { text-transform: uppercase; }
+/* Upcoming races on the runner profile (12 Nov 2026): scratched there. */
+.horse-past-races tr.scratched td { opacity: .55; }
+.horse-past-races tr.scratched td b { color: var(--adm-warn); }
 /* Runner ID + Copy (9 Nov 2026). */
 .runner-id-row { margin: -4px 0 10px; font-size: 12px; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .runner-id-row code { font-size: 12px; color: var(--fg); background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; word-break: break-all; }
