@@ -150,7 +150,9 @@
           '<td><b>' + esc(i.meeting) + ' R' + esc(i.rNo) + '</b> <span class="al-cc">' + esc(i.country) + '</span>' +
             '<div class="cc-when' + (soon ? ' cc-soon' : '') + '">' + esc(dayLabel(i.date)) + ' ' + esc(i.time || '') + ' &middot; ' + esc(inText(i.startUtc)) + '</div></td>' +
           '<td>' + (i.tab != null ? esc(i.tab) + '. ' : '') + esc(i.horse) + '<div class="cf-where">' + esc(i.where) + '</div></td>' +
-          '<td>&ldquo;' + esc(i.quote) + '&rdquo;<div class="cc-why">' + esc(i.why) + '</div><div class="cf-where">' + esc(i.claim) + '</div></td>' +
+          // The whole sentence it's in (12 Nov 2026, per Dinesh: "full sentence-a read pannanum").
+          '<td>&ldquo;' + esc(i.quote) + '&rdquo;' + (i.sentence && i.sentence !== i.quote ? '<div class="cf-sentence">' + esc(i.sentence) + '</div>' : '') +
+            '<div class="cc-why">' + esc(i.why) + '</div><div class="cf-where">' + esc(i.claim) + '</div></td>' +
           '<td class="cc-actions"><a class="adm-btn" href="' + esc(i.raceUrl) + '" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open race</a>' + action + ticketCell(i) + '</td>' +
           '</tr>';
       }).join('');
