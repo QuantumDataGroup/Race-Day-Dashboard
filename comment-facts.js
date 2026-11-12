@@ -79,6 +79,8 @@ function clauseAfter(text, end) {
 // Words just before a claim that turn it around: "lacks recent success",
 // "needs to find a win", "despite a lack of".
 const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of)\b[^.;,]{0,25}$/i;
+// Just before a win: it did not win ("narrowly missed victory at Milan").
+const MISSED = /\b(?:missed(?: out on)?|denied|failed to (?:land|record|secure|register|claim|score|notch|take|grab)|unable to (?:land|record|secure|claim|take)|could(?:n't| not) (?:land|record|secure|claim|take))\b[^.;,]{0,20}$/i;
 // The form figures ("252379x314", newest last) as positions, newest first:
 // 0 = 10th or worse, letters (F, P, U...) = didn't finish; spells (x) dropped.
 function figures(text) {
@@ -158,15 +160,26 @@ const RULES = [
     claim: 'result at a course',
     // Course names are capitalised: "solid 3rd at Chepstow", "won at Huntingdon".
     re: /\b(win|won|winning|victory|success|second|2nd|third|3rd|fourth|4th|runner-up)\s+at\s+([A-Z][A-Za-z'’]+(?:[ -][A-Z][A-Za-z'’]+){0,2})/g,
-    check(f, m) {
+    check(f, m, text = '') {
       const course = m[2].toLowerCase();
       if (/^(?:group|grade|listed|class|benchmark|odds|the|this|his|her|its|long|short|big|good|start|last|each|any)\b/.test(course)) return null;
-      const said = /^(?:win|won|winning|victory|success)$/i.test(m[1]) ? 1 : WORD_POS[m[1].toLowerCase()];
+      const isWin = /^(?:win|won|winning|victory|success)$/i.test(m[1]);
+      const said = isWin ? 1 : WORD_POS[m[1].toLowerCase()];
       const there = f.runs.slice(0, 6).filter((x) => {
         const c = String(x.Course || '').toLowerCase();
         return c && (c.startsWith(course) || course.startsWith(c));
       });
-      if (!there.length || there.some((x) => posOf(x) === said)) return null;
+      if (!there.length) return null;
+      // "narrowly missed victory at MILAN" says it did NOT win there (12 Nov
+      // 2026, per Dinesh: Orsa Suprema, 2nd at Milan) -- wrong only when its
+      // last run there was a win. A negated placing ("missed a place at") is
+      // left alone.
+      const before = String(text).slice(Math.max(0, m.index - 40), m.index);
+      if (MISSED.test(before) || NEGATED.test(before)) {
+        if (!isWin || posOf(there[0]) !== 1) return null;
+        return `at ${there[0].Course}: won ${shortDate(there[0].Date)}`;
+      }
+      if (there.some((x) => posOf(x) === said)) return null;
       return `at ${there[0].Course}: ${there.map((x) => `${posOf(x) ? ordinal(posOf(x)) : 'unplaced'} ${shortDate(x.Date)}`).join(', ')}`;
     },
   },
@@ -301,7 +314,7 @@ function checkClaims(text, runner, race) {
       // All capitals is a horse's name ("RGS DEBUTANT"), not a claim (review 28 Oct 2026).
       if (!/[a-z]/.test(m[0])) continue;
       const before = String(text).slice(Math.max(0, start - 40), start);
-      if ((rule.negatable && NEGATED.test(before)) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
+      if ((rule.negatable && (NEGATED.test(before) || MISSED.test(before))) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
       let why = rule.check(f, m, String(text));
       // A win / placing the comment can mean from a barrier trial is fine
       // (28 Oct 2026, per Dinesh: Born To Fly "comes off an impressive win at
