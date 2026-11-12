@@ -511,6 +511,8 @@ body.race-standalone-view .popup-tab-panel { height: auto; overflow-y: visible; 
 .cf-warn ul { margin: 0; padding-left: 18px; }
 .cf-warn li { margin: 2px 0; line-height: 1.45; color: var(--fg); }
 .cf-where { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+/* The whole sentence a comment check comes from (12 Nov 2026). */
+.cf-sentence { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 2px; }
 /* Comment Checks page: one row per finding, each with its race. */
 .adm-page-head h1 .cf-only { font-size: 12px; vertical-align: middle; color: var(--adm-warn); }
 .cc-table td { vertical-align: top; }

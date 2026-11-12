@@ -302,6 +302,8 @@ function checkClaims(text, runner, race) {
     trackDistance: record(stats.trackDistanceCombo),
     figures: figures(runner.formFigures),
   };
+  const recent = f.allRuns.slice(0, 3).map(runText).join(' · ');
+  const lastPositions = [f.runs[0], f.allRuns[0]].filter(Boolean).map(posOf);
   // One finding per phrase: "comes off a recent win at Rockhampton" is the
   // last-start rule's, not also "recent win" and "win at Rockhampton".
   const spans = [];
@@ -313,18 +315,101 @@ function checkClaims(text, runner, race) {
       spans.push([start, end]);
       // All capitals is a horse's name ("RGS DEBUTANT"), not a claim (review 28 Oct 2026).
       if (!/[a-z]/.test(m[0])) continue;
-      const before = String(text).slice(Math.max(0, start - 40), start);
+      const sentence = sentenceAt(String(text), start, end);
+      const before = String(text).slice(Math.max(sentence.from, start - 40), start);
       if ((rule.negatable && (NEGATED.test(before) || MISSED.test(before))) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
       let why = rule.check(f, m, String(text));
       // A win / placing the comment can mean from a barrier trial is fine
       // (28 Oct 2026, per Dinesh: Born To Fly "comes off an impressive win at
       // Randwick" -- a trial win the form shows like a race).
       if (why && TRIALS_COUNT.includes(rule.claim) && !rule.check({ ...f, runs: f.allRuns, figures: [] }, m, String(text))) why = null;
+      // The sentence's own word on the last run goes over one phrase of it:
+      // "narrowly missed victory at MILAN over 1400 last start, finishing
+      // 2nd" with a 2nd last start is right. A course result only when the
+      // last run was at that course.
+      const stated = statedLastPlace(clauseAt(sentence, start));
+      if (why && stated && lastPositions.includes(stated.pos) && ABOUT_LAST_RUN.includes(rule.claim)
+        && (rule.claim !== 'result at a course' || sameCourseAs(f.runs[0], m[2]))) why = null;
       // recent: the last three runs (trials marked), for the ticket (28 Oct 2026).
-      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why, recent: f.allRuns.slice(0, 3).map(runText).join(' · ') });
+      if (why && !out.some((x) => x.why === why)) out.push({ claim: rule.claim, quote: m[0].trim(), why, recent, sentence: sentence.text });
+    }
+  }
+  // A sentence that says where the last run finished ("…last start,
+  // finishing 2nd") when the form says otherwise.
+  // The form figures can have a run the form lines miss (see 'recent win').
+  const last = f.runs[0];
+  if (last && posOf(last)) {
+    for (const s of sentencesOf(String(text))) {
+      for (const c of clausesOf(s.raw)) {
+        const stated = statedLastPlace(c.text);
+        if (!stated || lastPositions.includes(stated.pos) || f.figures[0] === stated.pos) continue;
+        const why = `last start ${runText(last)}`;
+        if (!out.some((x) => x.why === why)) out.push({ claim: 'last-start placing', quote: stated.quote, why, recent, sentence: s.text });
+      }
     }
   }
   return out;
+}
+
+// --- The whole sentence (12 Nov 2026, per Dinesh: "comment full sentence
+// edukkanu, padila eduth ada issue panna kudadu, full sentence-a read
+// pannanum") -------------------------------------------------------------
+// Every finding is read with the sentence it's in, and carries it
+// (`sentence`) so the warning shows the whole thing. A sentence ends at ". "
+// "! " "? " -- "1.5" and "2.5L" don't end one.
+function sentencesOf(text) {
+  const out = [];
+  let from = 0;
+  const add = (to) => {
+    const raw = text.slice(from, to);
+    if (raw.trim()) out.push({ from, to, raw, text: raw.trim() });
+  };
+  for (const x of text.matchAll(/[.!?](?=\s|$)/g)) {
+    add(x.index + 1);
+    from = x.index + 1;
+  }
+  add(text.length);
+  return out;
+}
+function sentenceAt(text, start, end) {
+  return sentencesOf(text).find((s) => s.from <= start && end <= s.to) || { from: 0, to: text.length, raw: text, text: text.trim() };
+}
+// A sentence's clauses: a "but" / "however" / "while" / ";" starts another
+// thought -- "placed 2nd at Vichy, but struggled last start at Lyon" is two.
+// A comma doesn't: "missed victory at MILAN last start, finishing 2nd" is one.
+function clausesOf(raw) {
+  const out = [];
+  let from = 0;
+  for (const x of raw.matchAll(/;|\b(?:but|however|although|though|while|whereas|yet)\b/gi)) {
+    out.push({ from, text: raw.slice(from, x.index) });
+    from = x.index + x[0].length;
+  }
+  out.push({ from, text: raw.slice(from) });
+  return out;
+}
+function clauseAt(sentence, start) {
+  const at = start - sentence.from;
+  const c = clausesOf(sentence.raw).filter((x) => x.from <= at).pop();
+  return c ? c.text : sentence.text;
+}
+// Where a clause says the last run finished: "…last start, finishing 2nd",
+// "ran a game third last time". Not when it also talks about another run
+// ("two starts back", "prior") -- then the place could be that run's.
+const LAST_RUN_REF = /\b(?:last (?:start|time(?: out)?|outing|run)|(?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race))\b/i;
+const OTHER_RUN_REF = /\b(?:(?:two|three|four|five|2|3|4|5) (?:starts?|runs?|outings?|races?) (?:ago|back|before)|previous(?:ly)?|prior|before that|earlier (?:this|in)|first[- ]up|second[- ]up|third[- ]up|on debut)\b/i;
+const STATED_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)\b/i;
+function statedLastPlace(sentence) {
+  if (!LAST_RUN_REF.test(sentence) || OTHER_RUN_REF.test(sentence)) return null;
+  const m = STATED_PLACE.exec(sentence);
+  return m ? { pos: WORD_POS[m[1].toLowerCase()], quote: m[0] } : null;
+}
+// The claims a sentence's own place can settle -- not 'last-start placing',
+// whose "close" also needs the margin ("close 2nd last time out", beaten 9L).
+const ABOUT_LAST_RUN = ['last-start win', 'result at a course'];
+function sameCourseAs(run, course) {
+  const c = String((run && run.Course) || '').toLowerCase();
+  const said = String(course || '').toLowerCase();
+  return Boolean(c && said && (c.startsWith(said) || said.startsWith(c)));
 }
 
 const TRIALS_COUNT = ['last-start win', 'recent win', 'last-start placing', 'result at a course'];
