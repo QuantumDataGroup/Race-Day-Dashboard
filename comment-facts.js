@@ -79,7 +79,12 @@ function clauseAfter(text, end) {
 // Words just before a claim that turn it around: "lacks recent success",
 // "needs to find a win", "despite a lack of".
 const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of)\b[^.;,]{0,25}$/i;
-// Just before a win: it did not win ("narrowly missed victory at Milan").
+// Just before a win: it did not win ("narrowly missed victory at Milan",
+// "yet to record a win at Moe").
+// Just before a win: it's wanted or possible, not done ("needs a win at
+// Kalgoorlie", "could add a win at Moe").
+const WANTS = /\b(?:needs?|needing|search(?:es|ing)? for|seek(?:s|ing)?|chasing|looking for|aiming for|hoping for|hunting for|bid for|chance (?:of|for)|capable of|good enough for|in line for|regain|rediscover|could|can|should|would|may|might|will)\b[^.;,]{0,25}$/i;
+const DIDNT = /\b(?:no|not|never|without|yet to|hasn't|has not|didn't|did not|is still chasing|still chasing)\b[^.;,]{0,25}$/i;
 const MISSED = /\b(?:missed(?: out on)?|denied|failed to (?:land|record|secure|register|claim|score|notch|take|grab)|unable to (?:land|record|secure|claim|take)|could(?:n't| not) (?:land|record|secure|claim|take))\b[^.;,]{0,20}$/i;
 // The form figures ("252379x314", newest last) as positions, newest first:
 // 0 = 10th or worse, letters (F, P, U...) = didn't finish; spells (x) dropped.
@@ -174,8 +179,13 @@ const RULES = [
       // 2026, per Dinesh: Orsa Suprema, 2nd at Milan) -- wrong only when its
       // last run there was a win. A negated placing ("missed a place at") is
       // left alone.
+      // Only words that say it didn't win -- not NEGATED's "despite" / "needs"
+      // / "regain": "Despite a previous win at Kalgoorlie, recent form is
+      // concerning" says it DID win there (13 Nov 2026, per Dinesh: Moriah).
       const before = String(text).slice(Math.max(0, m.index - 40), m.index);
-      if (MISSED.test(before) || NEGATED.test(before)) {
+      // "needs a win at Kalgoorlie", "could take a win at Moe": wanted, not done.
+      if (isWin && WANTS.test(before)) return null;
+      if (MISSED.test(before) || DIDNT.test(before)) {
         if (!isWin || posOf(there[0]) !== 1) return null;
         return `at ${there[0].Course}: won ${shortDate(there[0].Date)}`;
       }
