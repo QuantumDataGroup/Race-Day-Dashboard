@@ -332,7 +332,14 @@ Checked against 11-12 Nov 2026 (606 T races): the same 56 findings as before.
 "needs / could / chasing a win at" isn't a claim (`WANTS`), words in capitals (a
 horse's name, "NO JOKE JOE") are left out of the negation look-back (`wordsOnly`),
 "then / before / after" also start a clause, and a clause with two places
-("finished 7th … ran 2nd") isn't read as the last run's. `commentFactsFor` (server.js) gives each race-comment claim to the
+("finished 7th … ran 2nd") isn't read as the last run's. A phrase never runs across
+a clause (`CLAUSE_BREAK`: "managed a 3rd at Kalgoorlie but struggled last time" is not
+"3rd last time"), a "… at <course>" in the last-start placing rule is capitalised words
+only, and a place told at another course than the last run's is another run. Also
+skipped: someone else's ("the trainer's recent success", `OTHERS`), "limited recent
+success", "no prior form to suggest …", "first starter here" / "where he has yet to
+run", a break in a sentence that tells a run's result ("finished 2nd at Bursa,
+showing fitness after a layoff"), "her first-up run", "a recent win on polytrack". `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10
