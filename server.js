@@ -4285,6 +4285,34 @@ app.get('/api/runner/:runnerId/upcoming', async (req, res) => {
   }
 });
 
+// The races in our DB a horse ran on given dates (13 Nov 2026, per Dinesh:
+// "anda race a click panna appo da anda race open aaganum") -- a past race on
+// the runner profile opens that race. ?dates=YYYY-MM-DD,... (up to 20); the
+// rDate index keeps it to those days. date -> { url, rNo, name }.
+app.get('/api/runner/:runnerId/races', async (req, res) => {
+  try {
+    const runnerId = String(req.params.runnerId || '');
+    if (!/^[0-9a-f-]{8,64}$/i.test(runnerId)) return res.status(400).json({ error: 'Bad runner id' });
+    const dates = [...new Set(String(req.query.dates || '').split(',').filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 20);
+    if (!dates.length) return res.json({ races: {} });
+    const docs = await cached(`runner-races|${runnerId}|${dates.join(',')}`, 5 * 60 * 1000, 30 * 60 * 1000, async () => (await getClient()).db().collection('races')
+      .find({ rDate: { $in: dates }, 'runners.runnerId': runnerId })
+      .project({ rDate: 1, rNo: 1, rName: 1, rDisplayName: 1, rCourseDisplayName: 1, rCountry: 1, rDiscipline: 1, isHidden: 1, isTrail: 1 })
+      .toArray());
+    const races = {};
+    for (const d of docs.sort((a, b) => (a.isHidden ? 1 : 0) - (b.isHidden ? 1 : 0))) {
+      if (races[d.rDate]) continue;
+      races[d.rDate] = {
+        url: raceUrl({ discipline: d.rDiscipline, country: d.rCountry, meeting: d.rCourseDisplayName, date: d.rDate, rNo: d.rNo }),
+        rNo: d.rNo, name: d.rName || d.rDisplayName || '', meeting: d.rCourseDisplayName, trial: Boolean(d.isTrail),
+      };
+    }
+    res.json({ races });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Raw source documents for a race -- "Race Card" (the `racecards` documents,
 // one per Style/Client variant) and "Data Dump" (the `datadumps` collection,
 // a separate, richer per-runner feed with narrative last-run comments) --
