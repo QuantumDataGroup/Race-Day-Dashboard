@@ -2440,7 +2440,8 @@ async function attachFormLineStatus(docs, options = {}) {
     // The horse profile's runs the card doesn't have (profileRunsFor, 13 Nov 2026).
     if (!options.light) {
       const profiles = await profileRunsFor((doc.runners || []).map((r) => r.runnerId)).catch(() => new Map());
-      for (const r of (doc.runners || [])) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(r.runnerId));
+      const regions = await courseRegions().catch(() => new Map());
+      for (const r of (doc.runners || [])) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(r.runnerId), doc.rCountry, regions);
     }
     // The racecard API's comments when we have a recent copy (what clients
     // get), then the comment checks on whichever comments the race shows.
@@ -5695,11 +5696,97 @@ async function profileRunsFor(runnerIds) {
   }
   return out;
 }
-function withProfileRuns(formLines, profileRuns) {
+// A namesake's runs (13 Nov 2026, Comment Checks live): some horse profiles,
+// and their runnerId, are shared by two horses of the same name in different
+// countries -- Barcelo (Panama) had a Brisbane Barcelo's Eagle Farm runs,
+// Lady Coco (Uttoxeter) a WA mare's, Silk Sonic (Toowoomba) Gavea's. The
+// race card's form lines are the right horse's, so a profile run at a course
+// that is only ever in another part of the world than this race and the card's
+// runs is left out. Course -> countries comes from the meetings, once a day;
+// a course we don't know is kept.
+const COUNTRY_ALIAS = { GBR: 'GB', UK: 'GB', 'UNITED KINGDOM': 'GB', IRL: 'IRE', FRA: 'FR', ITA: 'ITY', DEU: 'GER', ARE: 'UAE', ZAF: 'SAF', NZL: 'NZ', PA: 'PAN', 'KOREA, REPUBLIC OF': 'KOR', JAP: 'JPN', HKG: 'HK', BRA: 'BRZ' };
+// Horses move between these freely, so they count as one place.
+const COUNTRY_REGION = { GB: 'EU', IRE: 'EU', FR: 'EU', GER: 'EU', ITY: 'EU', SPA: 'EU', ESP: 'EU', BEL: 'EU', NOR: 'EU', SWE: 'EU', DEN: 'EU', CZE: 'EU', POL: 'EU', AUS: 'ANZ', NZ: 'ANZ', USA: 'NAM', CAN: 'NAM' };
+const regionOf = (country) => {
+  const c = String(country || '').trim().toUpperCase();
+  if (!c) return null;
+  const code = COUNTRY_ALIAS[c] || c;
+  return COUNTRY_REGION[code] || code;
+};
+const COURSE_REGIONS_TTL_MS = 24 * 60 * 60 * 1000;
+let courseRegionsCache = { at: 0, map: new Map(), loading: null };
+async function courseRegions() {
+  if (Date.now() - courseRegionsCache.at < COURSE_REGIONS_TTL_MS) return courseRegionsCache.map;
+  if (!courseRegionsCache.loading) {
+    courseRegionsCache.loading = (async () => {
+      try {
+        const rows = await (await getClient()).db().collection('meetings').aggregate([
+          { $match: { mCourseDisplayName: { $nin: [null, ''] } } },
+          { $group: { _id: '$mCourseDisplayName', c: { $addToSet: '$mCountry' } } },
+        ]).toArray();
+        const map = new Map();
+        for (const row of rows) {
+          const key = courseKey(row._id);
+          if (!key) continue;
+          const set = map.get(key) || new Set();
+          for (const c of row.c || []) { const r = regionOf(c); if (r) set.add(r); }
+          if (set.size) map.set(key, set);
+        }
+        courseRegionsCache = { at: Date.now(), map, loading: null };
+      } catch (err) {
+        // Try again in 10 minutes; until then nothing is left out.
+        courseRegionsCache = { at: Date.now() - COURSE_REGIONS_TTL_MS + 10 * 60 * 1000, map: courseRegionsCache.map, loading: null };
+      }
+    })();
+  }
+  await courseRegionsCache.loading;
+  return courseRegionsCache.map;
+}
+// The places a course is in: its own name, else a known course it starts or
+// is the start of ("Belmont" -> BELMONT PARK, "Sunshine Coast@Inner Track"
+// -> SUNSHINE COAST), "Mount" written "Mt". null when not known.
+const profileCourseKey = (name) => courseKey(String(name || '').replace(/\bmount\b/gi, 'Mt').replace(/\bsaint\b/gi, 'St'));
+const regionsAtCache = new WeakMap();
+function regionsAt(regions, course) {
+  const key = profileCourseKey(course);
+  if (!key) return null;
+  if (regions.has(key)) return regions.get(key);
+  let memo = regionsAtCache.get(regions);
+  if (!memo) { memo = new Map(); regionsAtCache.set(regions, memo); }
+  if (memo.has(key)) return memo.get(key);
+  let found = null;
+  if (key.length >= 5) {
+    for (const [k, set] of regions) {
+      if (k.length >= 5 && (k.startsWith(key) || key.startsWith(k))) {
+        found = found || new Set();
+        for (const r of set) found.add(r);
+      }
+    }
+  }
+  memo.set(key, found);
+  return found;
+}
+const dayMs = (iso) => Date.parse(String(iso || '').slice(0, 10));
+function withProfileRuns(formLines, profileRuns, raceCountry, regions) {
   const lines = Array.isArray(formLines) ? formLines : [];
   if (!profileRuns || !profileRuns.length) return lines;
   const have = new Set(lines.map((x) => String(x.Date || '').slice(0, 10)));
-  const extra = profileRuns.filter((p) => !have.has(p.Date));
+  // The profile can date a run a day off the card (Release The Beast:
+  // Cheltenham 12 Mar on the profile, 11 Mar on the card) -- the same run.
+  const sameRun = (p) => lines.some((l) => profileCourseKey(l.Course) === profileCourseKey(p.Course) && Math.abs(dayMs(l.Date) - dayMs(p.Date)) <= 86400000);
+  let extra = profileRuns.filter((p) => !have.has(p.Date) && !sameRun(p));
+  if (extra.length && regions && regions.size) {
+    const allowed = new Set();
+    const own = regionOf(raceCountry);
+    if (own) allowed.add(own);
+    for (const l of lines) for (const r of regionsAt(regions, l.Course) || []) allowed.add(r);
+    if (allowed.size) {
+      extra = extra.filter((p) => {
+        const at = regionsAt(regions, p.Course);
+        return !at || [...at].some((r) => allowed.has(r));
+      });
+    }
+  }
   if (!extra.length) return lines;
   return [...lines, ...extra].sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || '')));
 }
@@ -5707,7 +5794,7 @@ function withProfileRuns(formLines, profileRuns) {
 // raceId -> runnerId -> { pastRaces, performanceStatistics }, and the race's
 // class, from the racecards (AU variant first; the newest 8 form lines), plus
 // the horse profile's runs the card doesn't have (profileRunsFor).
-async function racecardFormFor(raceIds) {
+async function racecardFormFor(raceIds, countryByRace = new Map()) {
   const cards = await (await getClient()).db().collection('racecards').aggregate([
     { $match: { RaceId: { $in: raceIds } } },
     { $project: {
@@ -5733,7 +5820,8 @@ async function racecardFormFor(raceIds) {
     }
   }
   const profiles = await profileRunsFor([...out.values()].flatMap((race) => [...race.runners.keys()])).catch(() => new Map());
-  for (const race of out.values()) for (const [id, r] of race.runners) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(id));
+  const regions = await courseRegions().catch(() => new Map());
+  for (const [raceId, race] of out) for (const [id, r] of race.runners) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(id), countryByRace.get(raceId), regions);
   return out;
 }
 function startMs(doc) {
@@ -5798,7 +5886,7 @@ async function dispatchCommentFactAlerts() {
     });
     for (let i = 0; i < todo.length; i += 20) {
       const batch = todo.slice(i, i + 20);
-      const form = await racecardFormFor(batch.map((d) => d._id));
+      const form = await racecardFormFor(batch.map((d) => d._id), new Map(batch.map((d) => [d._id, d.rCountry])));
       for (const d of batch) {
         const card = form.get(d._id) || { raceClass: '', runners: new Map() };
         const runners = (d.runners || []).map((r) => ({ ...r, ...(card.runners.get(r.runnerId) || { pastRaces: [], performanceStatistics: null, formFigures: null }) }));
