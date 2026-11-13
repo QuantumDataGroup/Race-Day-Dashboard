@@ -261,7 +261,13 @@ const RULES = [
     check(f, m, text) {
       // "debut for a new stable / over fences / in Britain" is no first start;
       // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
-      if (/^\s*(?:for|over|in|at|under|here|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      // "first starter here … finishing last in his latest outing" is this
+      // track only; "A debutant here adds uncertainty" is today's debut (13 Nov 2026).
+      if (/^\s*here\b/i.test(clauseAfter(text, m.index + m[0].length))) {
+        const s = sentenceAt(text, m.index, m.index + m[0].length).text;
+        if ((s.match(ANY_PLACE) || []).length || LAST_RUN_REF.test(s) || /\b(?:latest|previous|prior|last) (?:outing|start|run|race|effort)s?\b/i.test(s)) return null;
+      }
       // "no prior form to suggest competitiveness" is poor form, not no runs;
       // "at this track, where he has yet to run" is this track only (13 Nov 2026).
       if (/form$/i.test(m[0]) && /^\s*(?:to|that|which|of note|worth|suggest\w*)\b/i.test(text.slice(m.index + m[0].length))) return null;
