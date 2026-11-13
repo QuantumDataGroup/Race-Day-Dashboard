@@ -78,9 +78,13 @@ function clauseAfter(text, end) {
 }
 // Words just before a claim that turn it around: "lacks recent success",
 // "needs to find a win", "despite a lack of".
-const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of)\b[^.;,]{0,25}$/i;
+const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of|limited|scant|scarce)\b[^.;,]{0,25}$/i;
+// Someone else's: "the trainer's recent success" isn't the horse's (13 Nov 2026).
+const OTHERS = /\b(?:trainer|jockey|rider|stable|yard|connections|sire|dam|owner|family|half-(?:sister|brother)|sibling)(?:'s|’s|s'|s’)?\s+(?:[a-z-]+\s+){0,2}$/i;
 // Just before a win: it did not win ("narrowly missed victory at Milan",
 // "yet to record a win at Moe").
+// A word that starts another clause; a claim doesn't run across one.
+const CLAUSE_BREAK = /;|\b(?:but|however|although|though|while|whereas|then)\b/i;
 // The words before a phrase without horse names: a name is in capitals, and
 // "NO JOKE JOE (15) won at Turfway Park" isn't "no ... won" (13 Nov 2026).
 const wordsOnly = (s) => s.replace(/\b[A-Z][A-Z'’-]+\b/g, ' ');
@@ -132,8 +136,10 @@ const RULES = [
     claim: 'recent win',
     negatable: true,
     re: /\b(?:recent (?:win|victory|success|winner)|recently (?:won|scored|saluted|broke (?:his|her|its) maiden))\b/gi,
-    check(f) {
+    check(f, m, text = '') {
       if (!f.runs.length) return null;
+      // "a recent win on polytrack" is its latest on that surface (13 Nov 2026).
+      if (/^\s*(?:on|over) (?:the )?(?:poly(?:track)?|tapeta|all[- ]weather|synthetic|dirt|turf|grass|sand|hurdles|fences)\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
       const i = f.runs.findIndex((x) => posOf(x) === 1);
       if (i === 0 || i === 1) return null;
       // The form lines can miss runs the figures have (Sujeed, "x314": a win the run before last).
@@ -155,6 +161,11 @@ const RULES = [
     check(f, m) {
       const last = f.runs[0];
       if (!last || !posOf(last)) return null;
+      // "at <course>" is capitalised words only -- the rule ignores case, so
+      // "3rd at Kalgoorlie and struggled last time" took "and struggled" as
+      // part of the course (13 Nov 2026).
+      const at = /\bat\s+(?!(?:his|her|its|the)\b)(.+?)\s+(?:last|at|on|in)\b/i.exec(m[0]);
+      if (at && at[1].split(/\s+/).some((w) => !/^[A-Z]/.test(w))) return null;
       // m[4]: the other word order (29 Oct 2026, Tuscan Rose: "Finished
       // strongly last start to claim second").
       const said = WORD_POS[String(m[2] || m[3] || m[4] || '').toLowerCase()];
@@ -218,7 +229,14 @@ const RULES = [
       // "a short break" is right for a few weeks; "absence from the winner's
       // circle" is no break at all (review 28 Oct 2026).
       if (/\b(?:short|brief|little|quick)\b/i.test(m[0])) return null;
-      if (/^\s*from the winner/i.test(text.slice(m.index + m[0].length))) return null;
+      const after = text.slice(m.index + m[0].length);
+      if (/^\s*from the winner/i.test(after)) return null;
+      // "her first-up run raises doubts" is a run already run (13 Nov 2026).
+      if (/^first[- ]up$/i.test(m[0]) && /^\s*(?:run|effort|start|outing|performance|win|victory)\b/i.test(after)) return null;
+      // A sentence that also tells a run's result ("finished 2nd at Bursa,
+      // showing fitness after a layoff") puts the break before that run, not
+      // today (13 Nov 2026: Barlin Ağa, Yenibey, Surertay, Niğbolu).
+      if ((sentenceAt(text, m.index, m.index + m[0].length).text.match(ANY_PLACE) || []).length) return null;
       const last = f.runs[0];
       if (!last) return null;
       const gap = daysBetween(last.Date, f.raceDate);
@@ -243,7 +261,11 @@ const RULES = [
     check(f, m, text) {
       // "debut for a new stable / over fences / in Britain" is no first start;
       // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
-      if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      if (/^\s*(?:for|over|in|at|under|here|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      // "no prior form to suggest competitiveness" is poor form, not no runs;
+      // "at this track, where he has yet to run" is this track only (13 Nov 2026).
+      if (/form$/i.test(m[0]) && /^\s*(?:to|that|which|of note|worth|suggest\w*)\b/i.test(text.slice(m.index + m[0].length))) return null;
+      if (/\b(?:where|here|this (?:track|course|venue|distance|trip|surface))\b[^.;]{0,30}$/i.test(text.slice(Math.max(0, m.index - 40), m.index))) return null;
       // The career figures say no start: form lines then are another horse's.
       if (f.career) return f.career.starts > 0 ? `career ${f.career.text}` : null;
       return f.runs.length ? `${f.runs.length} runs in the form, last ${runText(f.runs[0])}` : null;
@@ -328,9 +350,14 @@ function checkClaims(text, runner, race) {
       spans.push([start, end]);
       // All capitals is a horse's name ("RGS DEBUTANT"), not a claim (review 28 Oct 2026).
       if (!/[a-z]/.test(m[0])) continue;
+      // One claim is one clause: "managed a 3rd at Kalgoorlie but struggled
+      // last time" is a 3rd at Kalgoorlie, then a poor last run -- not "3rd
+      // last time" (13 Nov 2026, per Dinesh: Is This Thing On).
+      if (CLAUSE_BREAK.test(m[0])) continue;
       const sentence = sentenceAt(String(text), start, end);
       const before = wordsOnly(String(text).slice(Math.max(sentence.from, start - 40), start));
       if ((rule.negatable && (NEGATED.test(before) || MISSED.test(before))) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
+      if (OTHERS.test(before)) continue;
       let why = rule.check(f, m, String(text));
       // A win / placing the comment can mean from a barrier trial is fine
       // (28 Oct 2026, per Dinesh: Born To Fly "comes off an impressive win at
@@ -340,7 +367,7 @@ function checkClaims(text, runner, race) {
       // "narrowly missed victory at MILAN over 1400 last start, finishing
       // 2nd" with a 2nd last start is right. A course result only when the
       // last run was at that course.
-      const stated = statedLastPlace(clauseAt(sentence, start));
+      const stated = statedLastPlace(clauseAt(sentence, start), f.runs[0]);
       if (why && stated && lastPositions.includes(stated.pos) && ABOUT_LAST_RUN.includes(rule.claim)
         && (rule.claim !== 'result at a course' || sameCourseAs(f.runs[0], m[2]))) why = null;
       // recent: the last three runs (trials marked), for the ticket (28 Oct 2026).
@@ -354,7 +381,7 @@ function checkClaims(text, runner, race) {
   if (last && posOf(last)) {
     for (const s of sentencesOf(String(text))) {
       for (const c of clausesOf(s.raw)) {
-        const stated = statedLastPlace(c.text);
+        const stated = statedLastPlace(c.text, f.runs[0]);
         if (!stated || lastPositions.includes(stated.pos) || f.figures[0] === stated.pos) continue;
         const why = `last start ${runText(last)}`;
         if (!out.some((x) => x.why === why)) out.push({ claim: 'last-start placing', quote: stated.quote, why, recent, sentence: s.text });
@@ -415,11 +442,16 @@ const STATED_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|comin
 // Two places in one clause ("finished 7th … ran 2nd"): which is the last
 // run's isn't clear, so neither is used.
 const ANY_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(?:\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|runner-up)\b/gi;
-function statedLastPlace(sentence) {
+// A place named at another course than the last run's is that run's: "ran
+// 3rd at Kalgoorlie and struggled last time at Northam" (13 Nov 2026).
+function statedLastPlace(sentence, lastRun) {
   if (!LAST_RUN_REF.test(sentence) || OTHER_RUN_REF.test(sentence)) return null;
   if ((sentence.match(ANY_PLACE) || []).length > 1) return null;
   const m = STATED_PLACE.exec(sentence);
-  return m ? { pos: WORD_POS[m[1].toLowerCase()], quote: m[0] } : null;
+  if (!m) return null;
+  const at = /^\s+(?:[^,.;]{0,30}?\s)?at\s+([A-Z][A-Za-z'’-]+(?:[ -][A-Z][A-Za-z'’-]+){0,2})/.exec(sentence.slice(m.index + m[0].length));
+  if (at && lastRun && !sameCourseAs(lastRun, at[1])) return null;
+  return { pos: WORD_POS[m[1].toLowerCase()], quote: m[0] };
 }
 // The claims a sentence's own place can settle -- not 'last-start placing',
 // whose "close" also needs the margin ("close 2nd last time out", beaten 9L).
