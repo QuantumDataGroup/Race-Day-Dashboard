@@ -78,6 +78,7 @@ const { MongoClient } = require('mongodb');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
 const ExcelJS = require('exceljs');
@@ -2436,6 +2437,11 @@ async function attachFormLineStatus(docs, options = {}) {
       r.weightKg = enrich ? enrich.weightKg : null;
       r.runnerComment = shownComments.get(r.runnerId) || null;
       r.formFigures = enrich ? enrich.form : null;
+    }
+    // The horse profile's runs the card doesn't have (profileRunsFor, 13 Nov 2026).
+    if (!options.light) {
+      const profiles = await profileRunsFor((doc.runners || []).map((r) => r.runnerId)).catch(() => new Map());
+      for (const r of (doc.runners || [])) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(r.runnerId));
     }
     // The racecard API's comments when we have a recent copy (what clients
     // get), then the comment checks on whichever comments the race shows.
@@ -5618,8 +5624,62 @@ function masterAdminUsers() {
 function commentFactLine(f) {
   return `${f.tab != null ? `#${f.tab} ` : ''}${f.horse} (${f.where}): "${f.quote}" — ${f.why}`;
 }
+// --- Horse profile past runs (13 Nov 2026, per Dinesh: "Is This Thing On
+// ... past runs update pannitte, but dashboardla innu 3 past da kaattudu")
+// The admin's horse profile (`horses`, _id = the runnerId, gzipped JSON in
+// `data`: data.profileDetailsInfo.previousRun) can have runs the race card's
+// FormLines don't -- added or fixed after the card was made (Is This Thing On:
+// 9 there, 3 on the card). Those are added to the runner's past races
+// (fromProfile), newest first, for the popup and the comment checks. A run
+// already on the card (same date) is left as the card has it.
+const PROFILE_RUNS_TTL_MS = 5 * 60 * 1000;
+const profileRunsCache = new Map(); // runnerId -> { at, runs }
+async function profileRunsFor(runnerIds) {
+  const out = new Map();
+  const need = [];
+  for (const id of new Set(runnerIds.filter(Boolean))) {
+    const hit = profileRunsCache.get(id);
+    if (hit && Date.now() - hit.at < PROFILE_RUNS_TTL_MS) out.set(id, hit.runs);
+    else need.push(id);
+  }
+  if (need.length) {
+    const docs = await (await getClient()).db().collection('horses').find({ _id: { $in: need } }).project({ data: 1 }).toArray();
+    const byId = new Map(docs.map((d) => [d._id, d]));
+    for (const id of need) {
+      let runs = [];
+      try {
+        const raw = byId.get(id) && byId.get(id).data;
+        const json = raw ? JSON.parse(zlib.gunzipSync(Buffer.from(String(raw), 'base64')).toString('utf8')) : null;
+        const prev = json && json.data && json.data.profileDetailsInfo && json.data.profileDetailsInfo.previousRun;
+        runs = (Array.isArray(prev) ? prev : []).filter((p) => p && p.meetingDate).map((p) => ({
+          Date: String(p.meetingDate).slice(0, 10),
+          Course: p.meetingName || '',
+          FinishPosition: Number(p.finishPosition) > 0 ? Number(p.finishPosition) : null,
+          Distance: p.eventDistance ? Number(p.eventDistance) || p.eventDistance : null,
+          JockeyName: (p.jockey && p.jockey.name) || null,
+          Type: p.isTrial ? 'TRIAL' : 'RACE',
+          fromProfile: true,
+        }));
+      } catch (err) { /* a profile that can't be read adds nothing */ }
+      profileRunsCache.set(id, { at: Date.now(), runs });
+      out.set(id, runs);
+    }
+    if (profileRunsCache.size > 20000) for (const [k, v] of profileRunsCache) if (Date.now() - v.at > PROFILE_RUNS_TTL_MS) profileRunsCache.delete(k);
+  }
+  return out;
+}
+function withProfileRuns(formLines, profileRuns) {
+  const lines = Array.isArray(formLines) ? formLines : [];
+  if (!profileRuns || !profileRuns.length) return lines;
+  const have = new Set(lines.map((x) => String(x.Date || '').slice(0, 10)));
+  const extra = profileRuns.filter((p) => !have.has(p.Date));
+  if (!extra.length) return lines;
+  return [...lines, ...extra].sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || '')));
+}
+
 // raceId -> runnerId -> { pastRaces, performanceStatistics }, and the race's
-// class, from the racecards (AU variant first; the newest 8 form lines).
+// class, from the racecards (AU variant first; the newest 8 form lines), plus
+// the horse profile's runs the card doesn't have (profileRunsFor).
 async function racecardFormFor(raceIds) {
   const cards = await (await getClient()).db().collection('racecards').aggregate([
     { $match: { RaceId: { $in: raceIds } } },
@@ -5645,6 +5705,8 @@ async function racecardFormFor(raceIds) {
       }
     }
   }
+  const profiles = await profileRunsFor([...out.values()].flatMap((race) => [...race.runners.keys()])).catch(() => new Map());
+  for (const race of out.values()) for (const [id, r] of race.runners) r.pastRaces = withProfileRuns(r.pastRaces, profiles.get(id));
   return out;
 }
 function startMs(doc) {

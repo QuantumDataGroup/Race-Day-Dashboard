@@ -2728,8 +2728,12 @@
                 '<td>' + escapeHtmlClient(fl.LengthsBehind || '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.Date || '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.Course || '-') + '</td>' +
-                '<td>' + escapeHtmlClient(fl.RaceName || fl.EventClass || '-') + '</td>' +
-                '<td>' + (fl.Distance ? escapeHtmlClient(String(fl.Distance)) + 'm' : '-') + '</td>' +
+                // A run from the horse profile, not on the race card (13 Nov 2026).
+                '<td>' + escapeHtmlClient(fl.RaceName || fl.EventClass || '-') +
+                  (/^(?!race$)/i.test(String(fl.Type || 'RACE')) ? ' <span class="horse-region">(trial)</span>' : '') +
+                  (fl.fromProfile ? ' <span class="profile-run-tag" title="From the horse profile -- not on this race card">profile</span>' : '') + '</td>' +
+                // The card's Distance can already end in "m" ("1000m") -- was shown "1000mm".
+                '<td>' + (fl.Distance ? escapeHtmlClient(String(fl.Distance).replace(/\s*m$/i, '')) + 'm' : '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.JockeyName || '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.StartingPrice || '-') + '</td>' +
                 '<td class="horse-past-name">' + escapeHtmlClient(winnerOr2nd) + '</td>' +
