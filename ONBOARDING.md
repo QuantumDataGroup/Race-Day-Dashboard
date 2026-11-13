@@ -808,7 +808,15 @@ runs on the admin's horse profile the card doesn't have (`profileRunsFor` /
 `withProfileRuns` in server.js: `horses`, _id = runnerId, gzipped JSON in `data`,
 `data.profileDetailsInfo.previousRun`; same date = already on the card; cached 5 min).
 The comment checks read them too (`racecardFormFor`). Is This Thing On: 3 runs on
-the card, 9 on the profile. A Distance that already ends in "m" no longer shows
+the card, 9 on the profile. Namesakes: some profiles (and runnerIds) are shared by two
+horses of the same name in different countries (Barcelo Panama + Brisbane, Lady Coco
+GB + WA, Silk Sonic Toowoomba + Gavea), so a profile run at a course only ever in
+another part of the world than this race and the card's runs is left out
+(`courseRegions`: meetings course -> countries once a day, GB/IRE/FR... = one place,
+AUS/NZ, USA/CAN; "Belmont" matches BELMONT PARK, "Mount" = "Mt"; unknown course kept).
+A profile run a day off a card run at the same course is the same run (Release The
+Beast, Cheltenham 11/12 Mar). In the comment checks FinishPosition 99 reads "did not
+finish", and a date from an earlier year carries the year ("31 Oct 2025"). A Distance that already ends in "m" no longer shows
 "1000mm". Each past run's race in our DB (`GET /api/runner/:runnerId/races?dates=`,
 by runnerId + date) fills the Race column ("R6 · Swan Draught Maiden", "(trial)" when
 our race is a trial) and a click on the row opens that race (`loadPastRaceLinks`);

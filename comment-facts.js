@@ -15,7 +15,11 @@ const ordinal = (n) => {
 };
 const shortDate = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
-  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}` : '';
+  if (!m) return '';
+  // A run from an earlier year says so: "last win 31 Oct" next to "last start
+  // 31 Oct" was a year apart (EVEIN, 13 Nov 2026).
+  const year = Number(m[1]) !== new Date().getUTCFullYear() ? ` ${m[1]}` : '';
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}${year}`;
 };
 const daysBetween = (a, b) => Math.round((Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / 86400000);
 const WORD_POS = { first: 1, '1st': 1, second: 2, '2nd': 2, 'runner-up': 2, third: 3, '3rd': 3, fourth: 4, '4th': 4, fifth: 5, '5th': 5 };
@@ -29,7 +33,9 @@ function runsBefore(runner, raceDate, withTrials) {
 }
 const isTrial = (x) => Boolean(x.Type) && String(x.Type).toUpperCase() !== 'RACE';
 const posOf = (x) => (Number(x.FinishPosition) > 0 ? Number(x.FinishPosition) : null);
-const runText = (x) => `${posOf(x) ? ordinal(posOf(x)) : 'unplaced'}${isTrial(x) ? ' (trial)' : ''} at ${x.Course || '?'} ${shortDate(x.Date)}`;
+// 99 (and the like) is how the form lines write a run it didn't finish (pulled
+// up, fell): "did not finish", not "99th" (Release The Beast, 13 Nov 2026).
+const runText = (x) => `${posOf(x) >= 90 ? 'did not finish' : posOf(x) ? ordinal(posOf(x)) : 'unplaced'}${isTrial(x) ? ' (trial)' : ''} at ${x.Course || '?'} ${shortDate(x.Date)}`;
 // "16:3-1-4" -> { starts, wins, places }
 function record(text) {
   const m = /^\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)/.exec(String(text || ''));
