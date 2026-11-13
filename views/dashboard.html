@@ -2728,10 +2728,9 @@
                 '<td>' + escapeHtmlClient(fl.LengthsBehind || '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.Date || '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.Course || '-') + '</td>' +
-                // A run from the horse profile, not on the race card (13 Nov 2026).
-                '<td>' + escapeHtmlClient(fl.RaceName || fl.EventClass || '-') +
-                  (/^(?!race$)/i.test(String(fl.Type || 'RACE')) ? ' <span class="horse-region">(trial)</span>' : '') +
-                  (fl.fromProfile ? ' <span class="profile-run-tag" title="From the horse profile -- not on this race card">profile</span>' : '') + '</td>' +
+                // Filled with "R3 · name" when the race is in our DB (loadPastRaceLinks, 13 Nov 2026).
+                '<td><span id="past-race-name-' + idx + '">' + escapeHtmlClient(fl.RaceName || fl.EventClass || '-') + '</span>' +
+                  (/^(?!race$)/i.test(String(fl.Type || 'RACE')) ? ' <span class="horse-region">(trial)</span>' : '') + '</td>' +
                 // The card's Distance can already end in "m" ("1000m") -- was shown "1000mm".
                 '<td>' + (fl.Distance ? escapeHtmlClient(String(fl.Distance).replace(/\s*m$/i, '')) + 'm' : '-') + '</td>' +
                 '<td>' + escapeHtmlClient(fl.JockeyName || '-') + '</td>' +
@@ -2779,12 +2778,36 @@
 
       if (pastRaces.length) checkPastRaceVideos(pastRaces);
       if (r.runnerId) loadRunnerUpcoming(r.runnerId, _currentRaceData.id);
+      if (r.runnerId && pastRaces.length) loadPastRaceLinks(r);
     }
 
-    // The horse's other races still to come, from our DB (12 Nov 2026, per
-    // Dinesh) -- /api/runner/:runnerId/upcoming, without the race open now.
+    // Each past run's race in our DB, by date (/api/runner/:id/races): its
+    // "R3 · name" in the Race column and where a click on the row goes.
+    function loadPastRaceLinks(r) {
+      var dates = r.pastRaces.map(function (fl) { return String(fl.Date || '').slice(0, 10); }).filter(Boolean);
+      fetch('/api/runner/' + encodeURIComponent(r.runnerId) + '/races?dates=' + encodeURIComponent(dates.join(',')))
+        .then(function (res) { return res.ok ? res.json() : { races: {} }; })
+        .then(function (j) {
+          r._pastRaceLinks = j.races || {};
+          if (_currentHorseDetailRunner !== r) return;
+          r.pastRaces.forEach(function (fl, idx) {
+            var link = r._pastRaceLinks[String(fl.Date || '').slice(0, 10)];
+            var cell = document.getElementById('past-race-name-' + idx);
+            if (!link || !cell) return;
+            cell.textContent = 'R' + link.rNo + (link.name ? ' · ' + link.name : '');
+            // A trial in our DB the horse profile calls a race ("3mdn Trl").
+            var trialRace = /^(?!race$)/i.test(String(fl.Type || 'RACE'));
+            if (link.trial && !trialRace) cell.insertAdjacentHTML('afterend', ' <span class="horse-region">(trial)</span>');
+          });
+        })
+        .catch(function () { /* the rows keep their own page */ });
+    }
+
+    // The horse's races still to come, from our DB (12 Nov 2026, per
+    // Dinesh) -- /api/runner/:runnerId/upcoming. The race open now is listed
+    // too, marked "(this race)" (13 Nov 2026, per Dinesh: like the admin).
     function loadRunnerUpcoming(runnerId, raceId) {
-      fetch('/api/runner/' + encodeURIComponent(runnerId) + '/upcoming?exclude=' + encodeURIComponent(raceId || ''))
+      fetch('/api/runner/' + encodeURIComponent(runnerId) + '/upcoming')
         .then(function (res) { return res.json().then(function (j) { if (!res.ok) throw new Error(j.error || 'Failed'); return j; }); })
         .then(function (j) {
           var box = document.getElementById('runnerUpcoming');
@@ -2796,7 +2819,8 @@
                   '<td>' + escapeHtmlClient(u.date) + '</td>' +
                   '<td>' + escapeHtmlClient(u.time || '-') + '</td>' +
                   '<td>' + escapeHtmlClient(u.meeting) + ' <span class="horse-region">' + escapeHtmlClient(u.country) + '</span></td>' +
-                  '<td>R' + escapeHtmlClient(u.rNo) + (u.name ? ' · ' + escapeHtmlClient(u.name) : '') + (u.trial ? ' <span class="horse-region">(trial)</span>' : '') + (u.scratched ? ' <b>Scratched</b>' : '') + '</td>' +
+                  '<td>R' + escapeHtmlClient(u.rNo) + (u.name ? ' · ' + escapeHtmlClient(u.name) : '') + (u.trial ? ' <span class="horse-region">(trial)</span>' : '') + (u.scratched ? ' <b>Scratched</b>' : '') +
+                    (u.id === raceId ? ' <span class="horse-region">(this race)</span>' : '') + '</td>' +
                   '<td>' + (u.distance ? escapeHtmlClient(u.distance) + 'm' : '-') + '</td>' +
                   '<td>' + escapeHtmlClient(u.tab != null ? u.tab : '-') + '</td>' +
                   '<td>' + escapeHtmlClient(u.barrier || '-') + '</td>' +
@@ -2925,6 +2949,10 @@
       if (!r || !r.pastRaces) return;
       var fl = r.pastRaces[idx];
       if (!fl) return;
+      // The race itself when it's in our DB (13 Nov 2026, per Dinesh: "anda
+      // race a click panna appo da anda race open aaganum").
+      var link = r._pastRaceLinks && r._pastRaceLinks[String(fl.Date || '').slice(0, 10)];
+      if (link && link.url) { window.open(link.url, '_blank'); return; }
       var win = window.open('', '_blank');
       if (!win) return;
       var winnerOr2nd = fl.WinnerName || fl.SecondName || '-';
