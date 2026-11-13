@@ -326,7 +326,13 @@ finished ("…last start, finishing 2nd") settles a last-start win / course-resu
 phrase in it, and is itself checked against the last run (or the last form figure)
 -- not when it also names another run ("two starts back", "prior"). Every finding
 carries `sentence`, shown under it on Comment Checks, in the popup and in tickets.
-Checked against 11-12 Nov 2026 (606 T races): the same 56 findings as before. `commentFactsFor` (server.js) gives each race-comment claim to the
+Checked against 11-12 Nov 2026 (606 T races): the same 56 findings as before.
+13 Nov 2026: only "missed / never / not / yet to / didn't" make a course win a
+"did not win" (`DIDNT`; "Despite a previous win at Kalgoorlie" is a win, Moriah),
+"needs / could / chasing a win at" isn't a claim (`WANTS`), words in capitals (a
+horse's name, "NO JOKE JOE") are left out of the negation look-back (`wordsOnly`),
+"then / before / after" also start a clause, and a clause with two places
+("finished 7th … ran 2nd") isn't read as the last run's. `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10

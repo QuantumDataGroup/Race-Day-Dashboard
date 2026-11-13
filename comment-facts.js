@@ -81,6 +81,9 @@ function clauseAfter(text, end) {
 const NEGATED = /\b(?:no|not|never|lacks?|lacking|without|yet to|needs?|needing|search(?:es|ing)? for|finds?|rediscover|regain|despite|hasn't|has not|absence of|missing|short of|far from|little|lack of)\b[^.;,]{0,25}$/i;
 // Just before a win: it did not win ("narrowly missed victory at Milan",
 // "yet to record a win at Moe").
+// The words before a phrase without horse names: a name is in capitals, and
+// "NO JOKE JOE (15) won at Turfway Park" isn't "no ... won" (13 Nov 2026).
+const wordsOnly = (s) => s.replace(/\b[A-Z][A-Z'’-]+\b/g, ' ');
 // Just before a win: it's wanted or possible, not done ("needs a win at
 // Kalgoorlie", "could add a win at Moe").
 const WANTS = /\b(?:needs?|needing|search(?:es|ing)? for|seek(?:s|ing)?|chasing|looking for|aiming for|hoping for|hunting for|bid for|chance (?:of|for)|capable of|good enough for|in line for|regain|rediscover|could|can|should|would|may|might|will)\b[^.;,]{0,25}$/i;
@@ -182,7 +185,7 @@ const RULES = [
       // Only words that say it didn't win -- not NEGATED's "despite" / "needs"
       // / "regain": "Despite a previous win at Kalgoorlie, recent form is
       // concerning" says it DID win there (13 Nov 2026, per Dinesh: Moriah).
-      const before = String(text).slice(Math.max(0, m.index - 40), m.index);
+      const before = wordsOnly(String(text).slice(Math.max(0, m.index - 40), m.index));
       // "needs a win at Kalgoorlie", "could take a win at Moe": wanted, not done.
       if (isWin && WANTS.test(before)) return null;
       if (MISSED.test(before) || DIDNT.test(before)) {
@@ -326,7 +329,7 @@ function checkClaims(text, runner, race) {
       // All capitals is a horse's name ("RGS DEBUTANT"), not a claim (review 28 Oct 2026).
       if (!/[a-z]/.test(m[0])) continue;
       const sentence = sentenceAt(String(text), start, end);
-      const before = String(text).slice(Math.max(sentence.from, start - 40), start);
+      const before = wordsOnly(String(text).slice(Math.max(sentence.from, start - 40), start));
       if ((rule.negatable && (NEGATED.test(before) || MISSED.test(before))) || (rule.skipBefore && rule.skipBefore.test(before))) continue;
       let why = rule.check(f, m, String(text));
       // A win / placing the comment can mean from a barrier trial is fine
@@ -384,13 +387,14 @@ function sentencesOf(text) {
 function sentenceAt(text, start, end) {
   return sentencesOf(text).find((s) => s.from <= start && end <= s.to) || { from: 0, to: text.length, raw: text, text: text.trim() };
 }
-// A sentence's clauses: a "but" / "however" / "while" / ";" starts another
-// thought -- "placed 2nd at Vichy, but struggled last start at Lyon" is two.
-// A comma doesn't: "missed victory at MILAN last start, finishing 2nd" is one.
+// A sentence's clauses: a "but" / "however" / "while" / "then" / ";" starts
+// another thought -- "placed 2nd at Vichy, but struggled last start at Lyon"
+// and "finished 7th last start, then ran a solid 2nd at Albany" are two. A
+// comma doesn't: "missed victory at MILAN last start, finishing 2nd" is one.
 function clausesOf(raw) {
   const out = [];
   let from = 0;
-  for (const x of raw.matchAll(/;|\b(?:but|however|although|though|while|whereas|yet)\b/gi)) {
+  for (const x of raw.matchAll(/;|\b(?:but|however|although|though|while|whereas|yet|then|before|after)\b/gi)) {
     out.push({ from, text: raw.slice(from, x.index) });
     from = x.index + x[0].length;
   }
@@ -408,8 +412,12 @@ function clauseAt(sentence, start) {
 const LAST_RUN_REF = /\b(?:last (?:start|time(?: out)?|outing|run)|(?:his|her|its) (?:last|latest|most recent) (?:start|outing|run|race))\b/i;
 const OTHER_RUN_REF = /\b(?:(?:two|three|four|five|2|3|4|5) (?:starts?|runs?|outings?|races?) (?:ago|back|before)|previous(?:ly)?|prior|before that|earlier (?:this|in)|first[- ]up|second[- ]up|third[- ]up|on debut)\b/i;
 const STATED_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)\b/i;
+// Two places in one clause ("finished 7th … ran 2nd"): which is the last
+// run's isn't clear, so neither is used.
+const ANY_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(?:\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|runner-up)\b/gi;
 function statedLastPlace(sentence) {
   if (!LAST_RUN_REF.test(sentence) || OTHER_RUN_REF.test(sentence)) return null;
+  if ((sentence.match(ANY_PLACE) || []).length > 1) return null;
   const m = STATED_PLACE.exec(sentence);
   return m ? { pos: WORD_POS[m[1].toLowerCase()], quote: m[0] } : null;
 }
