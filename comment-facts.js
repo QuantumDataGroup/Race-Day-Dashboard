@@ -232,7 +232,9 @@ const RULES = [
       const after = text.slice(m.index + m[0].length);
       if (/^\s*from the winner/i.test(after)) return null;
       // "her first-up run raises doubts" is a run already run (13 Nov 2026).
-      if (/^first[- ]up$/i.test(m[0]) && /^\s*(?:run|effort|start|outing|performance|win|victory)\b/i.test(after)) return null;
+      // "a good first-up record", "recapture his first-up form": its record /
+      // form first-up, not today (13 Nov 2026: Spaceballs, Tokyo Bandit).
+      if (/^first[- ]up$/i.test(m[0]) && /^\s*(?:run|effort|start|outing|performance|win|victory|record|form|stats|figures|runs|starts|wins)\b/i.test(after)) return null;
       // A sentence that also tells a run's result ("finished 2nd at Bursa,
       // showing fitness after a layoff") puts the break before that run, not
       // today (13 Nov 2026: Barlin Ağa, Yenibey, Surertay, Niğbolu).
@@ -248,6 +250,8 @@ const RULES = [
     re: /\b(?:(?:is|remains|still|as) a maiden|maiden (?:galloper|horse|runner|colt|filly|gelding|mare)|yet to (?:win|break (?:his|her|its) maiden|salute|score|taste victory)|still searching for (?:a|his|her|its) (?:first|maiden) (?:win|victory))/gi,
     check(f, m, text) {
       if (QUALIFIED.test(clauseAfter(text, m.index + m[0].length))) return null;
+      // "potential as a maiden winner" won its maiden (13 Nov 2026: Brikeli).
+      if (/^\s*(?:winner|win|victory|race|event|special|company|grade)\b/i.test(text.slice(m.index + m[0].length))) return null;
       const career = f.career;
       if (career && career.wins > 0) return `career ${career.text} (${career.wins} win${career.wins === 1 ? '' : 's'})`;
       const won = f.runs.find((x) => posOf(x) === 1);
@@ -261,7 +265,7 @@ const RULES = [
     check(f, m, text) {
       // "debut for a new stable / over fences / in Britain" is no first start;
       // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
-      if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b)|on (?:the|this) (?:track|course|surface|turf|dirt|synthetic|sand|polytrack))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
       // "first starter here … finishing last in his latest outing" is this
       // track only; "A debutant here adds uncertainty" is today's debut (13 Nov 2026).
       if (/^\s*here\b/i.test(clauseAfter(text, m.index + m[0].length))) {
@@ -447,7 +451,7 @@ const OTHER_RUN_REF = /\b(?:(?:two|three|four|five|2|3|4|5) (?:starts?|runs?|out
 const STATED_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|runner-up)\b/i;
 // Two places in one clause ("finished 7th … ran 2nd"): which is the last
 // run's isn't clear, so neither is used.
-const ANY_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up)\s+(?:[a-z-]+\s+){0,2}?(?:\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|runner-up)\b/gi;
+const ANY_PLACE = /\b(?:finish(?:ed|ing)|ran|running|came(?: home| in)?|coming(?: home| in)?|placed|placing|ended up|ending up|was|were)\s+(?:[a-z-]+\s+){0,2}?(?:\d{1,2}(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|runner-up)\b/gi;
 // A place named at another course than the last run's is that run's: "ran
 // 3rd at Kalgoorlie and struggled last time at Northam" (13 Nov 2026).
 function statedLastPlace(sentence, lastRun) {

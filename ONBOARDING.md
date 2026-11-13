@@ -803,7 +803,13 @@ Under the name, the runner ID (`runners.runnerId`) with a **Copy** button
 the horse's own id in every race it runs, so races from yesterday on with it, not
 resulted / abandoned / started over 10 min ago, without the race open (cached 60 s;
 the rDate index keeps the scan small), each with tab, barrier, jockey, scratched and
-an "Open race" link. Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
+an "Open race" link. **Past Races (13 Nov 2026):** the race card's FormLines plus the
+runs on the admin's horse profile the card doesn't have (`profileRunsFor` /
+`withProfileRuns` in server.js: `horses`, _id = runnerId, gzipped JSON in `data`,
+`data.profileDetailsInfo.previousRun`; same date = already on the card; cached 5 min).
+Those show a "PROFILE" tag (trials "(trial)"); the comment checks read them too
+(`racecardFormFor`). Is This Thing On: 3 runs on the card, 9 on the profile. A
+Distance that already ends in "m" no longer shows "1000mm". Header detail grid: Trainer / Jockey / Colour / Sex / Age / Last Run
 (most recent past race's date) / Sire / Dam / Weight. Runner's narrative
 comment shown inline below that (always visible, not a tab). Then three
 tabs: **Past Form** (full past-races table, click a row to open that old
