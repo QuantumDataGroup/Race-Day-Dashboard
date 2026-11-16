@@ -339,7 +339,14 @@ only, and a place told at another course than the last run's is another run. Als
 skipped: someone else's ("the trainer's recent success", `OTHERS`), "limited recent
 success", "no prior form to suggest …", "first starter here" / "where he has yet to
 run", a break in a sentence that tells a run's result ("finished 2nd at Bursa,
-showing fitness after a layoff"), "her first-up run", "a recent win on polytrack". `commentFactsFor` (server.js) gives each race-comment claim to the
+showing fitness after a layoff"), "her first-up run", "a recent win on polytrack".
+A debut claim ("first starter", "debutant") in a comment that also tells of an earlier
+run is a first start at this track (16 Nov 2026, per Dinesh: Southern Holy, Palermo,
+"a first starter but had a previous run … eighth at SAN ISIDRO"; Just For Now, the run
+told the sentence before) -- unless the horse has run at this track (Zianada at
+Diyarbakir, Father Keys at Gavea), the run is a trial / jump-out, it's "no prior runs",
+or it's another horse's after "while" / "whereas". `checkClaims` now gets the race's
+course (`rCourseDisplayName`). `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10
