@@ -272,6 +272,10 @@ const RULES = [
       // "debut for a new stable / over fences / in Britain" is no first start;
       // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
       if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b)|on (?:the|this) (?:track|course|surface|turf|dirt|synthetic|sand|polytrack))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
+      // "has yet to run well / to form / a big race" is how it has run, not
+      // that it hasn't (Red Franco, Santiago R18 16 Nov 2026: "finishing 6th
+      // last start and has yet to run well at this distance").
+      if (/^yet to|^never/i.test(m[0]) && /^\s*(?:well|badly|poorly|fast|right|competitively|consistently|close|near|up to|to (?:form|(?:his|her|its) (?:best|potential|rating|mark))|(?:a|an) (?:[a-z-]+ )?(?:race|run|one|effort)|beyond|on|any good|anywhere|with)\b/i.test(text.slice(m.index + m[0].length))) return null;
       // A sentence that tells of an earlier run means a first start here (or at
       // this level), not the horse's first ever: "first starter here …
       // finishing last in his latest outing" (13 Nov 2026), "a first starter
