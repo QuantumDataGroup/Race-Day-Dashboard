@@ -272,11 +272,36 @@ const RULES = [
       // "debut for a new stable / over fences / in Britain" is no first start;
       // "a debutant with no prior form" is (Mirham, Abu Dhabi R7 28 Oct 2026).
       if (/^\s*(?:for|over|in|at|under|with (?!no\b|little\b|limited\b)|on (?:the|this) (?:track|course|surface|turf|dirt|synthetic|sand|polytrack))\b/i.test(clauseAfter(text, m.index + m[0].length))) return null;
-      // "first starter here … finishing last in his latest outing" is this
-      // track only; "A debutant here adds uncertainty" is today's debut (13 Nov 2026).
-      if (/^\s*here\b/i.test(clauseAfter(text, m.index + m[0].length))) {
-        const s = sentenceAt(text, m.index, m.index + m[0].length).text;
-        if ((s.match(ANY_PLACE) || []).length || LAST_RUN_REF.test(s) || /\b(?:latest|previous|prior|last) (?:outing|start|run|race|effort)s?\b/i.test(s)) return null;
+      // A sentence that tells of an earlier run means a first start here (or at
+      // this level), not the horse's first ever: "first starter here …
+      // finishing last in his latest outing" (13 Nov 2026), "a first starter
+      // but had a previous run in November 2025 where she finished eighth at
+      // SAN ISIDRO" (Southern Holy, Palermo 16 Nov 2026, per Dinesh: its first
+      // race at Palermo), "a debutant who last ran 11th at Istanbul", "a
+      // debutant ... in his single career start". "A debutant here adds
+      // uncertainty" tells of no run, so it's still today's debut. A trial or
+      // jump-out isn't a run, so a sentence about one still counts. "No prior
+      // runs" tells of none (Private Project). A horse that has run at this
+      // track is no first starter here either (Zianada, 4th at Diyarbakir,
+      // "a first starter who finished 4th in her debut" at Diyarbakir). The
+      // run can be told in another sentence of the horse's comment: "JUST FOR
+      // NOW (5) was last seen finishing 12th at SAN ISIDRO ... This debutant
+      // has a lot to prove" (Palermo 16 Nov 2026).
+      if (!(f.course && f.runs.some((x) => sameCourseAs(x, f.course)))) {
+        // "..., while FOO ran second last start" is another horse's run: only
+        // the claim's part of its sentence, and the other sentences up to a
+        // "while" / "whereas".
+        const sen = sentenceAt(text, m.index, m.index + m[0].length);
+        const at = m.index - sen.from;
+        let s = sen.raw;
+        for (const x of sen.raw.matchAll(/\b(?:while|whereas)\b/gi)) {
+          if (x.index < at) s = sen.raw.slice(x.index + x[0].length);
+          else { s = s.slice(0, s.length - (sen.raw.length - x.index)); break; }
+        }
+        const parts = [s, ...sentencesOf(text).filter((x) => x.from !== sen.from).map((x) => x.raw.split(/\b(?:while|whereas)\b/i)[0])];
+        const toldRun = (p) => (p.match(ANY_PLACE) || []).length || LAST_RUN_REF.test(p)
+          || /\b(?<!(?:no|without|any)\s)(?:latest|previous|prior|last|earlier|only|single|one) (?:career )?(?:outing|start|run|race|effort)s?\b|\blast (?:ran|seen)\b|\bhas (?:raced|run|started) (?:before|once)\b/i.test(p);
+        if (parts.some((p) => toldRun(p) && !/\b(?:trials?|trialled|trialed|jump-?outs?|barrier trials?)\b/i.test(p))) return null;
       }
       // "no prior form to suggest competitiveness" is poor form, not no runs;
       // "at this track, where he has yet to run" is this track only (13 Nov 2026).
@@ -347,6 +372,7 @@ function checkClaims(text, runner, race) {
     raceClass: race.rClass || '',
     raceDistance: parseFloat(race.rDistance) || null,
     country: race.rCountry,
+    course: race.rCourseDisplayName || '',
     career: record(stats.career),
     track: record(stats.track),
     distance: record(stats.distance),

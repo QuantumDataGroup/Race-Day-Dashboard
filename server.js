@@ -2158,7 +2158,7 @@ function applyRacecardApi(doc, card, pending) {
 function commentFactsFor(doc, raceClass) {
   if (doc.rDiscipline !== 'T') return [];
   const runners = (doc.runners || []).filter((r) => !r.isScratched);
-  const race = { rDate: doc.rDate, rCountry: doc.rCountry, rDistance: doc.rDistance, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
+  const race = { rDate: doc.rDate, rCountry: doc.rCountry, rCourseDisplayName: doc.rCourseDisplayName, rDistance: doc.rDistance, rClass: [doc.rClass, raceClass, doc.rName].filter(Boolean).join(' | ') };
   const out = [];
   // comment: the whole comment, for the ticket (28 Oct 2026).
   const add = (r, where, text, comment) => {
