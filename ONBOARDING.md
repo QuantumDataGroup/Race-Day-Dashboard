@@ -345,7 +345,8 @@ run is a first start at this track (16 Nov 2026, per Dinesh: Southern Holy, Pale
 "a first starter but had a previous run … eighth at SAN ISIDRO"; Just For Now, the run
 told the sentence before) -- unless the horse has run at this track (Zianada at
 Diyarbakir, Father Keys at Gavea), the run is a trial / jump-out, it's "no prior runs",
-or it's another horse's after "while" / "whereas". `checkClaims` now gets the race's
+or it's another horse's after "while" / "whereas". "Has yet to run well / to form / a big race"
+is how it has run, not a debut (Red Franco). `checkClaims` now gets the race's
 course (`rCourseDisplayName`). `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
