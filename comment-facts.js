@@ -98,7 +98,9 @@ const wordsOnly = (s) => s.replace(/\b[A-Z][A-Z'’-]+\b/g, ' ');
 // Kalgoorlie", "could add a win at Moe").
 const WANTS = /\b(?:needs?|needing|search(?:es|ing)? for|seek(?:s|ing)?|chasing|looking for|aiming for|hoping for|hunting for|bid for|chance (?:of|for)|capable of|good enough for|in line for|regain|rediscover|could|can|should|would|may|might|will)\b[^.;,]{0,25}$/i;
 const DIDNT = /\b(?:no|not|never|without|yet to|hasn't|has not|didn't|did not|is still chasing|still chasing)\b[^.;,]{0,25}$/i;
-const MISSED = /\b(?:missed(?: out on)?|denied|failed to (?:land|record|secure|register|claim|score|notch|take|grab)|unable to (?:land|record|secure|claim|take)|could(?:n't| not) (?:land|record|secure|claim|take))\b[^.;,]{0,20}$/i;
+// "who nearly won last time out" (Occus Poccus, Gavea 17 Nov 2026: 2nd) is
+// no win -- right before the claim only, not "nearly a length clear and won".
+const MISSED = /\b(?:missed(?: out on)?|denied|failed to (?:land|record|secure|register|claim|score|notch|take|grab)|unable to (?:land|record|secure|claim|take)|could(?:n't| not) (?:land|record|secure|claim|take))\b[^.;,]{0,20}$|\b(?:nearly|almost|all but|so nearly|(?:came|went|was|got) (?:so |very )?close to(?: having)?)\s+(?:just\s+)?$/i;
 // The form figures ("252379x314", newest last) as positions, newest first:
 // 0 = 10th or worse, letters (F, P, U...) = didn't finish; spells (x) dropped.
 function figures(text) {
@@ -236,6 +238,9 @@ const RULES = [
       // circle" is no break at all (review 28 Oct 2026).
       if (/\b(?:short|brief|little|quick)\b/i.test(m[0])) return null;
       const after = text.slice(m.index + m[0].length);
+      // "returns to dirt after a productive spell on synthetic surfaces" is a
+      // run of races, not a rest (Paschal Moon, Finger Lakes 17 Nov 2026).
+      if (/spell$/i.test(m[0]) && (/\b(?:productive|successful|good|strong|fine|purple|winning|consistent|busy|profitable|great|solid|decent|promising|encouraging|rewarding|lucrative|useful|fruitful|positive|bright)\b/i.test(m[0]) || /^\s*(?:(?:on|at|in|with)\b(?!\s+(?:the\s+|a\s+)?(?:paddock|farm|stud|spelling|pasture|grass|box|sidelines|stable|yard|home|rest)\b)|of (?:form|racing|runs|consistency|success|wins|placings)|across|abroad|overseas)/i.test(after))) return null;
       if (/^\s*from the winner/i.test(after)) return null;
       // "her first-up run raises doubts" is a run already run (13 Nov 2026).
       // "a good first-up record", "recapture his first-up form": its record /
@@ -337,13 +342,24 @@ const RULES = [
     claim: 'record at the distance',
     negatable: true,
     re: /\b(?:distance winner|won (?:over|at) (?:this|the|today's) (?:trip|distance)|(?:proven|strong|good|solid|excellent) (?:record )?(?:over|at) (?:this|the|today's) (?:trip|distance))\b/gi,
-    check(f, m) {
+    check(f, m, text = '') {
       const rec = f.distance;
       if (!rec) return null;
       // "Proven" with placings is fair; a win the form shows at about today's
-      // distance (50 m either way) counts too (review 28 Oct 2026).
+      // distance (50 m either way) counts too (review 28 Oct 2026) -- 2% on
+      // long trips (16 Nov 2026: Kilkee Bay, 3rd over 4887 m, today 4970 m).
       const won = /winner|won/i.test(m[0]);
-      if (won && f.raceDistance && f.allRuns.some((x) => posOf(x) === 1 && Math.abs(parseFloat(x.Distance) - f.raceDistance) <= 50)) return null;
+      const near = (x, dist) => Math.abs(parseFloat(x.Distance) - dist) <= Math.max(50, dist * 0.02);
+      const did = (x) => (won ? posOf(x) === 1 : posOf(x) && posOf(x) <= 3);
+      if (f.raceDistance && f.allRuns.some((x) => did(x) && near(x, f.raceDistance))) return null;
+      // "this distance" after the comment names one: "finishing fourth over
+      // 1308m last time out. He previously won at this distance" is 1308 m,
+      // where it won (Kuz It's Chilly, today 1207 m; Agent Tequila "won at
+      // Wexford last start over 4023m ... proven at this distance").
+      for (const d of String(text).slice(0, m.index).matchAll(/\b(\d{3,4})\s?(?:m|metres|meters)\b/gi)) {
+        const dist = Number(d[1]);
+        if (f.allRuns.some((x) => did(x) && near(x, dist))) return null;
+      }
       if (won ? rec.wins === 0 : rec.wins + rec.places === 0) return `distance record ${rec.text}`;
       return null;
     },

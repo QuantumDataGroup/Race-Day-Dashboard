@@ -347,7 +347,15 @@ told the sentence before) -- unless the horse has run at this track (Zianada at
 Diyarbakir, Father Keys at Gavea), the run is a trial / jump-out, it's "no prior runs",
 or it's another horse's after "while" / "whereas". "Has yet to run well / to form / a big race"
 is how it has run, not a debut (Red Franco). `checkClaims` now gets the race's
-course (`rCourseDisplayName`). `commentFactsFor` (server.js) gives each race-comment claim to the
+course (`rCourseDisplayName`). 16 Nov 2026 live review: "who nearly / almost won last time
+out" is no win (`MISSED`, right before the claim only; Occus Poccus); "after a productive
+spell on synthetic surfaces" is a run of races, not a break (a good / productive ... spell,
+or a spell on / at / in / across somewhere -- but "a spell in the paddock" is a rest;
+Paschal Moon); the distance record takes a win (or for "proven" / "good record" a top-3)
+within 50 m or 2% of today's distance (Kilkee Bay, 3rd over 4887 m, today 4970 m), and
+"this distance" after the comment names one ("fourth over 1308m ... previously won at this
+distance") is that distance (Kuz It's Chilly, Agent Tequila).
+`commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
 `commentFacts` only to `isMasterAdmin`). `dispatchCommentFactAlerts` (every 10
