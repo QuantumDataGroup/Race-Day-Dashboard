@@ -2695,6 +2695,7 @@ async function fetchRacecardCard(raceId) {
       if (!res.ok) throw new Error(`racecard API (${s.key}) HTTP ${res.status}`);
       j = await res.json();
       s.rests = 0;
+      s.errStreak = 0;
       s.ok++;
       source = s.key;
       break;
@@ -2702,6 +2703,16 @@ async function fetchRacecardCard(raceId) {
       s.failed++;
       s.lastError = err.message;
       lastErr = err;
+      // Three errors in a row (5xx, timeouts) rest it too: the internal copy
+      // answered HTTP 500 to 286 races in a row while external rested (16 Nov
+      // 2026) -- better to wait than keep asking.
+      // A 404 (no card for that race) says nothing about the API.
+      s.errStreak = /HTTP 4(?!03|29)\d\d/.test(err.message) ? 0 : (s.errStreak || 0) + 1;
+      if (s.errStreak >= 3 && s.restUntil <= Date.now()) {
+        s.restUntil = Date.now() + RACECARD_REST_STEPS_MS[Math.min(s.rests, RACECARD_REST_STEPS_MS.length - 1)];
+        s.rests++;
+        s.errStreak = 0;
+      }
     }
   }
   if (!j) {
