@@ -345,7 +345,8 @@ run is a first start at this track (16 Nov 2026, per Dinesh: Southern Holy, Pale
 "a first starter but had a previous run … eighth at SAN ISIDRO"; Just For Now, the run
 told the sentence before) -- unless the horse has run at this track (Zianada at
 Diyarbakir, Father Keys at Gavea), the run is a trial / jump-out, it's "no prior runs",
-or it's another horse's after "while" / "whereas". `checkClaims` now gets the race's
+or it's another horse's after "while" / "whereas". "Has yet to run well / to form / a big race"
+is how it has run, not a debut (Red Franco). `checkClaims` now gets the race's
 course (`rCourseDisplayName`). `commentFactsFor` (server.js) gives each race-comment claim to the
 horse named before it in the sentence ("the former" → the earlier horse). The
 popup shows a "Comment check · only you" box (`/api/race/:id` sends
@@ -522,6 +523,21 @@ keep the racecards comments. After a restart, until the first full pass finishes
 from the racecards copy (`racecardApiPending`) -- it showed a stale "Horse name missing" on
 every deploy. System health row "Racecard API (comments)". The old
 llmContent scan (19 Oct) is gone: the API is what clients see.
+
+**429s (16 Nov 2026):** Cloudflare (in front of both hosts) answered "429 too many" to
+197 of 315 races, so the reads now go **one at a time with a 150 ms gap**, soonest race
+first, and less often where comments rarely change: today's resulted races hourly (copy
+used 90 min), tomorrow's every 30 min (used 50 min), today's others every 10-min pass (used
+25 min); the 2-minute pass for the next 3 h is unchanged, and a race it read isn't read
+again by the full pass. **Fallback** (per Dinesh): external first, then
+`RACECARD_API_INTERNAL_URL` (default `https://internal.troyendata.com`,
+`GET /api/v1/Races/get-race-card?raceId=&language=EN&style=AU&ignoreCache=true`, same
+card; read-only, the rest of that API writes -- don't call it). A 429 / 403 rests that
+copy 5, 10, 20, then 30 min (`racecardSources`, reset by an answer); other errors just
+try the other copy for that race; with both resting the pass stops and the rest wait for
+the next pass (health: "both copies resting", warn). The comment checks' fresh read of
+flagged races is one at a time too, skips a race read in the last 2 min. Health shows
+each copy's ok / failed and "resting till".
 
 ### Runner comment versions (AU / UK / US, 19 Oct 2026)
 Racecards carry the runner comments in three Styles. The dashboard shows

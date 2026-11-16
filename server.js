@@ -843,12 +843,13 @@ async function runHealthChecks() {
   else add('clickup', 'ClickUp tickets', cu.lastError ? 'warn' : 'ok', cu.lastError ? 'Problem' : 'Connected', cu.lastError || `New tickets in list ${cu.ticketListId} ("Support related tasks")${cu.ticketListId !== cu.listId ? `, older ones still read from ${cu.listId}` : ''} · reminders every ${TICKET_REMINDER_EVERY_MS / 60000} min`);
 
   // Racecard API (20 Oct 2026): the comments the warnings check.
-  const rcFails = racecardApi.failed && (!racecardApi.races || racecardApi.failed > racecardApi.races / 4);
+  const rcFails = (racecardApi.failed && (!racecardApi.races || racecardApi.failed > racecardApi.races / 4)) || racecardApi.skipped > 0;
   add('racecard-api', 'Racecard API (comments)', !racecardApi.lastRunAt ? 'ok' : rcFails ? 'warn' : 'ok',
     racecardApi.lastRunAt ? `${racecardApi.races} races` : 'Starting',
-    [`${RACECARD_API_URL} · every ${RACECARD_API_EVERY_MS / 60000} min, today + tomorrow; races in the next 3 h every ${RACECARD_API_SOON_EVERY_MS / 60000} min${racecardApi.lastSoonAt ? ` (${racecardApi.soonRaces || 0} last time)` : ''}`,
+    [`${RACECARD_API_URL}, else ${RACECARD_API_INTERNAL_URL} · every ${RACECARD_API_EVERY_MS / 60000} min today (resulted hourly), tomorrow every 30 min; races in the next 3 h every ${RACECARD_API_SOON_EVERY_MS / 60000} min${racecardApi.lastSoonAt ? ` (${racecardApi.soonRaces || 0} last time)` : ''}`,
+      racecardSources.map((s) => `${s.key} ${s.ok} ok${s.failed ? ` / ${s.failed} failed` : ''}${s.restUntil > Date.now() ? ` (resting till ${new Date(s.restUntil).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })})` : ''}`).join(', '),
       racecardApi.lastRunAt ? `last ${new Date(racecardApi.lastRunAt).toLocaleTimeString('en-GB', { timeZone: process.env.DASHBOARD_TIMEZONE || 'Asia/Colombo', hour: '2-digit', minute: '2-digit' })}` : '',
-      racecardApi.failed ? `${racecardApi.failed} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
+      racecardApi.failed || racecardApi.skipped ? `${racecardApi.failed || 0} failed: ${racecardApi.lastError}` : ''].filter(Boolean).join(' · '));
 
   // RAS times (22 Oct 2026): the Time mismatch check; Neds when RAS fails.
   const viaNeds = rasTimes.source === 'Neds';
@@ -2450,7 +2451,7 @@ async function attachFormLineStatus(docs, options = {}) {
     // kept a "HORSENAME (n)" version long after the card was fixed (Te
     // Aroha R8 21 Oct 2026, per Dinesh) -- then the racecards copy is used.
     const card = racecardApi.byRace.get(doc._id);
-    applyRacecardApi(doc, card && Date.now() - card.at < RACECARD_API_FRESH_MS ? card : null, racecardApiPending(doc));
+    applyRacecardApi(doc, card && Date.now() - card.at < racecardFreshMs(doc) ? card : null, racecardApiPending(doc));
   }
 }
 
@@ -2657,15 +2658,61 @@ function racecardApiPending(doc) {
   const today = todayStr();
   return doc.rDate === today || doc.rDate === shiftDate(today, 1);
 }
+// Two copies of the API (16 Nov 2026, per Dinesh: "External use error varra
+// some times inda internal a use pannalam"): external first, then internal
+// (RACECARD_API_INTERNAL_URL, same card, /api/v1/Races/get-race-card). Both
+// sit behind Cloudflare, which answered 429 (too many) to 197 of 315 races:
+// a 429 / 403 rests that copy 5, then 10, 20, 30 minutes (reset by an
+// answer), and while it rests the other is used. Other errors just try the
+// other copy for that race.
+const RACECARD_API_INTERNAL_URL = (process.env.RACECARD_API_INTERNAL_URL || 'https://internal.troyendata.com').replace(/\/$/, '');
+const RACECARD_REST_STEPS_MS = [5, 10, 20, 30].map((m) => m * 60 * 1000);
+const racecardSources = [
+  { key: 'external', url: (id) => `${RACECARD_API_URL}/api/v1/Race/racecard/${encodeURIComponent(id)}?language=EN&style=AU&ignoreCache=true` },
+  { key: 'internal', url: (id) => `${RACECARD_API_INTERNAL_URL}/api/v1/Races/get-race-card?raceId=${encodeURIComponent(id)}&language=EN&style=AU&ignoreCache=true` },
+].map((s) => Object.assign(s, { restUntil: 0, rests: 0, ok: 0, failed: 0, lastError: null }));
+// When the next copy is free again, or 0 when one is free now.
+function racecardRestingUntil() {
+  const now = Date.now();
+  if (racecardSources.some((s) => s.restUntil <= now)) return 0;
+  return Math.min(...racecardSources.map((s) => s.restUntil));
+}
 async function fetchRacecardCard(raceId) {
   // ignoreCache=true (21 Oct 2026, per Dinesh / the devs): each URL form has
   // its own cached copy, and a race fixed after a re-scrape kept its old text
   // in ours ("REDFEET (10)" for Redcoat, Mombetsu R6) -- fresh is ~0.7 s too.
-  const res = await fetch(`${RACECARD_API_URL}/api/v1/Race/racecard/${encodeURIComponent(raceId)}?language=EN&style=AU&ignoreCache=true`, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`racecard API HTTP ${res.status}`);
-  const j = await res.json();
+  let j = null;
+  let source = null;
+  let lastErr = null;
+  for (const s of racecardSources) {
+    if (s.restUntil > Date.now()) continue;
+    try {
+      const res = await fetch(s.url(raceId), { signal: AbortSignal.timeout(15000) });
+      if (res.status === 429 || res.status === 403) {
+        s.restUntil = Date.now() + RACECARD_REST_STEPS_MS[Math.min(s.rests, RACECARD_REST_STEPS_MS.length - 1)];
+        s.rests++;
+        throw new Error(`racecard API (${s.key}) HTTP ${res.status}`);
+      }
+      if (!res.ok) throw new Error(`racecard API (${s.key}) HTTP ${res.status}`);
+      j = await res.json();
+      s.rests = 0;
+      s.ok++;
+      source = s.key;
+      break;
+    } catch (err) {
+      s.failed++;
+      s.lastError = err.message;
+      lastErr = err;
+    }
+  }
+  if (!j) {
+    if (lastErr) throw lastErr;
+    const until = racecardRestingUntil();
+    throw new Error(`racecard API resting${until ? ` until ${new Date(until).toISOString().slice(11, 16)} UTC` : ''}`);
+  }
   const card = {
     at: Date.now(),
+    source,
     raceComment: j.raceComment ? String(j.raceComment) : null,
     runners: (Array.isArray(j.runners) ? j.runners : []).map((x) => ({ number: Number(x.number), comment: x.comment ? String(x.comment) : null })),
   };
@@ -2678,6 +2725,19 @@ async function fetchRacecardCard(raceId) {
 // every 10 minutes.
 const RACECARD_API_SOON_EVERY_MS = 2 * 60 * 1000;
 const RACECARD_API_SOON_WINDOW_MS = 3 * 60 * 60 * 1000;
+const RACECARD_API_GAP_MS = 150;
+// How often the full pass reads a race, and how long its copy is used
+// (racecardFreshMs, a little longer so a slow pass doesn't drop it).
+function racecardRefreshMs(doc) {
+  if (doc.resultString) return 60 * 60 * 1000;
+  if (doc.rDate && doc.rDate > todayStr()) return 30 * 60 * 1000;
+  return RACECARD_API_EVERY_MS;
+}
+function racecardFreshMs(doc) {
+  if (doc.resultString) return 90 * 60 * 1000;
+  if (doc.rDate && doc.rDate > todayStr()) return 50 * 60 * 1000;
+  return RACECARD_API_FRESH_MS;
+}
 async function refreshRacecardApi(soonOnly) {
   if (racecardApi.running || !jobOn('racecard-api')) return;
   racecardApi.running = true;
@@ -2687,6 +2747,9 @@ async function refreshRacecardApi(soonOnly) {
     let races = 0;
     let failed = 0;
     let lastError = null;
+    let skipped = 0;
+    let resting = false;
+    const due = [];
     for (const dateStr of [today, shiftDate(today, 1)]) {
       // Today's resulted races too in the full pass: without a card they fall
       // back to the racecards copy, which can keep "HORSENAME (n)" after the
@@ -2694,26 +2757,37 @@ async function refreshRacecardApi(soonOnly) {
       const docs = (await fetchRaceDocs(dateStr, false))
         .filter((d) => d.rDiscipline === 'T' && !d.isAbandoned && String(d.rStatus || '').toUpperCase() !== 'ABANDONED')
         .filter((d) => {
-          if (!soonOnly) return true;
+          if (!soonOnly) {
+            // Less often where comments rarely change (16 Nov 2026, after the
+            // 429s): resulted races hourly, tomorrow's every 30 minutes,
+            // today's others every pass (10 min); a race read since by the
+            // 2-minute pass isn't read again.
+            const card = racecardApi.byRace.get(d._id);
+            return !card || Date.now() - card.at >= racecardRefreshMs(d) - 60 * 1000;
+          }
           if (d.resultString) return false;
-          const raw = String(d.rScheduleTimeUTC || '');
-          const start = Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(raw) ? raw : `${raw}Z`); // UTC, with or without the zone
+          const start = startMs(d);
           return Number.isFinite(start) && start > now - 10 * 60 * 1000 && start < now + RACECARD_API_SOON_WINDOW_MS;
         });
-      for (let i = 0; i < docs.length; i += 4) {
-        await Promise.all(docs.slice(i, i + 4).map(async (d) => {
-          try {
-            applyRacecardApi(d, await fetchRacecardCard(d._id)); // the cached day docs show it straight away
-            races++;
-          } catch (err) {
-            failed++;
-            lastError = err.message;
-          }
-        }));
-      }
+      due.push(...docs);
     }
+    // The soonest first, so a long pass still reads the races about to jump.
+    due.sort((a, b) => (startMs(a) || 0) - (startMs(b) || 0));
+    // One at a time with a short gap -- 4 at once tripped Cloudflare's limit.
+    for (const d of due) {
+      if (racecardRestingUntil()) { resting = true; skipped++; continue; }
+      try {
+        applyRacecardApi(d, await fetchRacecardCard(d._id)); // the cached day docs show it straight away
+        races++;
+      } catch (err) {
+        failed++;
+        lastError = err.message;
+      }
+      await new Promise((r) => setTimeout(r, RACECARD_API_GAP_MS));
+    }
+    if (resting) lastError = `both copies resting (too many requests) -- ${skipped} races left for the next pass${lastError ? `; ${lastError}` : ''}`;
     if (soonOnly) Object.assign(racecardApi, { lastSoonAt: new Date().toISOString(), soonRaces: races });
-    else Object.assign(racecardApi, { lastRunAt: new Date().toISOString(), races, failed, lastError });
+    else Object.assign(racecardApi, { lastRunAt: new Date().toISOString(), races, failed, skipped, lastError });
   } catch (err) {
     racecardApi.lastError = err.message;
     console.warn(`[race-dashboard] WARNING: racecard API check failed: ${err.message}`);
@@ -5877,8 +5951,14 @@ async function dispatchCommentFactAlerts() {
     // so a fixed comment leaves the page at the next run (28 Oct 2026, per
     // Dinesh: Dawwaas fixed but still shown -- the 10-minute copy lagged).
     const flagged = races.filter((d) => ((commentFactState.byRace.get(d._id) || {}).facts || []).length);
-    for (let i = 0; i < flagged.length; i += 4) {
-      await Promise.all(flagged.slice(i, i + 4).map((d) => fetchRacecardCard(d._id).then((card) => applyRacecardApi(d, card)).catch(() => null)));
+    // One at a time, not one read in the last 2 minutes, and none while both
+    // API copies rest (16 Nov 2026, the 429s).
+    for (const d of flagged) {
+      const had = racecardApi.byRace.get(d._id);
+      if (had && Date.now() - had.at < 2 * 60 * 1000) continue;
+      if (racecardRestingUntil()) break;
+      await fetchRacecardCard(d._id).then((card) => applyRacecardApi(d, card)).catch(() => null);
+      await new Promise((r) => setTimeout(r, RACECARD_API_GAP_MS));
     }
     const hashOf = (d) => crypto.createHash('sha1').update([d.raceComment || '', ...(d.runners || []).map((r) => `${r.tabNo}|${r.isScratched ? 'S' : ''}|${r.runnerComment || ''}`)].join('\n')).digest('hex');
     const todo = races.filter((d) => {
