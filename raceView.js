@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { INTEGRITY_CHECKS } = require('./integrity-checks');
 
 const MISSING_JOCKEY_BORDER_THRESHOLD = 0; // strictly more than this -> red border (any missing jockey at all triggers it)
 // 4 Sep 2026, per Dinesh, only 4+ runners missing form lines on one race
@@ -65,6 +66,7 @@ const ABANDONED_QUIET = {
   ageIssueCount: 0, missingRunnerCommentCount: 0, missingRaceComment: false, scratchedInComment: [], commentTabWrong: [],
   commentChecks: [], commentVersionIssues: [], missingVideo: false, missingSpeedMap: false, missingScratching: false,
   missingScratchingNames: [], runnerMismatch: false, runnerMismatchCount: 0, runnerCheckLines: [], timeMismatch: null,
+  integrityChecks: [],
 };
 
 function deriveRaceStatus(doc) {
@@ -366,6 +368,10 @@ function commentChecks(doc) {
 // exact Riccarton Park class of bug (local time was correct, only the UTC
 // field was wrong -- a purely local-time check cannot see that), which was
 // a known, explicitly-accepted tradeoff at removal time, not an oversight.
+//
+// 26 Nov 2026: a UTC check is back, per Dinesh (data for TD's new Trader):
+// integrity-checks.js `utc-offset`, only offsets the country can't have or
+// that differ from the rest of the meeting -- see ONBOARDING.md.
 
 // Per-runner issue label used in the click-through detail view. Combines the
 // tab-number check (all disciplines), the trainer check (all disciplines),
@@ -542,6 +548,8 @@ function buildSchedule(docs, dateStr) {
       runnerCheckLines: Array.isArray(doc.runnerCheckLines) ? doc.runnerCheckLines : [],
       // Our time vs the RAS API's, a race not run yet (server.js applyTimeMismatch).
       timeMismatch: doc.timeMismatch || null,
+      // Trader data-integrity checks (server.js attachIntegrityChecks, integrity-checks.js).
+      integrityChecks: Array.isArray(doc.integrityChecks) ? doc.integrityChecks : [],
     };
     // An abandoned race raises no issues at all (20 Oct 2026, per Dinesh:
     // "Abandoned meeting-la edawadu issue irunda ignore pannunga, Missing
@@ -571,7 +579,7 @@ function buildSchedule(docs, dateStr) {
       const {
         id, clock, startUtc, rClass, rPrizeMoney, missingJockeyCount, duplicateJockeyCount, tabIssueCount,
         missingTrainerCount, missingFormCount, ageIssueCount, missingRunnerCommentCount, missingRaceComment, scratchedInComment, commentTabWrong, commentChecks, commentVersionIssues, status, resultString, isTrial, missingVideo, videoUrl, missingSpeedMap,
-        missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines, timeMismatch,
+        missingScratching, missingScratchingNames, runnerMismatch, runnerMismatchCount, runnerCheckLines, timeMismatch, integrityChecks,
       } = g.races.get(rNo);
 
       let gapMinutes = null;
@@ -641,6 +649,7 @@ function buildSchedule(docs, dateStr) {
             runnerMismatchCount,
             runnerCheckLines,
             timeMismatch,
+            integrityChecks,
           }
         : null;
       if (clock) {
@@ -711,6 +720,7 @@ function buildSchedule(docs, dateStr) {
     let hasScratchedInComment = false;
     let hasCommentTabWrong = false;
     const commentCheckCodes = new Set();
+    const integrityCodes = new Set();
     let hasScheduleIssue = false;
     let hasAbandoned = false;
     for (const rNo of raceNos) {
@@ -733,14 +743,15 @@ function buildSchedule(docs, dateStr) {
       if (race.scratchedInComment && race.scratchedInComment.length) hasScratchedInComment = true;
       if (race.commentTabWrong && race.commentTabWrong.length) hasCommentTabWrong = true;
       (race.commentChecks || []).forEach((c) => commentCheckCodes.add(c.code));
+      (race.integrityChecks || []).forEach((c) => integrityCodes.add(c.code));
       if (race.badTime) hasScheduleIssue = true;
       if (race.status === 'abandoned') hasAbandoned = true;
     }
-    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasTimeMismatch || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || hasScheduleIssue;
+    const hasAnyIssue = hasMissingJockey || hasDuplicateJockey || hasMissingTab || hasMissingTrainer || hasMissingForm || hasAgeIssue || hasMissingRunnerComment || hasMissingVideo || hasMissingSpeedMap || hasMissingScratching || hasRunnerMismatch || hasMissingResults || hasTimeMismatch || hasMissingRaceComment || hasScratchedInComment || hasCommentTabWrong || commentCheckCodes.size > 0 || integrityCodes.size > 0 || hasScheduleIssue;
 
     meetings.push({
       meeting: g.meeting, country: g.country, discipline: g.discipline, isTAB: g.isTAB, meetingType: g.meetingType || null,
-      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasTimeMismatch, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
+      hasMissingJockey, hasDuplicateJockey, hasMissingTab, hasMissingTrainer, hasMissingForm, hasAgeIssue, hasMissingRunnerComment, hasMissingVideo, hasMissingSpeedMap, hasMissingScratching, hasRunnerMismatch, hasMissingResults, hasTimeMismatch, hasMissingRaceComment, hasScratchedInComment, hasCommentTabWrong, commentCheckCodes: [...commentCheckCodes], integrityCodes: [...integrityCodes], hasScheduleIssue, hasAnyIssue, hasAbandoned,
       scheduleNote,
       races,
     });
@@ -896,7 +907,8 @@ function pickSpotlights(byStyle, country) {
 // "Horse name missing" ticket the fresh popup no longer had). Kinds that
 // need the whole meeting (gaps between races, later races' results) are
 // left out; the page keeps those from the grid.
-const MEETING_WIDE_ISSUES = new Set(['schedule-issue', 'missing-results']);
+// The integrity checks need the whole day's races (and weeks of history).
+const MEETING_WIDE_ISSUES = new Set(['schedule-issue', 'missing-results', ...Object.keys(INTEGRITY_CHECKS)]);
 function popupIssues(doc) {
   try {
     const schedule = buildSchedule([doc], doc.rDate);
@@ -1581,6 +1593,7 @@ function raceIssueList(race) {
   }
   if (race.commentTabWrong && race.commentTabWrong.length) add('comment-tab', `Comment tab wrong (${commentTabText(race.commentTabWrong)})`);
   (race.commentChecks || []).forEach((c) => add(c.code, c.text));
+  (race.integrityChecks || []).forEach((c) => add(c.code, `${INTEGRITY_CHECKS[c.code] ? INTEGRITY_CHECKS[c.code].label : c.code} (${c.text})`));
   if (race.badTime) add('schedule-issue', `Schedule Issue (${race.badTimeReason})`);
   else if (race.highlighted) add('schedule-issue', `Schedule Issue (${race.gapMinutes} min after the previous race)`);
   return out;
@@ -1630,6 +1643,7 @@ const ISSUE_LABELS = {
   'missing-race-comment': 'Missing race comment', 'schedule-issue': 'Schedule issue',
   'scratched-in-comment': 'Scratched runner in comment', 'comment-tab': 'Comment tab wrong',
   ...Object.fromEntries(Object.entries(COMMENT_CHECKS).map(([code, c]) => [code, c.label])),
+  ...Object.fromEntries(Object.entries(INTEGRITY_CHECKS).map(([code, c]) => [code, c.label])),
 };
 
 // Every issue on a day's schedule, one entry per race + kind (several
@@ -1714,6 +1728,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
           if (race.scratchedInComment && race.scratchedInComment.length) otherIssueFlags.push('scratched-in-comment');
           if (race.commentTabWrong && race.commentTabWrong.length) otherIssueFlags.push('comment-tab');
           (race.commentChecks || []).forEach((c) => otherIssueFlags.push(c.code));
+          (race.integrityChecks || []).forEach((c) => otherIssueFlags.push(c.code));
 
           const titleParts = [];
           if (race.isTrial) titleParts.push('Trial race');
@@ -1784,6 +1799,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasScratchedInComment) issueCodes.push('scratchedincomment');
         if (m.hasCommentTabWrong) issueCodes.push('commenttab');
         (m.commentCheckCodes || []).forEach((code) => issueCodes.push(COMMENT_CHECKS[code].filter));
+        (m.integrityCodes || []).forEach((code) => issueCodes.push(INTEGRITY_CHECKS[code].filter));
         if (m.hasScheduleIssue) issueCodes.push('scheduleissue');
         // Tooltip lists exactly which category(ies) triggered the "Issue"
         // pill -- added 10 Aug 2026 after a real support ticket where the
@@ -1809,6 +1825,7 @@ function renderMeetingsTable(meetings, maxRaceNo, dateStr, includeTrials) {
         if (m.hasScratchedInComment) issueReasons.push('Scratched runner in comment');
         if (m.hasCommentTabWrong) issueReasons.push('Comment tab wrong');
         (m.commentCheckCodes || []).forEach((code) => issueReasons.push(COMMENT_CHECKS[code].label));
+        (m.integrityCodes || []).forEach((code) => issueReasons.push(INTEGRITY_CHECKS[code].label));
         if (m.hasScheduleIssue) issueReasons.push('Schedule Issue');
         const abandonedTag = m.hasAbandoned ? '<span class="abandoned-tag" title="At least one race at this meeting is abandoned">ABBN</span>' : '';
         // Trailing "Status" column (15 Sep 2026, per Dinesh, a reference

@@ -118,6 +118,11 @@
             <option value="namemisspelt">Horse Name Misspelt</option>
             <option value="namemissing">Horse Name Missing in Comment</option>
             <option value="aicomment">Runner Comment Problem</option>
+            <option value="fieldmixup">Wrong Field (Runners of Another Race)</option>
+            <option value="horsetworaces">Horse in Two Races</option>
+            <option value="runneridclash">Runner ID Shared by Two Horses</option>
+            <option value="utcoffset">UTC Time Wrong</option>
+            <option value="racedata">Barrier / Distance Problem</option>
             <option value="scheduleissue">Schedule Issue</option>
             <option value="hasissues">Meetings with Issues</option>
             <option value="healthy">Healthy Meetings</option>
@@ -983,7 +988,7 @@
     // words are still used as the space-separated tokens in each cell's
     // data-otherissue-flags attribute (see raceView.js), so this list is
     // reused unchanged as the set of tokens to check for.
-    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'time-mismatch', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'name-missing', 'ai-comment'];
+    var OTHER_ISSUE_CLASSES = ['missing-jockeys', 'duplicate-jockey', 'tab-issue', 'missing-trainer', 'bad-time', 'missing-video', 'missing-speed-map', 'missing-scratching', 'runner-mismatch', 'missing-results', 'time-mismatch', 'horse-age-issue', 'missing-runner-comment', 'missing-race-comment', 'scratched-in-comment', 'comment-tab', 'race-comment-tab', 'race-comment-unknown', 'comment-wrong-horse', 'name-misspelt', 'name-missing', 'ai-comment', 'field-mixup', 'horse-two-races', 'runner-id-clash', 'utc-offset', 'race-data'];
 
     // Friendly label + issueFilter <select> code for every token that can
     // appear in a cell's data-otherissue-flags, used by refreshIssueIcons()
@@ -1015,6 +1020,11 @@
       'name-misspelt': { label: 'Horse name misspelt', code: 'namemisspelt' },
       'name-missing': { label: 'Horse name missing in comment', code: 'namemissing' },
       'ai-comment': { label: 'Runner comment problem', code: 'aicomment' },
+      'field-mixup': { label: 'Wrong field (runners of another race)', code: 'fieldmixup' },
+      'horse-two-races': { label: 'Horse in two races on one day', code: 'horsetworaces' },
+      'runner-id-clash': { label: 'Runner ID shared by two horses', code: 'runneridclash' },
+      'utc-offset': { label: 'UTC time wrong', code: 'utcoffset' },
+      'race-data': { label: 'Barrier / distance problem', code: 'racedata' },
     };
 
     // Every ignorable issue currently still active on one race cell, read
@@ -1623,7 +1633,7 @@
     // 2026: the cell's copy can be minutes old).
     function raceIssuesForTickets(race) {
       if (!Array.isArray(race.issues)) return raceIssuesFromGrid(race.id);
-      var meetingWide = { 'schedule-issue': true, 'missing-results': true };
+      var meetingWide = { 'schedule-issue': true, 'missing-results': true, 'field-mixup': true, 'horse-two-races': true, 'runner-id-clash': true, 'utc-offset': true, 'race-data': true };
       var byCode = {};
       race.issues.forEach(function (i) { (byCode[i.code] = byCode[i.code] || []).push(i.text); });
       return Object.keys(byCode).map(function (code) { return { code: code, texts: byCode[code] }; })
