@@ -1520,6 +1520,7 @@
         ? '<p class="modal-runner-check"><i class="fa-solid fa-clock"></i> ' + escapeHtmlClient(race.timeMismatch.text) +
           ' <button type="button" class="missing-jockey-ignore-btn" data-ras="' + escapeHtmlClient(race.timeMismatch.rasUtc) + '" onclick="ignoreTimeMismatch(this)">&#10003; Ignore</button></p>'
         : '';
+      var integrityLine = integrityLinesHtml(race.id);
       var formIgnoreAllLine = _currentFormFlaggedRunners.length
         ? '<p class="form-ignore-all-line"><button type="button" class="form-ignore-btn form-ignore-all-btn" onclick="confirmNoFormLinesAll(this)">&#10003; Confirm no form for all (' + _currentFormFlaggedRunners.length + ')</button></p>'
         : '';
@@ -1600,6 +1601,7 @@
         resultLine +
         runnerCheckLine +
         timeMismatchLine +
+        integrityLine +
         '<div class="tk-raise" id="tkRaise" hidden></div>' +
         popupTabsHtml +
         '<div id="raceFieldView" class="popup-tab-panel">' +
@@ -3208,6 +3210,60 @@
           var cell = document.querySelector('td.cell.time.clickable[data-race-id="' + raceId + '"]');
           if (cell && !left) {
             cell.setAttribute('data-otherissue-flags', (cell.getAttribute('data-otherissue-flags') || '').split(' ').filter(function (f) { return f && f !== 'runner-mismatch'; }).join(' '));
+            refreshIssueIcons(cell);
+          }
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.innerHTML = '&#10003; Ignore';
+          window.alert('Could not save: ' + err.message);
+        });
+    }
+
+    // Data integrity checks (26 Nov 2026): they need the whole day, so the
+    // popup shows the grid cell's copy, one line each. A runner ID clash has
+    // an Ignore per horse; it comes back if the race is re-scraped and the
+    // clash is still there (server.js applyIntegrityIgnores).
+    var INTEGRITY_CODES = ['field-mixup', 'horse-two-races', 'runner-id-clash', 'utc-offset', 'race-data'];
+    function integrityLinesHtml(raceId) {
+      var cell = document.querySelector('td[data-race-id="' + raceId + '"]');
+      var list = [];
+      try { list = JSON.parse((cell && cell.getAttribute('data-issues')) || '[]'); } catch (e) { list = []; }
+      return list.filter(function (i) { return INTEGRITY_CODES.indexOf(i.code) !== -1; }).map(function (i) {
+        return '<p class="modal-runner-check"><i class="fa-solid fa-triangle-exclamation"></i> ' + escapeHtmlClient(i.text) +
+          (i.key ? ' <button type="button" class="missing-jockey-ignore-btn" data-code="' + escapeHtmlClient(i.code) + '" data-key="' + escapeHtmlClient(i.key) + '" data-text="' + escapeHtmlClient(i.text) + '" onclick="ignoreIntegrity(this)">&#10003; Ignore</button>' : '') +
+          '</p>';
+      }).join('');
+    }
+    function ignoreIntegrity(btn) {
+      var race = _currentRaceData;
+      if (!race || !_currentRaceId) return;
+      var code = btn.getAttribute('data-code');
+      var key = btn.getAttribute('data-key');
+      var text = btn.getAttribute('data-text');
+      if (!window.confirm('Ignore this for ' + race.meeting + ' R' + race.rNo + '?\n\n' + text + '\n\nIt comes back if the meeting is re-scraped and the problem is still there.')) return;
+      var raceId = _currentRaceId;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      fetch('/api/race/' + encodeURIComponent(raceId) + '/integrity-ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignored: true, code: code, key: key, text: text, race: race.meeting + ' R' + race.rNo + ' (' + race.country + ')' }),
+      })
+        .then(function (res) {
+          if (!res.ok) return throwWithServerError(res);
+          return res.json();
+        })
+        .then(function () {
+          var line = btn.parentNode;
+          if (line) line.remove();
+          var cell = document.querySelector('td[data-race-id="' + raceId + '"]');
+          if (cell) {
+            try {
+              var list = JSON.parse(cell.getAttribute('data-issues') || '[]').filter(function (i) { return !(i.code === code && i.key === key); });
+              cell.setAttribute('data-issues', JSON.stringify(list));
+              if (!list.some(function (i) { return i.code === code; })) setOtherIssueFlag(cell, code, false);
+            } catch (e) { /* the next refresh redraws it */ }
             refreshIssueIcons(cell);
           }
         })

@@ -596,7 +596,14 @@ checks mostly look for data that is missing). Five issue codes, shown like the c
   far-apart region (`REGION`: EU / ANZ / NAM, else the country) <= 7 days away. TD makes runnerIds
   from the horse's name, so namesakes share one (167 in 30 days). Reads ~5 weeks of races
   (~10 s), so `idClashesFor` runs it in the background, kept 30 min per date: a date's first
-  load shows it from the next refresh.
+  load shows it from the next refresh. One item per horse (`key` = runnerId), each with an
+  **Ignore** in the popup (26 Nov 2026): `POST /api/race/:raceId/integrity-ignore`, stored in
+  `integrity-ignores.json` in the activity-log folder, keyed race + check + runnerId. Like the
+  age/jockey ignores it lapses when the race is re-scraped (`isIgnoreStale`, the doc's
+  `createdAt` past `ignoredAt`), so the warning shows again if the clash is still there.
+  `INTEGRITY_IGNORABLE` lists the checks that get the button (only this one). The loader keeps
+  the full list on `doc.integrityAll`; `applyIntegrityIgnores` (in `applyAllIgnores`, on every
+  read) sets `doc.integrityChecks`.
 - `utc-offset` -- `rScheduleTime` minus `rScheduleTimeUTC` impossible for the country
   (`COUNTRY_OFFSETS`, DST included) or different from the rest of the meeting. A UTC string
   without a zone is read as UTC (`parseUtc`): 43% of `rStartTimeUTC` values have none. (The
@@ -604,7 +611,7 @@ checks mostly look for data that is missing). Five issue codes, shown like the c
 - `race-data` -- Thoroughbred barrier drawn twice (not harness: front/back rows share numbers);
   distance under 700 m (150 m in the Americas, quarter horses) or over 7400 m.
 Abandoned races are left out. They're meeting-wide for the popup (`MEETING_WIDE_ISSUES`): the
-popup keeps the grid's copy. The 30-day check script that tuned the rules is not in the repo.
+popup keeps the grid's copy and shows each as a line (`integrityLinesHtml`). The 30-day check script that tuned the rules is not in the repo.
 
 ### Metropolitan meetings (Racing Australia, 6 Nov 2026)
 A "METROPOLITAN" label under the meeting name on the grid and in the race popup

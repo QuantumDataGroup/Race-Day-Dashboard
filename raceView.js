@@ -1593,7 +1593,10 @@ function raceIssueList(race) {
   }
   if (race.commentTabWrong && race.commentTabWrong.length) add('comment-tab', `Comment tab wrong (${commentTabText(race.commentTabWrong)})`);
   (race.commentChecks || []).forEach((c) => add(c.code, c.text));
-  (race.integrityChecks || []).forEach((c) => add(c.code, `${INTEGRITY_CHECKS[c.code] ? INTEGRITY_CHECKS[c.code].label : c.code} (${c.text})`));
+  // An ignorable one carries its key for the popup's Ignore button.
+  (race.integrityChecks || []).forEach((c) => out.push({
+    code: c.code, text: `${INTEGRITY_CHECKS[c.code] ? INTEGRITY_CHECKS[c.code].label : c.code} (${c.text})`, ...(c.ignorable ? { key: c.key } : {}),
+  }));
   if (race.badTime) add('schedule-issue', `Schedule Issue (${race.badTimeReason})`);
   else if (race.highlighted) add('schedule-issue', `Schedule Issue (${race.gapMinutes} min after the previous race)`);
   return out;
