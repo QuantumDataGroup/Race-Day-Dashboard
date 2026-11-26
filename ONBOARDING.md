@@ -582,6 +582,30 @@ MEX/SPA/ARG/URU/BRZ/SAU. The warning says which source ("Neds 19:02"); the healt
 "N races via Neds". RAS and Neds don't always agree (22 Oct: RAS had all 7 Northam races out,
 Neds only R2-R4).
 
+### Data integrity checks for the Trader (`integrity-checks.js`, 26 Nov 2026)
+TD's new Trader takes our data, so these look for data that is there but **wrong** (the other
+checks mostly look for data that is missing). Five issue codes, shown like the comment checks
+(grid filter, meeting Status breakdown, Overview, tickets):
+- `field-mixup` -- two races sharing most of their runners (>= 2 and >= half the smaller
+  field) at different meetings, or an identical field at one meeting. Found Ascot AUS (Perth)
+  31 Oct R1-R7 carrying the Ascot GB jumps fields: same course name, different country.
+- `horse-two-races` -- a horse not scratched in two races on one day (Desert Charm at
+  Morphettville AUS and Southwell GB, 31 Oct).
+- `runner-id-clash` -- the race's runnerId used by another horse in the 30 days before / 3 after:
+  a different name, a different discipline, filly/mare vs colt/gelding/horse/rig, or a run in a
+  far-apart region (`REGION`: EU / ANZ / NAM, else the country) <= 7 days away. TD makes runnerIds
+  from the horse's name, so namesakes share one (167 in 30 days). Reads ~5 weeks of races
+  (~10 s), so `idClashesFor` runs it in the background, kept 30 min per date: a date's first
+  load shows it from the next refresh.
+- `utc-offset` -- `rScheduleTime` minus `rScheduleTimeUTC` impossible for the country
+  (`COUNTRY_OFFSETS`, DST included) or different from the rest of the meeting. A UTC string
+  without a zone is read as UTC (`parseUtc`): 43% of `rStartTimeUTC` values have none. (The
+  Aug 2026 timezone check was removed for noise; this one fired only on real errors in 30 days.)
+- `race-data` -- Thoroughbred barrier drawn twice (not harness: front/back rows share numbers);
+  distance under 700 m (150 m in the Americas, quarter horses) or over 7400 m.
+Abandoned races are left out. They're meeting-wide for the popup (`MEETING_WIDE_ISSUES`): the
+popup keeps the grid's copy. The 30-day check script that tuned the rules is not in the repo.
+
 ### Metropolitan meetings (Racing Australia, 6 Nov 2026)
 A "METROPOLITAN" label under the meeting name on the grid and in the race popup
 header, for AUS Thoroughbred meetings Racing Australia calls Metro (listed first in their

@@ -84,6 +84,7 @@ const session = require('express-session');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const { loadConfig, extractConnectionString } = require('./db-config');
+const { dayIntegrity, idClashes } = require('./integrity-checks');
 const { MIN_PASSWORD_LENGTH, USERNAME_RE, loadAuthFile, saveAuthFile, findUserIndex, usersFilePath, activeAuthPath } = require('./auth-store');
 const { KEEP_PREVIOUS_MONTHS, activityLogDir, monthKey, monthFilePath, migrateLegacyLog, deleteOldMonths, readEntries } = require('./activity-log');
 const { DEFAULT_COUNTRIES: MISSING_DEFAULT_COUNTRIES, pickSourceMeetings, uncheckedFeedCountries, compareMeetings, sameCourse: sameCourseName } = require('./missing-meetings');
@@ -2548,7 +2549,63 @@ async function loadRaceDocs(dateStr, includeTrials) {
   }
   await Promise.all([attachFormLineStatus(docs, { light: true }), attachVideoStatus(docs, dateStr), attachSpeedMapStatus(docs, dateStr), attachScratchingStatus(docs, dateStr), fillFinishPositions(docs)]);
   attachRunnersCheck(docs);
+  attachIntegrityChecks(docs, dateStr);
   return docs;
+}
+
+// Trader data-integrity checks (26 Nov 2026, per Dinesh; integrity-checks.js
+// has the rules and what they found). The same-day ones run on every load;
+// the runner-ID one reads ~5 weeks of races (~10 s), so it runs in the
+// background and its result is kept 30 minutes -- a fresh day shows it from
+// the next refresh on.
+const ID_CLASH_FRESH_MS = 30 * 60 * 1000;
+const ID_CLASH_DAYS_BACK = 30;
+const ID_CLASH_DAYS_AHEAD = 3;
+const idClashCache = new Map(); // dateStr -> { at, map, loading }
+function shiftDateStr(dateStr, days) {
+  return new Date(Date.parse(`${dateStr}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+async function loadIdClashes(dateStr, docs) {
+  const ids = [...new Set(docs.flatMap((d) => (d.runners || []).map((r) => r.runnerId)).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const hist = await (await getClient()).db().collection('races').aggregate([
+    { $match: { rDate: { $gte: shiftDateStr(dateStr, -ID_CLASH_DAYS_BACK), $lte: shiftDateStr(dateStr, ID_CLASH_DAYS_AHEAD) }, isHidden: { $ne: true }, 'runners.runnerId': { $in: ids } } },
+    { $project: {
+      rDate: 1, rCountry: 1, rDiscipline: 1, rCourseDisplayName: 1, rNo: 1, isAbandoned: 1, rStatus: 1,
+      runners: { $map: {
+        input: { $filter: { input: '$runners', as: 'x', cond: { $in: ['$$x.runnerId', ids] } } },
+        as: 'x', in: { runnerId: '$$x.runnerId', horseName: '$$x.horseName', sex: '$$x.sex', isScratched: '$$x.isScratched' },
+      } },
+    } },
+  ]).toArray();
+  return idClashes(docs, hist);
+}
+function idClashesFor(dateStr, docs) {
+  let entry = idClashCache.get(dateStr);
+  if (!entry) {
+    entry = { at: 0, map: null, loading: null };
+    idClashCache.set(dateStr, entry);
+    for (const [k, e] of idClashCache) if (k !== dateStr && Date.now() - e.at > 6 * 60 * 60 * 1000 && !e.loading) idClashCache.delete(k);
+  }
+  if (Date.now() - entry.at > ID_CLASH_FRESH_MS && !entry.loading) {
+    entry.loading = loadIdClashes(dateStr, docs)
+      .then((map) => { entry.map = map; entry.at = Date.now(); })
+      .catch((err) => {
+        console.warn(`runner ID check ${dateStr}: ${err.message}`);
+        entry.at = Date.now() - ID_CLASH_FRESH_MS + 5 * 60 * 1000; // try again in 5 minutes
+      })
+      .finally(() => { entry.loading = null; });
+  }
+  return entry.map;
+}
+function attachIntegrityChecks(docs, dateStr) {
+  try {
+    const day = dayIntegrity(docs);
+    const clashes = idClashesFor(dateStr, docs) || new Map();
+    for (const doc of docs) doc.integrityChecks = [...(day.get(doc._id) || []), ...(clashes.get(doc._id) || [])];
+  } catch (err) {
+    console.warn(`integrity checks ${dateStr}: ${err.message}`);
+  }
 }
 
 // One race's full detail for the popup: fresh 30 s, then up to 60 s more
