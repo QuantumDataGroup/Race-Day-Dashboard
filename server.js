@@ -328,6 +328,7 @@ function applyAllIgnores(docs) {
   applyTimeMismatch(docs);
   applyVideoIgnores(docs);
   applyMeetingType(docs);
+  applyIntegrityIgnores(docs);
 }
 
 // --- Response cache (1 Oct 2026, per Dinesh: "site a konjo optimize panni
@@ -2601,9 +2602,44 @@ function attachIntegrityChecks(docs, dateStr) {
   try {
     const day = dayIntegrity(docs);
     const clashes = idClashesFor(dateStr, docs) || new Map();
-    for (const doc of docs) doc.integrityChecks = [...(day.get(doc._id) || []), ...(clashes.get(doc._id) || [])];
+    // Kept whole on the cached doc; applyIntegrityIgnores picks what shows.
+    for (const doc of docs) doc.integrityAll = [...(day.get(doc._id) || []), ...(clashes.get(doc._id) || [])];
   } catch (err) {
     console.warn(`integrity checks ${dateStr}: ${err.message}`);
+  }
+  applyIntegrityIgnores(docs);
+}
+
+// Integrity check Ignore (26 Nov 2026, per Dinesh: "Runner ID shared by two
+// horses ... Ignore pandradukku option podunga, anda meeting marubadium
+// scrape pannadu anda issue irunda marubadium warning waranum"). One entry
+// per race + check + horse (runnerId). Like the age/jockey ignores it holds
+// only until the race is re-scraped (isIgnoreStale: the doc's createdAt
+// moves past ignoredAt); then the warning shows again if it's still there.
+// Only the kinds listed here get the button. Entries over a week old are
+// dropped on the next save (the route is with the other race Ignore routes).
+const INTEGRITY_IGNORABLE = new Set(['runner-id-clash']);
+const INTEGRITY_IGNORE_PATH = path.join(ACTIVITY_LOG_DIR, 'integrity-ignores.json');
+let integrityIgnores = {};
+try {
+  if (fs.existsSync(INTEGRITY_IGNORE_PATH)) integrityIgnores = JSON.parse(fs.readFileSync(INTEGRITY_IGNORE_PATH, 'utf8'));
+} catch (err) {
+  console.warn(`[race-dashboard] WARNING: could not read ${INTEGRITY_IGNORE_PATH}: ${err.message} -- starting with an empty list`);
+}
+function integrityIgnoreKey(raceId, code, key) {
+  return `${raceId}|${code}|${key}`;
+}
+function applyIntegrityIgnores(docs) {
+  for (const doc of docs) {
+    if (!Array.isArray(doc.integrityAll)) continue;
+    doc.integrityChecks = [];
+    doc.integrityIgnored = [];
+    for (const c of doc.integrityAll) {
+      const ignorable = INTEGRITY_IGNORABLE.has(c.code) && c.key;
+      const entry = ignorable ? integrityIgnores[integrityIgnoreKey(doc._id, c.code, c.key)] : null;
+      if (entry && !isIgnoreStale(entry, doc)) doc.integrityIgnored.push({ ...c, ignoredBy: entry.ignoredBy, ignoredAt: entry.ignoredAt });
+      else doc.integrityChecks.push(ignorable ? { ...c, ignorable: true } : c);
+    }
   }
 }
 
@@ -4579,6 +4615,25 @@ app.post('/api/race/:raceId/runner/:runnerId/missing-jockey-ignore', requireWork
   }
   try {
     saveMissingJockeyIgnores();
+  } catch (err) {
+    return res.status(500).json({ error: `Could not save: ${err.message}` });
+  }
+  res.json({ ok: true, ignored: Boolean(ignored) });
+});
+
+// Integrity check Ignore (26 Nov 2026): see applyIntegrityIgnores.
+app.post('/api/race/:raceId/integrity-ignore', requireWork, (req, res) => {
+  const { raceId } = req.params;
+  const { code, key, ignored, race, text } = req.body || {};
+  if (!INTEGRITY_IGNORABLE.has(code) || !key) return res.status(400).json({ error: 'This check cannot be ignored' });
+  logActivity(req, ignored ? 'confirm' : 'undo-confirm', { detail: `Integrity check ignored: ${race || raceId}: ${text || key}` });
+  const k = integrityIgnoreKey(raceId, code, String(key));
+  if (ignored) integrityIgnores[k] = { race: race || null, text: text || null, ignoredAt: new Date().toISOString(), ignoredBy: req.session.username };
+  else delete integrityIgnores[k];
+  for (const [kk, v] of Object.entries(integrityIgnores)) if (Date.parse(v.ignoredAt) < Date.now() - 7 * 86400000) delete integrityIgnores[kk];
+  try {
+    fs.mkdirSync(path.dirname(INTEGRITY_IGNORE_PATH), { recursive: true });
+    fs.writeFileSync(INTEGRITY_IGNORE_PATH, JSON.stringify(integrityIgnores, null, 2), 'utf8');
   } catch (err) {
     return res.status(500).json({ error: `Could not save: ${err.message}` });
   }

@@ -185,7 +185,9 @@ function idClashes(docs, hist) {
   }
   for (const d of docs) {
     if (isAbandoned(d)) continue;
-    const lines = [];
+    // One item per horse, keyed by its runnerId, so each can be ignored on
+    // its own (server.js's integrity Ignore).
+    const items = [];
     for (const r of running(d)) {
       const runs = (seen.get(r.runnerId) || []).filter((x) => x.id !== d._id);
       if (!runs.length) continue;
@@ -202,9 +204,9 @@ function idClashes(docs, hist) {
         .filter((y) => y.days <= FAR_RUN_MAX_DAYS)
         .sort((a, b) => a.days - b.days)[0];
       if (far && !otherName && !otherSex) why.push(`also ran at ${far.x.where}, ${far.days} day${far.days === 1 ? '' : 's'} apart`);
-      if (why.length) lines.push(`${r.horseName || '?'}: ${why.join(', ')}`);
+      if (why.length) items.push({ code: 'runner-id-clash', key: r.runnerId, text: `${r.horseName || '?'}: ${why.join(', ')}` });
     }
-    if (lines.length) out.set(d._id, [{ code: 'runner-id-clash', text: lines.join('; ') }]);
+    if (items.length) out.set(d._id, items);
   }
   return out;
 }
